@@ -105,6 +105,7 @@ export class ComputerUseProviderRouter {
         "7.5": "first-enable-safety",
         "7.6": "repair-entrypoint-catalog",
         "7.7": "clean-install-degraded-proof",
+        "7.8": "windows-installer-transaction",
       },
       providers: {
         windowCapture: process.platform === "win32" ? "PrintWindow" : "unsupported",

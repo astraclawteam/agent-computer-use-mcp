@@ -1,19 +1,19 @@
 import assert from "node:assert/strict";
-import { spawn } from "node:child_process";
 import { mkdtemp, mkdir, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { dirname, join } from "node:path";
 import { after, before, test } from "node:test";
 
 import { materializeReleaseBundle } from "../src/release-bundle.mjs";
+import {
+  ensureWindowsInstallerBuilt,
+  runWindowsInstaller,
+} from "../src/windows-installer-host.mjs";
 
-const projectPath = resolve("windows-installer/AgentComputerUse.Installer.csproj");
-const installerDll = resolve("windows-installer/bin/Release/net10.0/AgentComputerUse.Installer.dll");
 const fixtureRoots = [];
 
 before(async () => {
-  const build = await runCommand("dotnet", ["build", projectPath, "--configuration", "Release", "--nologo"]);
-  assert.equal(build.exitCode, 0, build.stderr || build.stdout);
+  await ensureWindowsInstallerBuilt();
 });
 
 after(async () => {
@@ -144,18 +144,13 @@ async function createHarness() {
       return bundleRoot;
     },
     async run(operation, options = {}) {
-      const args = [
-        installerDll,
-        operation,
-        "--program-root",
+      const result = await runWindowsInstaller(operation, {
         programRoot,
-        "--data-root",
         dataRoot,
-      ];
-      if (options.bundleRoot) args.push("--bundle", options.bundleRoot);
-      const result = await runCommand("dotnet", args);
+        bundleRoot: options.bundleRoot,
+      });
       assert.equal(result.exitCode, options.expectedExitCode ?? 0, result.stderr || result.stdout);
-      return JSON.parse(result.stdout);
+      return result.report;
     },
   };
 }
@@ -164,26 +159,4 @@ async function writeFixture(root, path, contents) {
   const target = join(root, path);
   await mkdir(dirname(target), { recursive: true });
   await writeFile(target, contents, "utf8");
-}
-
-function runCommand(command, args) {
-  return new Promise((resolvePromise, reject) => {
-    const child = spawn(command, args, {
-      cwd: process.cwd(),
-      stdio: ["ignore", "pipe", "pipe"],
-      windowsHide: true,
-    });
-    let stdout = "";
-    let stderr = "";
-    child.stdout.on("data", (chunk) => {
-      stdout += chunk.toString("utf8");
-    });
-    child.stderr.on("data", (chunk) => {
-      stderr += chunk.toString("utf8");
-    });
-    child.on("error", reject);
-    child.on("close", (exitCode) => {
-      resolvePromise({ exitCode, stdout, stderr });
-    });
-  });
 }
