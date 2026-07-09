@@ -49,6 +49,10 @@ test("Phase 0.7 benchmark locks product latency targets for warm region OCR", ()
   assert.match(benchmark, /targetMs:\s*200/);
   assert.match(benchmark, /targetMs:\s*300/);
   assert.match(benchmark, /firstRunTargetMs:\s*1000/);
+  assert.match(benchmark, /enforceFirstRunTarget:\s*false/);
+  assert.match(benchmark, /enforceWarmTarget:\s*false/);
+  assert.match(benchmark, /firstRunTargetEnforced/);
+  assert.match(benchmark, /warmTargetEnforced/);
   assert.match(benchmark, /warmRuns/);
   assert.match(benchmark, /shapeWarmupMs/);
   assert.match(benchmark, /cacheHit/);
