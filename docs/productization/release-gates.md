@@ -45,6 +45,7 @@ npm run phase:5.2
 npm run phase:5.3
 npm run phase:5.4
 npm run phase:6.0
+npm run phase:6.1
 npm run phase:1.4
 npm run package:foundation
 npm run package:dry-run
@@ -82,6 +83,7 @@ Required evidence:
 - `npm run phase:5.3` verifies all public MCP tools declare versioned strict output schemas through `tools/list`.
 - `npm run phase:5.4` verifies MCP Inspector-style initialization, tool listing, and read-only tool calls.
 - `npm run phase:6.0` verifies the app smoke matrix result schema and required category coverage.
+- `npm run phase:6.1` verifies the app smoke matrix has 20-50 commercial beta coverage rows and fail-closed audit notes.
 - No generated build output or model packs in Git.
 - `computer.health({fast:true})` is ready or structured degraded.
 - User overlay is excluded from observations.
@@ -115,6 +117,7 @@ Required evidence:
 - Strict output schema report from `npm run phase:5.3`.
 - MCP Inspector smoke report from `npm run phase:5.4`.
 - App smoke matrix contract report from `npm run phase:6.0`.
+- App smoke coverage report from `npm run phase:6.1`.
 - OCR latency report with warm p95 values.
 - App matrix report in `docs/productization/app-smoke-matrix.md`.
 
