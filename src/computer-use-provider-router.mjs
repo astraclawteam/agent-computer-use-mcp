@@ -64,6 +64,7 @@ export class ComputerUseProviderRouter {
         "5.0": "concurrent-controller-guard",
         "5.1": "standard-mcp-multi-client",
         "5.2": "disconnect-cleanup",
+        "5.3": "strict-tool-output-schemas",
       },
       providers: {
         windowCapture: process.platform === "win32" ? "PrintWindow" : "unsupported",
