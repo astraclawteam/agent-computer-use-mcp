@@ -33,6 +33,7 @@ npm run phase:2.9
 npm run phase:3.0
 npm run phase:3.1
 npm run phase:3.2
+npm run phase:3.3
 npm run phase:5.0
 npm run phase:5.1
 npm run phase:5.2
@@ -63,6 +64,7 @@ Required evidence:
 - `npm run phase:3.0` verifies OCR model pack manifest and file-level doctor readiness without downloads or desktop control.
 - `npm run phase:3.1` verifies dirty-region OCR scheduling, stable region cache keys, and normal action-loop full-window OCR gating.
 - `npm run phase:3.2` verifies local template matching for static/repeated controls and pixel-limited observation output.
+- `npm run phase:3.3` verifies local SOM proposal generation for self-drawn/canvas surfaces without image upload.
 - `npm run phase:5.0` verifies concurrent `request_access` calls cannot create multiple active controllers.
 - `npm run phase:5.1` verifies two standard MCP SDK clients can connect and call read-only tools concurrently.
 - `npm run phase:5.2` verifies disconnect cleanup revokes active control state and stops overlay.
@@ -89,6 +91,7 @@ Required evidence:
 - OCR model pack manager report from `npm run phase:3.0`.
 - OCR region/diff scheduler report from `npm run phase:3.1`.
 - Template matching provider report from `npm run phase:3.2`.
+- SOM proposal provider report from `npm run phase:3.3`.
 - Concurrent tool call report from `npm run phase:5.0`.
 - Multi-client connection report from `npm run phase:5.1`.
 - Disconnect cleanup report from `npm run phase:5.2`.
