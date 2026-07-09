@@ -15,6 +15,7 @@ export class ComputerUseProviderRouter {
     this.ocr = options.ocrSession ?? new OcrSidecarSession();
     this.driver = options.driver ?? null;
     this.overlayRuntime = options.overlayRuntime ?? null;
+    this.processSupervisor = options.processSupervisor ?? null;
     this.overlayHandle = null;
     this.ocrStarted = false;
     this.artifactRoot = options.artifactRoot;
@@ -57,6 +58,7 @@ export class ComputerUseProviderRouter {
         "2.5": "diagnostics-retention-cleanup",
         "2.6": "daemon-lifecycle-manager",
         "2.7": "process-supervisor-recovery",
+        "2.8": "supervisor-doctor-repair",
       },
       providers: {
         windowCapture: process.platform === "win32" ? "PrintWindow" : "unsupported",
@@ -93,18 +95,21 @@ export class ComputerUseProviderRouter {
     const installCache = options.includeInstallCache === false
       ? null
       : await runInstallCacheDoctor();
-    const status = deriveDoctorStatus([runtime.status, installCache?.status]);
-    const repairPlan = installCache?.repairPlan ?? {
-      mode: "plan-only",
-      requiresApproval: false,
-      actions: [],
-    };
+    const runtimeSupervisor = this.processSupervisor?.health
+      ? this.processSupervisor.health()
+      : null;
+    const status = deriveDoctorStatus([runtime.status, installCache?.status, runtimeSupervisor?.status]);
+    const repairPlan = mergeRepairPlans(
+      installCache?.repairPlan,
+      runtimeSupervisor?.recoverActions,
+    );
     const diagnostics = buildDiagnosticsPolicy();
 
     return {
       status,
       module: "agent-computer-use-mcp",
       runtime,
+      runtimeSupervisor,
       installCache,
       diagnostics,
       repairPlan,
@@ -122,7 +127,7 @@ export class ComputerUseProviderRouter {
   async repair(options = {}) {
     const doctor = await this.doctor({
       fast: true,
-      includeInstallCache: true,
+      includeInstallCache: options.includeInstallCache,
     });
     const actionIds = new Set(options.actionIds ?? []);
     const actions = doctor.repairPlan.actions
@@ -163,7 +168,15 @@ export class ComputerUseProviderRouter {
         startsDesktopControl: false,
       };
     }
-    const status = !approved && actions.length > 0
+    const executableProcessActions = actions
+      .filter((action) => action.kind === "process-restart");
+    const shouldExecuteProcessRestart = approved && dryRun === false && executableProcessActions.length > 0;
+    const executionResults = shouldExecuteProcessRestart
+      ? executableProcessActions.map((action) => this.processSupervisor.recover(action.id, { approved: true }))
+      : [];
+    const status = shouldExecuteProcessRestart
+      ? "repaired"
+      : !approved && actions.length > 0
       ? "approval_required"
       : "planned";
 
@@ -175,12 +188,15 @@ export class ComputerUseProviderRouter {
       dryRun,
       approval,
       repairPlan,
-      executesImmediately: false,
+      executesImmediately: shouldExecuteProcessRestart,
       execution: {
-        status: "not_started",
-        reason: approved
-          ? "execution-not-implemented"
-          : "approval-required",
+        status: shouldExecuteProcessRestart ? "completed" : "not_started",
+        reason: shouldExecuteProcessRestart
+          ? "approved-process-restart"
+          : approved
+            ? "execution-not-implemented"
+            : "approval-required",
+        results: executionResults,
       },
       includeUserOverlay: false,
       startsDesktopControl: false,
@@ -632,4 +648,25 @@ function deriveDoctorStatus(statuses) {
   if (statuses.includes("unavailable")) return "unavailable";
   if (statuses.includes("degraded")) return "degraded";
   return "healthy";
+}
+
+function mergeRepairPlans(installRepairPlan, recoverActions = []) {
+  const installPlan = installRepairPlan ?? {
+    mode: "plan-only",
+    requiresApproval: false,
+    actions: [],
+  };
+  const processActions = (recoverActions ?? []).map((action) => ({
+    ...action,
+    executesImmediately: false,
+  }));
+  const actions = [
+    ...installPlan.actions,
+    ...processActions,
+  ];
+  return {
+    ...installPlan,
+    actions,
+    requiresApproval: actions.length > 0,
+  };
 }

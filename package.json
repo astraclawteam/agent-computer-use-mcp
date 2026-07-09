@@ -63,6 +63,7 @@
     "phase:2.5": "node src/phase-2-5-diagnostics-cleanup.mjs",
     "phase:2.6": "node src/phase-2-6-daemon-lifecycle.mjs",
     "phase:2.7": "node src/phase-2-7-process-supervisor.mjs",
+    "phase:2.8": "node src/phase-2-8-supervisor-repair.mjs",
     "package:dry-run": "node scripts/package-dry-run.mjs",
     "package:foundation": "node scripts/package-foundation-report.mjs",
     "assets:manifest": "node scripts/offline-asset-manifest.mjs",
