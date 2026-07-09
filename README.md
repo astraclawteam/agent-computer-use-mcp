@@ -61,6 +61,7 @@ Example MCP client config:
 - `npm run phase:2.7`: verify child process supervision reports crashes as degraded state and plans approved restarts.
 - `npm run phase:2.8`: verify supervisor crash recovery appears in `computer.doctor` and executes through approval-gated `computer.repair`.
 - `npm run phase:2.9`: verify repair approval denial clears pending state and never executes repair actions.
+- `npm run phase:5.0`: verify concurrent `request_access` calls cannot create multiple active controllers.
 - `npm run phase:1.4`: run the real `cua-driver mcp` desktop action lifecycle smoke.
 - `npm run package:foundation`: print install layout, version policy, packaging policy, and offline asset manifest.
 - `npm run package:dry-run`: run `npm pack --dry-run --json` and fail if generated artifacts would enter the package.
