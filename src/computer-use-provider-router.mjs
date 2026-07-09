@@ -102,6 +102,7 @@ export class ComputerUseProviderRouter {
         "7.2": "repair-progress-plan",
         "7.3": "offline-capability-proof",
         "7.4": "offline-install-proof",
+        "7.5": "first-enable-safety",
       },
       providers: {
         windowCapture: process.platform === "win32" ? "PrintWindow" : "unsupported",

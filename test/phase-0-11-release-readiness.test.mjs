@@ -36,6 +36,7 @@ test("release readiness gate captures the alpha release command contract", async
   assert.ok(gate.evidence.some((item) => item.id === "signed-helper-inventory"));
   assert.ok(gate.evidence.some((item) => item.id === "offline-install-cache-doctor"));
   assert.ok(gate.evidence.some((item) => item.id === "offline-install-proof"));
+  assert.ok(gate.evidence.some((item) => item.id === "first-enable-safety"));
   assert.ok(gate.evidence.some((item) => item.id === "policy-deny-proof"));
   assert.ok(gate.evidence.some((item) => item.id === "control-approval-state"));
   assert.ok(gate.evidence.some((item) => item.id === "mcp-approval-compatibility"));

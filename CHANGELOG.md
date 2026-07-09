@@ -12,6 +12,7 @@ All notable changes to `agent-computer-use-mcp` are tracked here.
 - Release artifact hash and Windows helper signing verification gate.
 - Signed Windows helper inventory proof for required helper artifacts and reserved future sidecars.
 - Offline install proof for prepared install roots, offline bundle readiness, and no-network capability enablement.
+- First-enable safety proof for bounded waits, no first-enable downloads, and approval-gated repair progress.
 - Commercial policy-deny proof for password, payment, credential, and private surfaces.
 - Computer control approval state machine for approve, deny, cancel, revoke, and timeout flows.
 - MCP approval compatibility proof for pending approval schemas, duplicate-pending rejection, and disconnect cleanup.
