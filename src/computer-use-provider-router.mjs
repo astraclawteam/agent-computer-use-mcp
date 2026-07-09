@@ -63,6 +63,7 @@ export class ComputerUseProviderRouter {
         "2.9": "repair-deny-state",
         "5.0": "concurrent-controller-guard",
         "5.1": "standard-mcp-multi-client",
+        "5.2": "disconnect-cleanup",
       },
       providers: {
         windowCapture: process.platform === "win32" ? "PrintWindow" : "unsupported",
@@ -537,8 +538,19 @@ export class ComputerUseProviderRouter {
     };
   }
 
-  async close() {
+  async close(args = {}) {
+    const previous = this.activeController;
+    this.activeController = null;
+    this.lastCapture = null;
+    this.pendingRepairApproval = null;
+    this.controllerRequestInProgress = false;
     await this.stopOverlay();
+    if (previous) {
+      this.recordAudit("computer.controller.closed", {
+        controllerId: previous.controllerId,
+        reason: args.reason ?? "router-close",
+      });
+    }
     if (this.driver?.close) {
       await this.driver.close();
     }
