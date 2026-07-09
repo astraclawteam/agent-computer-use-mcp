@@ -92,6 +92,7 @@ export class ComputerUseProviderRouter {
         "5.3": "strict-tool-output-schemas",
         "5.4": "mcp-inspector-smoke",
         "5.5": "approval-compatibility",
+        "5.6": "standard-mcp-multi-client-stress",
         "6.0": "app-smoke-matrix-contract",
         "6.1": "app-smoke-coverage-gate",
         "7.0": "first-run-readiness",

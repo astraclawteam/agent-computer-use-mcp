@@ -36,6 +36,7 @@ test("release metadata matches package version, tag, changelog, and upgrade poli
     "policy-deny-proof",
     "control-approval-state",
     "mcp-approval-compatibility",
+    "mcp-multi-client-stress",
     "daemon-session",
     "daemon-session-doctor-repair",
     "runtime-cleanup",
@@ -80,7 +81,7 @@ test("Phase 0.10 has changelog and executable release metadata smoke script", as
   assert.equal(report.phase, "0.10");
   assert.equal(report.releaseTag, `v${packageJson.version}`);
   assert.equal(report.changelogEntryPresent, true);
-  assert.equal(report.artifactCount, 14);
+  assert.equal(report.artifactCount, 15);
   assert.equal(report.includeUserOverlay, false);
   assert.equal(report.startsDesktopControl, false);
 });

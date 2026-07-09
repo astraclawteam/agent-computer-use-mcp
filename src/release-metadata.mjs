@@ -65,6 +65,11 @@ export function buildReleaseMetadata(options = {}) {
         required: true,
       },
       {
+        name: "mcp-multi-client-stress",
+        command: "npm run phase:5.6",
+        required: true,
+      },
+      {
         name: "daemon-session",
         command: "npm run phase:2.10",
         required: true,
