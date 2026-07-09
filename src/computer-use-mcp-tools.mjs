@@ -20,6 +20,26 @@ export const COMPUTER_USE_MCP_TOOLS = [
     },
   },
   {
+    name: "computer.doctor",
+    title: "Computer Use Doctor",
+    description: "Return actionable runtime and install/cache diagnostics without starting desktop control.",
+    annotations: { phase: "2.0", readOnlyHint: true },
+    inputSchema: {
+      type: "object",
+      properties: {
+        fast: {
+          type: "boolean",
+          description: "When true, skip heavyweight provider initialization and return cheap runtime diagnostics.",
+        },
+        includeInstallCache: {
+          type: "boolean",
+          description: "When true, include driver, overlay, OCR model, WebView2, and permission readiness.",
+        },
+      },
+      additionalProperties: false,
+    },
+  },
+  {
     name: "computer.installation",
     title: "Computer Use Installation",
     description: "Return local MCP module installation manifest and client configuration templates.",

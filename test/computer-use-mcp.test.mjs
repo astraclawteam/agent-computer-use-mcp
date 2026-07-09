@@ -14,6 +14,7 @@ test("agent-computer-use-mcp freezes the local MCP tool contract", () => {
   const toolNames = COMPUTER_USE_MCP_TOOLS.map((tool) => tool.name);
   assert.deepEqual(toolNames, [
     "computer.health",
+    "computer.doctor",
     "computer.installation",
     "computer.request_access",
     "computer.capture",
@@ -30,6 +31,12 @@ test("agent-computer-use-mcp freezes the local MCP tool contract", () => {
   assert.equal(health.annotations.phase, "0.9");
   assert.equal(health.inputSchema.type, "object");
   assert.equal(health.inputSchema.properties.prewarm.type, "boolean");
+
+  const doctor = COMPUTER_USE_MCP_TOOLS.find((tool) => tool.name === "computer.doctor");
+  assert.equal(doctor.annotations.phase, "2.0");
+  assert.equal(doctor.annotations.readOnlyHint, true);
+  assert.equal(doctor.inputSchema.properties.fast.type, "boolean");
+  assert.equal(doctor.inputSchema.properties.includeInstallCache.type, "boolean");
 
   const capture = COMPUTER_USE_MCP_TOOLS.find((tool) => tool.name === "computer.capture_window");
   assert.equal(capture.annotations.phase, "1.0");
@@ -60,6 +67,7 @@ test("agent-computer-use-mcp answers initialize, tools/list, and health over std
     const listed = await client.listTools();
     assert.deepEqual(listed.tools.map((tool) => tool.name), [
       "computer.health",
+      "computer.doctor",
       "computer.installation",
       "computer.request_access",
       "computer.capture",
@@ -85,6 +93,18 @@ test("agent-computer-use-mcp answers initialize, tools/list, and health over std
     assert.equal(health.structuredContent.phases["1.5"], "safety-diagnostics");
     assert.equal(health.structuredContent.phases["1.6"], "install-config-contract");
     assert.deepEqual(health.structuredContent.actionPolicy.deliveryModes, ["background"]);
+
+    const doctor = await client.callTool({
+      name: "computer.doctor",
+      arguments: { fast: true, includeInstallCache: true },
+    });
+    assert.equal(doctor.structuredContent.module, "agent-computer-use-mcp");
+    assert.equal(["healthy", "degraded", "unavailable"].includes(doctor.structuredContent.status), true);
+    assert.equal(doctor.structuredContent.includeUserOverlay, false);
+    assert.equal(doctor.structuredContent.startsDesktopControl, false);
+    assert.equal(Array.isArray(doctor.structuredContent.repairPlan.actions), true);
+    assert.equal(doctor.structuredContent.installCache.includeUserOverlay, false);
+    assert.equal(doctor.structuredContent.installCache.startsDesktopControl, false);
 
     const missingController = await client.callTool({
       name: "computer.capture",
