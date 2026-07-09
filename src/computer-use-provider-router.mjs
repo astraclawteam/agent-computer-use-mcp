@@ -56,6 +56,7 @@ export class ComputerUseProviderRouter {
         "2.4": "redacted-trace-writer",
         "2.5": "diagnostics-retention-cleanup",
         "2.6": "daemon-lifecycle-manager",
+        "2.7": "process-supervisor-recovery",
       },
       providers: {
         windowCapture: process.platform === "win32" ? "PrintWindow" : "unsupported",
