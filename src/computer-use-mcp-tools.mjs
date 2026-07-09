@@ -94,6 +94,10 @@ export const COMPUTER_USE_MCP_TOOLS = [
         tier: { type: "string", enum: ["observe", "full", "admin"] },
         agentId: { type: "string" },
         reason: { type: "string" },
+        leaseTtlMs: {
+          type: "number",
+          description: "Controller lease TTL in milliseconds. Expired leases are revoked before capture or action.",
+        },
       },
       additionalProperties: false,
     },

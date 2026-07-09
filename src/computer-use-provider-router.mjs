@@ -49,6 +49,7 @@ export class ComputerUseProviderRouter {
         "1.7": "standard-sdk-client-smoke",
         "1.8": "standard-sdk-server-transport",
         "1.9": "permission-policy-engine",
+        "1.10": "controller-lease-timeout",
         "2.0": "doctor-tool",
         "2.1": "repair-approval-gate",
         "2.2": "repair-approval-state",
@@ -116,6 +117,7 @@ export class ComputerUseProviderRouter {
         controllerId: this.activeController.controllerId,
         status: this.activeController.status,
         tier: this.activeController.tier,
+        expiresAt: this.activeController.expiresAt,
         window: this.activeController.window,
       } : null,
       includeUserOverlay: false,
@@ -206,6 +208,7 @@ export class ComputerUseProviderRouter {
     if (!this.driver?.findWindow) {
       fail("provider.unavailable", "cua-driver is not available", { provider: "cua-driver" });
     }
+    await this.expireActiveController({ throwOnExpire: false });
     if (this.activeController) {
       fail("controller.already_active", "A Gateway-managed Computer Use controller is already active.", {
         controllerId: this.activeController.controllerId,
@@ -214,6 +217,9 @@ export class ComputerUseProviderRouter {
     const tier = args.tier ?? "full";
     const window = await this.driver.findWindow({ titlePart: args.titlePart });
     this.enforcePolicyDecision(this.policy.evaluateAccessRequest({ tier, window }));
+    const leaseTtlMs = Math.max(1, args.leaseTtlMs ?? 300000);
+    const startedAtMs = this.clock.now();
+    const expiresAtMs = startedAtMs + leaseTtlMs;
     this.activeController = {
       controllerId: randomUUID(),
       provider: "gateway-managed",
@@ -221,7 +227,10 @@ export class ComputerUseProviderRouter {
       agentId: args.agentId ?? "unknown",
       status: "active",
       window,
-      startedAt: new Date().toISOString(),
+      startedAt: this.clock.iso(startedAtMs),
+      expiresAt: this.clock.iso(expiresAtMs),
+      expiresAtMs,
+      leaseTtlMs,
       includeUserOverlay: false,
     };
     if (this.overlayRuntime?.start) {
@@ -248,7 +257,7 @@ export class ComputerUseProviderRouter {
   }
 
   async capture(args = {}) {
-    this.requireActiveController();
+    await this.requireActiveController();
     const mode = args.mode ?? "semantic";
     let observation;
     if (mode === "semantic") {
@@ -287,7 +296,7 @@ export class ComputerUseProviderRouter {
   }
 
   async act(args = {}) {
-    this.requireActiveController();
+    await this.requireActiveController();
     const action = args.action;
     this.validateAction(action);
     this.recordAudit("computer.action.started", {
@@ -369,6 +378,7 @@ export class ComputerUseProviderRouter {
   }
 
   async listState() {
+    await this.expireActiveController({ throwOnExpire: false });
     return {
       status: this.activeController ? "active" : "idle",
       activeController: this.activeController,
@@ -521,10 +531,32 @@ export class ComputerUseProviderRouter {
     return join(this.artifactRoot, `${Date.now()}-${name}`);
   }
 
-  requireActiveController() {
+  async requireActiveController() {
+    await this.expireActiveController({ throwOnExpire: true });
     if (!this.activeController) {
       fail("controller.required", "A Gateway-managed Computer Use controller is required.");
     }
+  }
+
+  async expireActiveController({ throwOnExpire = false } = {}) {
+    if (!this.activeController?.expiresAtMs || this.activeController.expiresAtMs > this.clock.now()) return false;
+    const previous = this.activeController;
+    this.activeController = null;
+    this.lastCapture = null;
+    await this.stopOverlay();
+    this.recordAudit("computer.controller.expired", {
+      controllerId: previous.controllerId,
+      tier: previous.tier,
+      expiresAt: previous.expiresAt,
+    });
+    if (throwOnExpire) {
+      fail("controller.expired", "controller.expired: The Gateway-managed Computer Use controller lease expired.", {
+        controllerId: previous.controllerId,
+        expiresAt: previous.expiresAt,
+        includeUserOverlay: false,
+      });
+    }
+    return true;
   }
 
   validateAction(action) {
