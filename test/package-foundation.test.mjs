@@ -72,13 +72,16 @@ test("offline asset manifest declares productized asset packs", () => {
     "gateway-overlay-windows",
     "ocr-runtime-onnxruntime-node",
     "ocr-model-pp-ocrv6-small",
+    "webview2-runtime",
   ]);
   assert.equal(manifest.assets.find((asset) => asset.id === "ocr-model-pp-ocrv6-small").offlineRequired, false);
+  assert.equal(manifest.assets.find((asset) => asset.id === "webview2-runtime").offlineRequired, false);
 });
 
 test("package files policy rejects generated artifacts and local caches", () => {
   const policy = getPackageFilesPolicy();
   assert.deepEqual(policy.forbiddenPathPrefixes, FORBIDDEN_PACKAGE_PATHS);
+  assert.equal(policy.includeRoots.includes("scripts/"), true);
 
   const result = validatePackEntries([
     "package/package.json",
@@ -105,7 +108,7 @@ test("package dry-run script emits a JSON report", async () => {
   const report = JSON.parse(result.stdout);
   assert.equal(report.status, "passed");
   assert.equal(report.packageName, "agent-computer-use-mcp");
-  assert.equal(report.offlineAssetManifest.assets.length, 4);
+  assert.equal(report.offlineAssetManifest.assets.length, 5);
   assert.equal(report.signingPolicy.windowsHelpers.signingRequired, true);
   assert.equal(report.packageFilesPolicy.forbiddenPathPrefixes.includes("node_modules/"), true);
 });

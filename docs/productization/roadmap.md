@@ -32,6 +32,7 @@ Acceptance:
 - `npm pack --dry-run` contains only intended files.
 - `npm run package:foundation` emits install layout, version policy, signing placeholders, package file policy, and offline asset manifest.
 - `npm run assets:manifest` emits a standalone offline asset manifest.
+- `npm run doctor:install-cache` emits a plan-only readiness report for driver, overlay, OCR runtime/model, WebView2, and permissions without starting desktop control.
 - `npm run phase:1.6` emits install paths using `AGENT_COMPUTER_USE_*`.
 - A clean Windows VM can install, run `computer.health({fast:true})`, and produce a clear degraded state when optional assets are missing.
 
@@ -182,6 +183,7 @@ Acceptance:
 
 - First enable does not block indefinitely on downloads.
 - Missing optional components show exact repair actions.
+- The install/cache doctor remains plan-only until the host receives explicit user approval.
 - Offline bundle can run `health`, overlay, semantic capture, and configured model-pack OCR without network.
 
 ## Release Gates

@@ -53,6 +53,7 @@ Example MCP client config:
 - `npm run package:foundation`: print install layout, version policy, packaging policy, and offline asset manifest.
 - `npm run package:dry-run`: run `npm pack --dry-run --json` and fail if generated artifacts would enter the package.
 - `npm run assets:manifest`: print the offline asset manifest.
+- `npm run doctor:install-cache`: inspect local driver, overlay, OCR runtime/model, WebView2, and permission readiness without starting desktop control.
 
 ## Environment
 
