@@ -59,6 +59,7 @@ export class ComputerUseProviderRouter {
         "2.6": "daemon-lifecycle-manager",
         "2.7": "process-supervisor-recovery",
         "2.8": "supervisor-doctor-repair",
+        "2.9": "repair-deny-state",
       },
       providers: {
         windowCapture: process.platform === "win32" ? "PrintWindow" : "unsupported",
@@ -143,20 +144,42 @@ export class ComputerUseProviderRouter {
       requiresApproval: actions.length > 0,
     };
     const approved = options.approved === true;
+    const denied = options.denied === true;
     const dryRun = options.dryRun !== false;
     const approval = this.resolveRepairApproval({
       approved,
+      denied,
       approvalToken: options.approvalToken,
       requestApproval: options.requestApproval,
       approvalTtlMs: options.approvalTtlMs,
       repairPlan,
     });
+    if (approval.status === "invalid") {
+      return {
+        status: "approval_invalid",
+        mode: "plan-only",
+        module: "agent-computer-use-mcp",
+        approved: false,
+        denied: false,
+        dryRun,
+        approval,
+        repairPlan,
+        executesImmediately: false,
+        execution: {
+          status: "not_started",
+          reason: "approval-invalid",
+        },
+        includeUserOverlay: false,
+        startsDesktopControl: false,
+      };
+    }
     if (approval.status === "expired") {
       return {
         status: "approval_expired",
         mode: "plan-only",
         module: "agent-computer-use-mcp",
         approved: false,
+        denied: false,
         dryRun,
         approval,
         repairPlan,
@@ -164,6 +187,25 @@ export class ComputerUseProviderRouter {
         execution: {
           status: "not_started",
           reason: "approval-expired",
+        },
+        includeUserOverlay: false,
+        startsDesktopControl: false,
+      };
+    }
+    if (approval.status === "denied") {
+      return {
+        status: "approval_denied",
+        mode: "plan-only",
+        module: "agent-computer-use-mcp",
+        approved: false,
+        denied: true,
+        dryRun,
+        approval,
+        repairPlan,
+        executesImmediately: false,
+        execution: {
+          status: "not_started",
+          reason: "approval-denied",
         },
         includeUserOverlay: false,
         startsDesktopControl: false,
@@ -186,6 +228,7 @@ export class ComputerUseProviderRouter {
       mode: "plan-only",
       module: "agent-computer-use-mcp",
       approved,
+      denied,
       dryRun,
       approval,
       repairPlan,
@@ -583,7 +626,7 @@ export class ComputerUseProviderRouter {
     });
   }
 
-  resolveRepairApproval({ approved, approvalToken, requestApproval, approvalTtlMs, repairPlan }) {
+  resolveRepairApproval({ approved, denied, approvalToken, requestApproval, approvalTtlMs, repairPlan }) {
     if (approvalToken) {
       const pending = this.pendingRepairApproval;
       if (!pending || pending.token !== approvalToken) {
@@ -597,6 +640,14 @@ export class ComputerUseProviderRouter {
           expiresAt: pending.expiresAt,
         };
       }
+      if (denied) {
+        this.pendingRepairApproval = null;
+        return {
+          status: "denied",
+          token: approvalToken,
+          expiresAt: pending.expiresAt,
+        };
+      }
       return {
         status: approved ? "approved" : "pending",
         token: approvalToken,
@@ -604,6 +655,15 @@ export class ComputerUseProviderRouter {
       };
     }
     this.expireRepairApproval();
+    if (denied && this.pendingRepairApproval) {
+      const pending = this.pendingRepairApproval;
+      this.pendingRepairApproval = null;
+      return {
+        status: "denied",
+        token: pending.token,
+        expiresAt: pending.expiresAt,
+      };
+    }
     if (requestApproval && repairPlan.actions.length > 0) {
       const ttlMs = Math.max(1, approvalTtlMs ?? 300000);
       const expiresAtMs = this.clock.now() + ttlMs;
