@@ -2,7 +2,7 @@
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
-import { COMPUTER_USE_MCP_TOOLS } from "./computer-use-mcp-tools.mjs";
+import { COMPUTER_USE_MCP_TOOLS, MCP_RESULT_SCHEMA_VERSION } from "./computer-use-mcp-tools.mjs";
 import { serializeToolError } from "./computer-use-errors.mjs";
 import { getComputerUseInstallation } from "./computer-use-installation.mjs";
 import { ComputerUseProviderRouter } from "./computer-use-provider-router.mjs";
@@ -98,15 +98,15 @@ async function callTool(name, args) {
           text: JSON.stringify({ error: toolError }, null, 2),
         },
       ],
-      structuredContent: {
+      structuredContent: withResultContract({
         status: "error",
         error: toolError,
-        includeUserOverlay: false,
-      },
+      }),
       isError: true,
     };
   }
 
+  structuredContent = withResultContract(structuredContent);
   return {
     content: [
       {
@@ -116,6 +116,21 @@ async function callTool(name, args) {
     ],
     structuredContent,
     isError: false,
+  };
+}
+
+function withResultContract(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return {
+      resultSchemaVersion: MCP_RESULT_SCHEMA_VERSION,
+      value,
+      includeUserOverlay: false,
+    };
+  }
+  return {
+    ...value,
+    resultSchemaVersion: MCP_RESULT_SCHEMA_VERSION,
+    includeUserOverlay: false,
   };
 }
 

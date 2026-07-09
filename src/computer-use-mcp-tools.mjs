@@ -1,3 +1,27 @@
+export const MCP_RESULT_SCHEMA_VERSION = "5.3";
+
+const ANY_OBJECT = { type: "object", additionalProperties: true };
+const ANY_ARRAY = { type: "array", items: {} };
+
+const COMMON_OUTPUT_PROPERTIES = {
+  resultSchemaVersion: { const: MCP_RESULT_SCHEMA_VERSION },
+  includeUserOverlay: { const: false },
+  status: { type: "string" },
+  error: ANY_OBJECT,
+};
+
+function outputSchema(properties = {}, required = []) {
+  return {
+    type: "object",
+    required: ["resultSchemaVersion", "includeUserOverlay", ...required],
+    properties: {
+      ...COMMON_OUTPUT_PROPERTIES,
+      ...properties,
+    },
+    additionalProperties: false,
+  };
+}
+
 export const COMPUTER_USE_MCP_TOOLS = [
   {
     name: "computer.health",
@@ -18,6 +42,17 @@ export const COMPUTER_USE_MCP_TOOLS = [
       },
       additionalProperties: false,
     },
+    outputSchema: outputSchema({
+      status: { type: "string" },
+      module: { type: "string" },
+      version: { type: "string" },
+      phases: ANY_OBJECT,
+      providers: ANY_OBJECT,
+      actionPolicy: ANY_OBJECT,
+      driver: ANY_OBJECT,
+      ocr: ANY_OBJECT,
+      prewarm: ANY_OBJECT,
+    }, ["status", "module", "version", "phases", "providers", "actionPolicy"]),
   },
   {
     name: "computer.doctor",
@@ -38,6 +73,17 @@ export const COMPUTER_USE_MCP_TOOLS = [
       },
       additionalProperties: false,
     },
+    outputSchema: outputSchema({
+      status: { type: "string" },
+      module: { type: "string" },
+      runtime: ANY_OBJECT,
+      runtimeSupervisor: { anyOf: [ANY_OBJECT, { type: "null" }] },
+      installCache: { anyOf: [ANY_OBJECT, { type: "null" }] },
+      diagnostics: ANY_OBJECT,
+      repairPlan: ANY_OBJECT,
+      activeController: { anyOf: [ANY_OBJECT, { type: "null" }] },
+      startsDesktopControl: { const: false },
+    }, ["status", "module", "runtime", "repairPlan", "activeController", "startsDesktopControl"]),
   },
   {
     name: "computer.repair",
@@ -67,6 +113,19 @@ export const COMPUTER_USE_MCP_TOOLS = [
       },
       additionalProperties: false,
     },
+    outputSchema: outputSchema({
+      status: { type: "string" },
+      mode: { type: "string" },
+      module: { type: "string" },
+      approved: { type: "boolean" },
+      denied: { type: "boolean" },
+      dryRun: { type: "boolean" },
+      approval: ANY_OBJECT,
+      repairPlan: ANY_OBJECT,
+      executesImmediately: { type: "boolean" },
+      execution: ANY_OBJECT,
+      startsDesktopControl: { const: false },
+    }, ["status", "mode", "module", "approved", "denied", "dryRun", "approval", "repairPlan", "executesImmediately", "execution", "startsDesktopControl"]),
   },
   {
     name: "computer.installation",
@@ -84,6 +143,11 @@ export const COMPUTER_USE_MCP_TOOLS = [
       },
       additionalProperties: false,
     },
+    outputSchema: outputSchema({
+      phase: { type: "string" },
+      manifest: ANY_OBJECT,
+      clientConfig: ANY_OBJECT,
+    }, ["phase", "manifest", "clientConfig"]),
   },
   {
     name: "computer.request_access",
@@ -105,6 +169,11 @@ export const COMPUTER_USE_MCP_TOOLS = [
       },
       additionalProperties: false,
     },
+    outputSchema: outputSchema({
+      status: { type: "string" },
+      controller: ANY_OBJECT,
+      overlay: { anyOf: [ANY_OBJECT, { type: "null" }] },
+    }, ["status", "controller"]),
   },
   {
     name: "computer.capture",
@@ -130,6 +199,15 @@ export const COMPUTER_USE_MCP_TOOLS = [
       },
       additionalProperties: false,
     },
+    outputSchema: outputSchema({
+      observationId: { type: "string" },
+      provider: { type: "string" },
+      source: { type: "string" },
+      mode: { type: "string" },
+      elements: ANY_ARRAY,
+      artifact: ANY_OBJECT,
+      capture: ANY_OBJECT,
+    }),
   },
   {
     name: "computer.act",
@@ -156,6 +234,14 @@ export const COMPUTER_USE_MCP_TOOLS = [
       },
       additionalProperties: false,
     },
+    outputSchema: outputSchema({
+      status: { type: "string" },
+      provider: { type: "string" },
+      action: { type: "string" },
+      result: ANY_OBJECT,
+      pixelLimitedAction: { type: "boolean" },
+      capture: ANY_OBJECT,
+    }, ["status", "provider", "action", "result", "pixelLimitedAction"]),
   },
   {
     name: "computer.cancel",
@@ -167,6 +253,10 @@ export const COMPUTER_USE_MCP_TOOLS = [
       properties: { reason: { type: "string" } },
       additionalProperties: false,
     },
+    outputSchema: outputSchema({
+      status: { type: "string" },
+      previousController: { anyOf: [ANY_OBJECT, { type: "null" }] },
+    }, ["status", "previousController"]),
   },
   {
     name: "computer.revoke",
@@ -178,6 +268,10 @@ export const COMPUTER_USE_MCP_TOOLS = [
       properties: { reason: { type: "string" } },
       additionalProperties: false,
     },
+    outputSchema: outputSchema({
+      status: { type: "string" },
+      previousController: { anyOf: [ANY_OBJECT, { type: "null" }] },
+    }, ["status", "previousController"]),
   },
   {
     name: "computer.list_state",
@@ -189,6 +283,13 @@ export const COMPUTER_USE_MCP_TOOLS = [
       properties: {},
       additionalProperties: false,
     },
+    outputSchema: outputSchema({
+      status: { type: "string" },
+      activeController: { anyOf: [ANY_OBJECT, { type: "null" }] },
+      lastCapture: { anyOf: [ANY_OBJECT, { type: "null" }] },
+      pendingRepairApproval: { anyOf: [ANY_OBJECT, { type: "null" }] },
+      auditEvents: ANY_ARRAY,
+    }, ["status", "activeController", "lastCapture", "pendingRepairApproval", "auditEvents"]),
   },
   {
     name: "computer.capture_window",
@@ -205,6 +306,13 @@ export const COMPUTER_USE_MCP_TOOLS = [
       },
       additionalProperties: false,
     },
+    outputSchema: outputSchema({
+      status: { type: "string" },
+      provider: { type: "string" },
+      source: { type: "string" },
+      capture: ANY_OBJECT,
+      artifact: ANY_OBJECT,
+    }, ["status", "provider", "source", "capture", "artifact"]),
   },
   {
     name: "computer.ocr_region",
@@ -236,6 +344,14 @@ export const COMPUTER_USE_MCP_TOOLS = [
       },
       additionalProperties: false,
     },
+    outputSchema: outputSchema({
+      status: { type: "string" },
+      provider: { type: "string" },
+      mode: { type: "string" },
+      imagePath: { type: "string" },
+      capture: { anyOf: [ANY_OBJECT, { type: "null" }] },
+      observation: ANY_OBJECT,
+    }, ["status", "provider", "mode", "imagePath", "observation"]),
   },
   {
     name: "computer.observe_diff",
@@ -258,5 +374,15 @@ export const COMPUTER_USE_MCP_TOOLS = [
       },
       additionalProperties: false,
     },
+    outputSchema: outputSchema({
+      status: { type: "string" },
+      provider: { type: "string" },
+      mode: { type: "string" },
+      baselinePath: { type: "string" },
+      changedPath: { type: "string" },
+      dirtyRegion: { anyOf: [ANY_OBJECT, { type: "null" }] },
+      ocrRegion: ANY_OBJECT,
+      observation: { anyOf: [ANY_OBJECT, { type: "null" }] },
+    }, ["status", "provider", "mode", "dirtyRegion", "observation"]),
   },
 ];
