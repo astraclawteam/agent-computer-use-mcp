@@ -44,6 +44,11 @@ export function buildReleaseMetadata(options = {}) {
         command: "npm run release:artifacts",
         required: true,
       },
+      {
+        name: "offline-install-proof",
+        command: "npm run phase:7.4",
+        required: true,
+      },
     ],
     includeUserOverlay: false,
     startsDesktopControl: false,
