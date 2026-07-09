@@ -117,6 +117,31 @@ test("native installer initializes stable roots and rollback fails closed withou
   assert.equal(status.revision, 1);
 });
 
+test("native installer rejects a different payload that reuses an installed version", async () => {
+  const harness = await createHarness();
+  const originalV1 = await harness.bundle("0.0.1", "original-v1");
+  const v2 = await harness.bundle("0.0.2", "v2");
+  const conflictingV1 = await harness.bundle("0.0.1", "different-v1");
+  await harness.run("install", { bundleRoot: originalV1 });
+  await harness.run("upgrade", { bundleRoot: v2 });
+
+  const failed = await harness.run("upgrade", {
+    bundleRoot: conflictingV1,
+    expectedExitCode: 2,
+  });
+  assert.equal(failed.status, "failed");
+  assert.equal(failed.error.code, "installer.release_conflict");
+
+  const status = await harness.run("status");
+  assert.equal(status.currentVersion, "0.0.2");
+  assert.equal(status.previousVersion, "0.0.1");
+  assert.equal(status.revision, 2);
+  assert.equal(
+    await readFile(join(harness.programRoot, "releases/0.0.1/payload/package/version.txt"), "utf8"),
+    "original-v1",
+  );
+});
+
 async function createHarness() {
   const root = await mkdtemp(join(tmpdir(), "agent-computer-use-installer-"));
   fixtureRoots.push(root);

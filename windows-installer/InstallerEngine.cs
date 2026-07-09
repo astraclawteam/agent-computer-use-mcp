@@ -27,7 +27,13 @@ internal sealed class InstallerEngine(InstallerLayout layout, ReleaseVerifier ve
 
             if (Directory.Exists(finalReleaseRoot))
             {
-                verifier.Verify(finalReleaseRoot);
+                var existingRelease = verifier.Verify(finalReleaseRoot);
+                if (!ReleaseVerifier.HasSamePayload(sourceRelease, existingRelease))
+                {
+                    throw new InstallerException(
+                        "installer.release_conflict",
+                        $"Installed release {sourceRelease.Manifest.Version} has different payload hashes");
+                }
                 Directory.Delete(transactionRoot, recursive: true);
             }
             else

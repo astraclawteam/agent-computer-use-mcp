@@ -6,6 +6,21 @@ namespace AgentComputerUse.Installer;
 
 internal sealed partial class ReleaseVerifier
 {
+    public static bool HasSamePayload(VerifiedRelease left, VerifiedRelease right)
+    {
+        if (!string.Equals(left.Manifest.PackageName, right.Manifest.PackageName, StringComparison.Ordinal)
+            || !string.Equals(left.Manifest.Version, right.Manifest.Version, StringComparison.Ordinal)
+            || left.Manifest.Files.Count != right.Manifest.Files.Count)
+        {
+            return false;
+        }
+
+        var rightFiles = right.Manifest.Files.ToDictionary(file => file.Path, StringComparer.OrdinalIgnoreCase);
+        return left.Manifest.Files.All(file => rightFiles.TryGetValue(file.Path, out var candidate)
+            && candidate.Bytes == file.Bytes
+            && string.Equals(candidate.Sha256, file.Sha256, StringComparison.Ordinal));
+    }
+
     public VerifiedRelease Verify(string releaseRoot)
     {
         var normalizedRoot = Path.GetFullPath(releaseRoot);
