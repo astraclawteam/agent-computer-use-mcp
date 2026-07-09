@@ -96,6 +96,7 @@ Example MCP client config:
 - `npm run phase:7.2`: verify repair progress plans make long setup operations approval-gated, cancellable, and no-download by default.
 - `npm run phase:7.3`: verify offline bundle capability proof covers health, overlay, semantic capture, and configured model-pack OCR without network.
 - `npm run phase:7.4`: verify offline install proof covers install roots, prepared bundle, and offline capabilities without network or first-enable downloads.
+- `npm run phase:7.5`: verify first enable blocks quickly with approval-gated progress instead of waiting on downloads.
 - `npm run phase:1.4`: run the real `cua-driver mcp` desktop action lifecycle smoke.
 - `npm run package:foundation`: print install layout, version policy, packaging policy, and offline asset manifest.
 - `npm run package:dry-run`: run `npm pack --dry-run --json` and fail if generated artifacts would enter the package.

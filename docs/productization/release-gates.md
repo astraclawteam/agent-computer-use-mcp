@@ -65,6 +65,7 @@ npm run phase:7.1
 npm run phase:7.2
 npm run phase:7.3
 npm run phase:7.4
+npm run phase:7.5
 npm run phase:1.4
 npm run package:foundation
 npm run package:dry-run
@@ -122,6 +123,7 @@ Required evidence:
 - `npm run phase:7.2` verifies repair progress plans make long setup operations approval-gated, cancellable, and no-download by default.
 - `npm run phase:7.3` verifies offline bundle capability proof covers health, overlay, semantic capture, and configured model-pack OCR without network.
 - `npm run phase:7.4` verifies offline install proof covers install roots, prepared bundle, and offline capabilities without network or first-enable downloads.
+- `npm run phase:7.5` verifies first enable blocks quickly with approval-gated progress instead of waiting on downloads.
 - No generated build output or model packs in Git.
 - `computer.health({fast:true})` is ready or structured degraded.
 - User overlay is excluded from observations.
@@ -169,6 +171,7 @@ Required evidence:
 - Repair progress plan report from `npm run phase:7.2`.
 - Offline capability proof report from `npm run phase:7.3`.
 - Offline install proof report from `npm run phase:7.4`.
+- First-enable safety report from `npm run phase:7.5`.
 - OCR latency report with warm p95 values.
 - App matrix report in `docs/productization/app-smoke-matrix.md`.
 
@@ -190,6 +193,7 @@ Required evidence:
 - Signing verification output from `npm run phase:0.12`.
 - Signed Windows helper inventory proof from `npm run phase:0.13`.
 - Offline install proof from `npm run phase:7.4`.
+- First-enable safety proof from `npm run phase:7.5`.
 - Daemon session proof from `npm run phase:2.10`.
 - Daemon session doctor/repair proof from `npm run phase:2.11`.
 - Runtime cleanup proof from `npm run phase:2.12`.

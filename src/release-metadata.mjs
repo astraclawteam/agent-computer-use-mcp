@@ -55,6 +55,11 @@ export function buildReleaseMetadata(options = {}) {
         required: true,
       },
       {
+        name: "first-enable-safety",
+        command: "npm run phase:7.5",
+        required: true,
+      },
+      {
         name: "policy-deny-proof",
         command: "npm run phase:1.11",
         required: true,
