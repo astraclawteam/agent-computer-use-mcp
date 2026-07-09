@@ -55,6 +55,10 @@ export const COMPUTER_USE_MCP_TOOLS = [
           type: "boolean",
           description: "Must be true before any future repair execution path can run.",
         },
+        denied: {
+          type: "boolean",
+          description: "When true with a pending approval token, deny the repair request and clear pending approval.",
+        },
         actionIds: {
           type: "array",
           items: { type: "string" },
