@@ -24,6 +24,9 @@ test("Phase 2.0 doctor reports install/runtime readiness without desktop control
   assert.equal(report.runtime.phases["2.0"], "doctor-tool");
   assert.equal(report.installCache.includeUserOverlay, false);
   assert.equal(report.installCache.startsDesktopControl, false);
+  assert.equal(report.diagnostics.status, "ready");
+  assert.equal(report.diagnostics.includeUserOverlay, false);
+  assert.equal(report.diagnostics.redactionPolicy.replacement, "[REDACTED]");
   assert.equal(report.repairPlan.mode, "plan-only");
   assert.deepEqual(overlayCalls, []);
 
