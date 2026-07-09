@@ -47,6 +47,7 @@ Example MCP client config:
 
 - `npm test`: run the full local test suite.
 - `npm run phase:0.10`: verify release metadata, tag policy, changelog entry, and required release artifact commands.
+- `npm run phase:0.11`: verify the alpha release readiness command manifest, required evidence, and release blockers.
 - `npm run phase:1.6`: print the local MCP install/config contract.
 - `npm run phase:1.7`: verify a standalone official MCP SDK client can connect.
 - `npm run phase:1.8`: verify the server path uses the official MCP SDK transport.
@@ -87,6 +88,7 @@ Example MCP client config:
 - `npm run package:dry-run`: run `npm pack --dry-run --json` and fail if generated artifacts would enter the package.
 - `npm run assets:manifest`: print the offline asset manifest.
 - `npm run doctor:install-cache`: inspect local driver, overlay, OCR runtime/model, WebView2, and permission readiness without starting desktop control.
+- `npm run release:readiness`: print the Phase 0.11 release readiness manifest validation report.
 
 ## Environment
 

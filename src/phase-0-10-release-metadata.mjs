@@ -13,7 +13,8 @@ const validation = validateReleaseMetadata(metadata, {
 const passed = validation.status === "passed"
   && metadata.releaseTag === `v${packageJson.version}`
   && validation.changelogEntryPresent === true
-  && validation.artifactCount === 3
+  && validation.artifactCount === metadata.artifacts.length
+  && metadata.artifacts.every((artifact) => artifact.command && artifact.required === true)
   && metadata.includeUserOverlay === false
   && metadata.startsDesktopControl === false;
 

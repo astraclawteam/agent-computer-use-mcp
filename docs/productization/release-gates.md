@@ -16,6 +16,7 @@ Required commands:
 ```sh
 npm test
 npm run phase:0.10
+npm run phase:0.11
 npm run phase:1.6
 npm run phase:1.7
 npm run phase:1.8
@@ -63,6 +64,7 @@ Required evidence:
 - `npm run package:dry-run` passes with no generated artifacts.
 - `npm run package:foundation` records install layout, version policy, and package file policy.
 - `npm run phase:0.10` verifies release metadata, tag policy, changelog entry, and required release artifact commands.
+- `npm run phase:0.11` verifies the alpha release readiness command manifest, required evidence, and release blockers.
 - `npm run assets:manifest` records offline/cacheable asset packs.
 - `npm run doctor:install-cache` records readiness and repair actions without starting desktop control.
 - `npm run phase:1.9` verifies permission tiers, unsafe-window deny policy, and secure-field fail-closed behavior.
@@ -149,6 +151,7 @@ Required evidence:
 
 - Release artifact hashes.
 - Release metadata/changelog report from `npm run phase:0.10`.
+- Release readiness manifest report from `npm run phase:0.11`.
 - Signing verification output.
 - Offline install proof.
 - Policy-deny proof for password/payment/private surfaces.

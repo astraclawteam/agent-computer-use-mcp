@@ -34,6 +34,11 @@ export function buildReleaseMetadata(options = {}) {
         command: "npm run package:foundation",
         required: true,
       },
+      {
+        name: "release-readiness-gate",
+        command: "npm run release:readiness",
+        required: true,
+      },
     ],
     includeUserOverlay: false,
     startsDesktopControl: false,
