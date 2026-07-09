@@ -65,6 +65,11 @@ export function buildReleaseMetadata(options = {}) {
         required: true,
       },
       {
+        name: "clean-install-degraded-proof",
+        command: "npm run phase:7.7",
+        required: true,
+      },
+      {
         name: "policy-deny-proof",
         command: "npm run phase:1.11",
         required: true,
