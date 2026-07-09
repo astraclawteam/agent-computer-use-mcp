@@ -71,6 +71,7 @@ export class ComputerUseProviderRouter {
         "2.9": "repair-deny-state",
         "2.10": "daemon-session",
         "2.11": "daemon-session-doctor-repair",
+        "2.12": "runtime-cleanup",
         "3.0": "ocr-model-pack-manager",
         "3.1": "ocr-region-diff-scheduler",
         "3.2": "template-matching-provider",

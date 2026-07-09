@@ -74,6 +74,11 @@ export function buildReleaseMetadata(options = {}) {
         command: "npm run phase:2.11",
         required: true,
       },
+      {
+        name: "runtime-cleanup",
+        command: "npm run phase:2.12",
+        required: true,
+      },
     ],
     includeUserOverlay: false,
     startsDesktopControl: false,

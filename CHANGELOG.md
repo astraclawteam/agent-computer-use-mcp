@@ -16,3 +16,4 @@ All notable changes to `agent-computer-use-mcp` are tracked here.
 - MCP approval compatibility proof for pending approval schemas, duplicate-pending rejection, and disconnect cleanup.
 - Daemon session proof for lock ownership, child supervision, duplicate startup blocking, and clean shutdown.
 - Daemon session doctor/repair proof for exposing degraded child state and approval-gated recovery through standard MCP tools.
+- Runtime cleanup proof for stale daemon locks and expired runtime temp files without desktop control.

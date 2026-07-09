@@ -37,6 +37,7 @@ npm run phase:2.8
 npm run phase:2.9
 npm run phase:2.10
 npm run phase:2.11
+npm run phase:2.12
 npm run phase:3.0
 npm run phase:3.1
 npm run phase:3.2
@@ -88,6 +89,7 @@ Required evidence:
 - `npm run phase:2.9` verifies repair approval denial clears pending state and never executes repair actions.
 - `npm run phase:2.10` verifies daemon session lock ownership, duplicate startup blocking, child supervision, recovery, and clean shutdown.
 - `npm run phase:2.11` verifies daemon session health and approved recovery surface through `computer.doctor` and `computer.repair`.
+- `npm run phase:2.12` verifies stale daemon locks and expired runtime temp files are cleaned without starting desktop control.
 - `npm run phase:3.0` verifies OCR model pack manifest and file-level doctor readiness without downloads or desktop control.
 - `npm run phase:3.1` verifies dirty-region OCR scheduling, stable region cache keys, and normal action-loop full-window OCR gating.
 - `npm run phase:3.2` verifies local template matching for static/repeated controls and pixel-limited observation output.
@@ -130,6 +132,7 @@ Required evidence:
 - `computer.doctor` and `computer.repair` smoke outputs.
 - Daemon session report from `npm run phase:2.10`.
 - Daemon session doctor/repair report from `npm run phase:2.11`.
+- Runtime cleanup report from `npm run phase:2.12`.
 - OCR model pack manager report from `npm run phase:3.0`.
 - OCR region/diff scheduler report from `npm run phase:3.1`.
 - Template matching provider report from `npm run phase:3.2`.
@@ -174,6 +177,7 @@ Required evidence:
 - Offline install proof from `npm run phase:7.4`.
 - Daemon session proof from `npm run phase:2.10`.
 - Daemon session doctor/repair proof from `npm run phase:2.11`.
+- Runtime cleanup proof from `npm run phase:2.12`.
 - Policy-deny proof for password/payment/private surfaces from `npm run phase:1.11`.
 - Control approval state proof from `npm run phase:1.12`.
 - MCP approval compatibility proof from `npm run phase:5.5`.
