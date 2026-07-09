@@ -40,6 +40,7 @@ test("release readiness gate captures the alpha release command contract", async
   assert.ok(gate.evidence.some((item) => item.id === "daemon-session"));
   assert.ok(gate.evidence.some((item) => item.id === "daemon-session-doctor-repair"));
   assert.ok(gate.evidence.some((item) => item.id === "runtime-cleanup"));
+  assert.ok(gate.evidence.some((item) => item.id === "runtime-cleanup-doctor-repair"));
   assert.equal(validation.status, "passed");
   assert.deepEqual(validation.violations, []);
 });

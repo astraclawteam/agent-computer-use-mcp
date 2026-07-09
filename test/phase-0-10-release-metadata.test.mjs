@@ -39,6 +39,7 @@ test("release metadata matches package version, tag, changelog, and upgrade poli
     "daemon-session",
     "daemon-session-doctor-repair",
     "runtime-cleanup",
+    "runtime-cleanup-doctor-repair",
   ]);
   assert.equal(validation.status, "passed");
   assert.deepEqual(validation.violations, []);
@@ -78,7 +79,7 @@ test("Phase 0.10 has changelog and executable release metadata smoke script", as
   assert.equal(report.phase, "0.10");
   assert.equal(report.releaseTag, `v${packageJson.version}`);
   assert.equal(report.changelogEntryPresent, true);
-  assert.equal(report.artifactCount, 12);
+  assert.equal(report.artifactCount, 13);
   assert.equal(report.includeUserOverlay, false);
   assert.equal(report.startsDesktopControl, false);
 });
