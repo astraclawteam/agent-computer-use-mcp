@@ -15,3 +15,4 @@ All notable changes to `agent-computer-use-mcp` are tracked here.
 - Computer control approval state machine for approve, deny, cancel, revoke, and timeout flows.
 - MCP approval compatibility proof for pending approval schemas, duplicate-pending rejection, and disconnect cleanup.
 - Daemon session proof for lock ownership, child supervision, duplicate startup blocking, and clean shutdown.
+- Daemon session doctor/repair proof for exposing degraded child state and approval-gated recovery through standard MCP tools.

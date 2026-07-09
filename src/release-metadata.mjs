@@ -69,6 +69,11 @@ export function buildReleaseMetadata(options = {}) {
         command: "npm run phase:2.10",
         required: true,
       },
+      {
+        name: "daemon-session-doctor-repair",
+        command: "npm run phase:2.11",
+        required: true,
+      },
     ],
     includeUserOverlay: false,
     startsDesktopControl: false,
