@@ -142,6 +142,15 @@ export function buildOfflineAssetManifest(options = {}) {
         acquisition: "bundle-or-first-run-cache",
         version: "pinned-by-manifest",
       },
+      {
+        id: "webview2-runtime",
+        kind: "system-runtime",
+        platform: "win32",
+        targetRoot: "system",
+        offlineRequired: false,
+        acquisition: "system-installed-or-offline-evergreen-bootstrapper",
+        version: "system-detected",
+      },
     ],
   };
 }
@@ -150,6 +159,7 @@ export function getPackageFilesPolicy() {
   return {
     includeRoots: [
       "src/",
+      "scripts/",
       "public/",
       "gateway-overlay/",
       "native-lab/",

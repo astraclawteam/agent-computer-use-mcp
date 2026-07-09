@@ -22,6 +22,7 @@ npm run phase:1.4
 npm run package:foundation
 npm run package:dry-run
 npm run assets:manifest
+npm run doctor:install-cache
 ```
 
 Required evidence:
@@ -29,6 +30,7 @@ Required evidence:
 - `npm run package:dry-run` passes with no generated artifacts.
 - `npm run package:foundation` records install layout, version policy, and package file policy.
 - `npm run assets:manifest` records offline/cacheable asset packs.
+- `npm run doctor:install-cache` records readiness and repair actions without starting desktop control.
 - No generated build output or model packs in Git.
 - `computer.health({fast:true})` is ready or structured degraded.
 - User overlay is excluded from observations.

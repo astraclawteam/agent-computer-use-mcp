@@ -24,6 +24,7 @@
   },
   "files": [
     "src",
+    "scripts",
     "public",
     "gateway-overlay/*.csproj",
     "gateway-overlay/*.cs",
@@ -57,6 +58,7 @@
     "package:dry-run": "node scripts/package-dry-run.mjs",
     "package:foundation": "node scripts/package-foundation-report.mjs",
     "assets:manifest": "node scripts/offline-asset-manifest.mjs",
+    "doctor:install-cache": "node scripts/install-cache-doctor.mjs --json",
     "governance:protect-main": "node scripts/configure-branch-protection.mjs",
     "serve": "node src/server.mjs"
   },
