@@ -15,6 +15,7 @@ All notable changes to `agent-computer-use-mcp` are tracked here.
 - First-enable safety proof for bounded waits, no first-enable downloads, and approval-gated repair progress.
 - Repair entrypoint catalog for product-safe installer UI actions covering driver, overlay, OCR, WebView2, permissions, and OS features.
 - Clean install degraded proof for empty Windows install roots with exact plan-only repair actions and catalog entries.
+- Deterministic release bundle builder plus a real .NET install, upgrade, corruption rejection, status, and rollback transaction gate.
 - Commercial policy-deny proof for password, payment, credential, and private surfaces.
 - Computer control approval state machine for approve, deny, cancel, revoke, and timeout flows.
 - MCP approval compatibility proof for pending approval schemas, duplicate-pending rejection, and disconnect cleanup.

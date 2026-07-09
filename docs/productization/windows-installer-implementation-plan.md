@@ -37,7 +37,7 @@
 - Produces: `verifyReleaseBundle({ bundleRoot })`
 - Manifest shape: `{ schemaVersion: 1, packageName, version, generatedAt, files: [{ path, bytes, sha256 }] }`
 
-- [ ] **Step 1: Write failing tests for deterministic manifests and path safety**
+- [x] **Step 1: Write failing tests for deterministic manifests and path safety**
 
 ```js
 test("release bundle materializes hashed payload files", async () => {
@@ -61,13 +61,13 @@ test("release bundle rejects traversal and mismatched hashes", async () => {
 });
 ```
 
-- [ ] **Step 2: Run the focused test and verify RED**
+- [x] **Step 2: Run the focused test and verify RED**
 
 Run: `node --test test/release-bundle.test.mjs`
 
 Expected: FAIL because `src/release-bundle.mjs` does not exist.
 
-- [ ] **Step 3: Implement deterministic copy, hashing, and verification**
+- [x] **Step 3: Implement deterministic copy, hashing, and verification**
 
 ```js
 export async function materializeReleaseBundle(options) {
@@ -90,7 +90,7 @@ export async function materializeReleaseBundle(options) {
 
 Implementation must sort normalized paths, reject absolute/traversal/duplicate paths, create parent directories, and re-read copied payload files during verification.
 
-- [ ] **Step 4: Run focused and full tests**
+- [x] **Step 4: Run focused and full tests**
 
 Run: `node --test test/release-bundle.test.mjs`
 
@@ -100,7 +100,7 @@ Run: `npm test`
 
 Expected: all tests PASS.
 
-- [ ] **Step 5: Commit Task 1**
+- [x] **Step 5: Commit Task 1**
 
 ```sh
 git add src/release-bundle.mjs test/release-bundle.test.mjs
@@ -129,7 +129,7 @@ git commit -m "feat: add deterministic release bundle builder"
 - Exit `0`: structured JSON `{ status, operation, currentVersion, previousVersion, revision, activePayloadRoot }`
 - Non-zero: structured JSON on stdout `{ status: "failed", operation, error: { code, message } }`
 
-- [ ] **Step 1: Write the failing black-box transaction test**
+- [x] **Step 1: Write the failing black-box transaction test**
 
 ```js
 test("Windows installer performs install upgrade and rollback on real files", async () => {
@@ -148,13 +148,13 @@ test("Windows installer performs install upgrade and rollback on real files", as
 
 Add cases proving a corrupted bundle does not change the active version, rollback fails closed when no previous version exists, and all cache/data directories are initialized.
 
-- [ ] **Step 2: Run the focused test and verify RED**
+- [x] **Step 2: Run the focused test and verify RED**
 
 Run: `node --test test/windows-installer-transaction.test.mjs`
 
 Expected: FAIL because the .NET installer project does not exist.
 
-- [ ] **Step 3: Implement the .NET installer project and JSON contracts**
+- [x] **Step 3: Implement the .NET installer project and JSON contracts**
 
 ```xml
 <Project Sdk="Microsoft.NET.Sdk">
@@ -171,7 +171,7 @@ Expected: FAIL because the .NET installer project does not exist.
 
 Use source-generated `System.Text.Json` metadata for `ReleaseManifest`, `InstallState`, `InstallerResult`, and `InstallerError` so later NativeAOT release publishing does not depend on runtime reflection.
 
-- [ ] **Step 4: Implement safe manifest verification and immutable staging**
+- [x] **Step 4: Implement safe manifest verification and immutable staging**
 
 ```csharp
 public VerifiedRelease Verify(string releaseRoot)
@@ -190,7 +190,7 @@ public VerifiedRelease Verify(string releaseRoot)
 
 Reject rooted paths, `.`/`..`, duplicate case-insensitive paths, invalid versions, unsupported schema versions, and empty manifests before touching the active state.
 
-- [ ] **Step 5: Implement install, upgrade, status, and rollback state transitions**
+- [x] **Step 5: Implement install, upgrade, status, and rollback state transitions**
 
 ```csharp
 var stageRoot = layout.CreateTransactionStage();
@@ -209,7 +209,7 @@ finally
 
 Installation of an already-active verified version is idempotent. Upgrade retains the old current version as previous. Rollback swaps current and previous only after verifying the target release. State revisions increase on every successful activation.
 
-- [ ] **Step 6: Run focused tests, build, and NativeAOT publish**
+- [x] **Step 6: Run focused tests, build, and NativeAOT publish**
 
 Run: `node --test test/windows-installer-transaction.test.mjs`
 
@@ -223,7 +223,7 @@ Run: `dotnet publish windows-installer/AgentComputerUse.Installer.csproj --confi
 
 Expected: a self-contained `AgentComputerUse.Installer.exe` is produced under the ignored `artifacts/` root.
 
-- [ ] **Step 7: Commit Task 2**
+- [x] **Step 7: Commit Task 2**
 
 ```sh
 git add windows-installer test/windows-installer-transaction.test.mjs
@@ -235,6 +235,7 @@ git commit -m "feat: add transactional Windows installer"
 **Files:**
 
 - Create: `src/phase-7-8-windows-installer-transaction.mjs`
+- Create: `src/windows-installer-host.mjs`
 - Create: `test/phase-7-8-windows-installer-transaction.test.mjs`
 - Modify: `package.json`
 - Modify: `src/computer-use-provider-router.mjs`
@@ -245,7 +246,7 @@ git commit -m "feat: add transactional Windows installer"
 - Report: `{ status: "passed", phase: "7.8", install, upgrade, rollback, corruptedBundleRejected, startsDesktopControl: false, includeUserOverlay: false }`
 - Script: `npm run installer:publish:win-x64`
 
-- [ ] **Step 1: Write the failing phase contract test**
+- [x] **Step 1: Write the failing phase contract test**
 
 ```js
 test("Phase 7.8 proves real installer transactions", async () => {
@@ -261,13 +262,13 @@ test("Phase 7.8 proves real installer transactions", async () => {
 });
 ```
 
-- [ ] **Step 2: Run the phase test and verify RED**
+- [x] **Step 2: Run the phase test and verify RED**
 
 Run: `node --test test/phase-7-8-windows-installer-transaction.test.mjs`
 
 Expected: FAIL because `phase:7.8` is not registered.
 
-- [ ] **Step 3: Implement the phase runner and package scripts**
+- [x] **Step 3: Implement the phase runner and package scripts**
 
 The runner creates two local fixture bundles under an OS temp directory, executes the built installer for install/upgrade/rollback, corrupts a third bundle, verifies the active version remains unchanged, prints one JSON report, and removes all fixtures in `finally`.
 
@@ -281,7 +282,7 @@ Register:
 }
 ```
 
-- [ ] **Step 4: Run focused and full verification**
+- [x] **Step 4: Run focused and full verification**
 
 Run: `node --test test/phase-7-8-windows-installer-transaction.test.mjs`
 
@@ -295,7 +296,7 @@ Run: `npm test`
 
 Expected: all tests PASS.
 
-- [ ] **Step 5: Commit Task 3**
+- [x] **Step 5: Commit Task 3**
 
 ```sh
 git add package.json src/computer-use-provider-router.mjs src/phase-7-8-windows-installer-transaction.mjs test/phase-7-8-windows-installer-transaction.test.mjs
@@ -322,7 +323,7 @@ git commit -m "test: add real Windows installer transaction gate"
 - The npm package includes `windows-installer/*.csproj` and `windows-installer/*.cs` source, not generated binaries.
 - Roadmap explicitly distinguishes completed proof gates from real transaction execution.
 
-- [ ] **Step 1: Write failing package/release-gate assertions**
+- [x] **Step 1: Write failing package/release-gate assertions**
 
 ```js
 assert.ok(files.includes("windows-installer/AgentComputerUse.Installer.csproj"));
@@ -330,13 +331,13 @@ assert.ok(files.includes("windows-installer/Program.cs"));
 assert.equal(releaseGate.requiredCommands.includes("npm run phase:7.8"), true);
 ```
 
-- [ ] **Step 2: Run focused tests and verify RED**
+- [x] **Step 2: Run focused tests and verify RED**
 
 Run: `node --test test/package-foundation.test.mjs test/phase-0-11-release-readiness.test.mjs`
 
 Expected: FAIL because installer source and Phase 7.8 are absent from package/release contracts.
 
-- [ ] **Step 3: Update CI, package policy, roadmap, release gates, and operator docs**
+- [x] **Step 3: Update CI, package policy, roadmap, release gates, and operator docs**
 
 CI additions:
 
@@ -352,7 +353,7 @@ CI additions:
 
 Document that the installer is a headless per-user transaction engine, consumes only verified local bundles, and is the sole writer of release activation state. Keep asset acquisition and signing as explicit follow-up gates.
 
-- [ ] **Step 4: Run final verification**
+- [x] **Step 4: Run final verification**
 
 Run: `npm run installer:build`
 
@@ -376,7 +377,7 @@ Run: `git diff --check`
 
 Expected: every command exits `0`; generated artifacts remain ignored; installer operations report `startsDesktopControl=false` and `includeUserOverlay=false`.
 
-- [ ] **Step 5: Commit Task 4**
+- [x] **Step 5: Commit Task 4**
 
 ```sh
 git add .github/workflows/ci.yml docs/productization README.md CHANGELOG.md package.json test/package-foundation.test.mjs test/phase-0-11-release-readiness.test.mjs
@@ -385,11 +386,12 @@ git commit -m "docs: gate transactional Windows installation"
 
 ## Follow-On PR Sequence
 
-1. `feat/asset-cache-materializer`: signed asset manifest schema, resumable download, local/offline source adapters, SHA-256/AuthentiCode verification, content-addressed cache, and approved repair execution.
-2. `test/real-app-smoke-runner`: executable result store plus Notepad, browser, Electron, WPF, and WinForms smoke adapters; unavailable third-party apps report `skipped_environment`, never fabricated success.
-3. `feat/ocr-pack-delivery`: PP-OCRv6 small pack acquisition, file verification, compute-provider probing, warm process lifetime, crop/diff benchmark corpus, and latency history artifacts.
-4. `test/runtime-soak-harness`: daemon soak, abnormal MCP disconnect, multi-client pressure, child crash loops, stale process/port cleanup, and restart recovery evidence.
-5. `ci/release-pipeline`: tag validation, npm tarball and offline bundle build, installer NativeAOT publish, Authenticode hook, checksums, GitHub Release draft, and explicit npm/private distribution channel selection.
-6. `docs/open-source-governance`: concise public README, contribution and AI coding rules, security response policy, architecture decision records, and release operator runbook.
+1. `feat/npm-release-hardening`: release-only staging package, esbuild bundle/minify, final-pass JavaScript obfuscation, no source or Source Maps, tarball inventory gate, runtime smoke, and SHA-256 evidence. Because the GitHub repository is open source, this raises analysis/tamper cost but is not treated as secrecy.
+2. `feat/asset-cache-materializer`: signed asset manifest schema, resumable download, local/offline source adapters, SHA-256/AuthentiCode verification, content-addressed cache, and approved repair execution.
+3. `test/real-app-smoke-runner`: executable result store plus Notepad, browser, Electron, WPF, and WinForms smoke adapters; unavailable third-party apps report `skipped_environment`, never fabricated success.
+4. `feat/ocr-pack-delivery`: PP-OCRv6 small pack acquisition, file verification, compute-provider probing, warm process lifetime, crop/diff benchmark corpus, and latency history artifacts.
+5. `test/runtime-soak-harness`: daemon soak, abnormal MCP disconnect, multi-client pressure, child crash loops, stale process/port cleanup, and restart recovery evidence.
+6. `ci/release-pipeline`: tag validation, protected npm tarball and offline bundle build, installer NativeAOT publish, Authenticode hook, checksums, GitHub Release draft, and explicit npm/private distribution channel selection.
+7. `docs/open-source-governance`: concise public README, contribution and AI coding rules, security response policy, architecture decision records, and release operator runbook.
 
 Each follow-on PR gets its own implementation plan and must pass review before the next layer is allowed to depend on it.

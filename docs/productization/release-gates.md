@@ -68,6 +68,7 @@ npm run phase:7.4
 npm run phase:7.5
 npm run phase:7.6
 npm run phase:7.7
+npm run phase:7.8
 npm run phase:1.4
 npm run package:foundation
 npm run package:dry-run
@@ -128,6 +129,7 @@ Required evidence:
 - `npm run phase:7.5` verifies first enable blocks quickly with approval-gated progress instead of waiting on downloads.
 - `npm run phase:7.6` verifies repair entrypoints are product-safe, approval-gated, and directly renderable by host install UI.
 - `npm run phase:7.7` verifies a clean Windows install reports degraded readiness with exact plan-only repair actions and catalog entries.
+- `npm run phase:7.8` executes real local install, upgrade, corruption rejection, and rollback transactions without network or desktop control.
 - No generated build output or model packs in Git.
 - `computer.health({fast:true})` is ready or structured degraded.
 - User overlay is excluded from observations.
@@ -178,6 +180,7 @@ Required evidence:
 - First-enable safety report from `npm run phase:7.5`.
 - Repair entrypoint catalog report from `npm run phase:7.6`.
 - Clean install degraded proof report from `npm run phase:7.7`.
+- Windows installer transaction report from `npm run phase:7.8`.
 - OCR latency report with warm p95 values.
 - App matrix report in `docs/productization/app-smoke-matrix.md`.
 
@@ -202,6 +205,7 @@ Required evidence:
 - First-enable safety proof from `npm run phase:7.5`.
 - Repair entrypoint catalog proof from `npm run phase:7.6`.
 - Clean install degraded proof from `npm run phase:7.7`.
+- Real Windows installer transaction proof from `npm run phase:7.8`.
 - Daemon session proof from `npm run phase:2.10`.
 - Daemon session doctor/repair proof from `npm run phase:2.11`.
 - Runtime cleanup proof from `npm run phase:2.12`.
@@ -223,3 +227,4 @@ Any of these block release:
 - Full-window OCR becomes the default action loop.
 - `main` receives non-admin direct pushes after branch protection is enabled.
 - CI required checks are bypassed for non-admin merges.
+- A publish-ready npm artifact contains first-party source, tests, C# source, Source Maps, or unobfuscated runtime entrypoints.

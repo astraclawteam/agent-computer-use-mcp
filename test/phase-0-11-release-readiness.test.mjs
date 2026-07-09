@@ -25,6 +25,7 @@ test("release readiness gate captures the alpha release command contract", async
     "npm run phase:0.11",
     "npm run phase:0.12",
     "npm run phase:0.13",
+    "npm run phase:7.8",
     "npm run package:foundation",
     "npm run package:dry-run",
     "npm run assets:manifest",
@@ -39,6 +40,7 @@ test("release readiness gate captures the alpha release command contract", async
   assert.ok(gate.evidence.some((item) => item.id === "first-enable-safety"));
   assert.ok(gate.evidence.some((item) => item.id === "repair-entrypoint-catalog"));
   assert.ok(gate.evidence.some((item) => item.id === "clean-install-degraded-proof"));
+  assert.ok(gate.evidence.some((item) => item.id === "windows-installer-transaction"));
   assert.ok(gate.evidence.some((item) => item.id === "policy-deny-proof"));
   assert.ok(gate.evidence.some((item) => item.id === "control-approval-state"));
   assert.ok(gate.evidence.some((item) => item.id === "mcp-approval-compatibility"));
@@ -103,6 +105,7 @@ function requiredCommandSubset(gate) {
     "npm run phase:0.11",
     "npm run phase:0.12",
     "npm run phase:0.13",
+    "npm run phase:7.8",
     "npm run package:foundation",
     "npm run package:dry-run",
     "npm run assets:manifest",

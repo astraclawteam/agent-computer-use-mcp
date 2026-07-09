@@ -33,6 +33,8 @@
     "native-lab/*.cs",
     "ocr-sidecar/*.py",
     "ocr-sidecar/*.mjs",
+    "windows-installer/*.csproj",
+    "windows-installer/*.cs",
     "docs/productization/*.md",
     "README.md",
     "CHANGELOG.md",

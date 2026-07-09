@@ -83,6 +83,7 @@ test("package files policy rejects generated artifacts and local caches", () => 
   assert.deepEqual(policy.forbiddenPathPrefixes, FORBIDDEN_PACKAGE_PATHS);
   assert.equal(policy.includeRoots.includes("scripts/"), true);
   assert.equal(policy.includeRoots.includes("docs/productization/"), true);
+  assert.equal(policy.includeRoots.includes("windows-installer/"), true);
 
   const result = validatePackEntries([
     "package/package.json",
@@ -126,6 +127,10 @@ test("npm package includes executable productization review documents", async ()
   assert.ok(files.includes("docs/productization/app-smoke-matrix.md"));
   assert.ok(files.includes("docs/productization/public-mcp-contract-review.md"));
   assert.ok(files.includes("docs/productization/release-gates.md"));
+  assert.ok(files.includes("windows-installer/AgentComputerUse.Installer.csproj"));
+  assert.ok(files.includes("windows-installer/Program.cs"));
+  assert.equal(files.some((file) => file.startsWith("windows-installer/bin/")), false);
+  assert.equal(files.some((file) => file.startsWith("windows-installer/obj/")), false);
 });
 
 test("offline asset manifest script emits the asset manifest only", async () => {

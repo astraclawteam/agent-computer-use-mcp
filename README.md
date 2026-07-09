@@ -99,6 +99,9 @@ Example MCP client config:
 - `npm run phase:7.5`: verify first enable blocks quickly with approval-gated progress instead of waiting on downloads.
 - `npm run phase:7.6`: verify repair entrypoints are product-safe, approval-gated, and directly renderable by host install UI.
 - `npm run phase:7.7`: verify a clean Windows install reports degraded readiness with exact plan-only repair actions and catalog entries.
+- `npm run phase:7.8`: execute a real local Windows install, upgrade, corruption rejection, and rollback transaction.
+- `npm run installer:build`: build the headless .NET 10 installer transaction engine.
+- `npm run installer:publish:win-x64`: publish the ignored NativeAOT Windows x64 installer artifact for signing and release assembly.
 - `npm run phase:1.4`: run the real `cua-driver mcp` desktop action lifecycle smoke.
 - `npm run package:foundation`: print install layout, version policy, packaging policy, and offline asset manifest.
 - `npm run package:dry-run`: run `npm pack --dry-run --json` and fail if generated artifacts would enter the package.
@@ -136,3 +139,5 @@ Commercial-readiness planning lives in:
 - `docs/productization/app-smoke-matrix.md`
 
 New productization work should use the GitHub issue templates for productization phases and app smokes.
+
+The native installer consumes a prebuilt local release bundle, verifies every payload file by SHA-256, stages an immutable version, and atomically updates `state/install-state.json`. It never downloads assets or starts Computer Use; asset acquisition and user-facing installer UI are separate product layers.
