@@ -70,6 +70,11 @@ export function buildReleaseMetadata(options = {}) {
         required: true,
       },
       {
+        name: "public-mcp-contract-review",
+        command: "npm run phase:5.7",
+        required: true,
+      },
+      {
         name: "daemon-session",
         command: "npm run phase:2.10",
         required: true,
