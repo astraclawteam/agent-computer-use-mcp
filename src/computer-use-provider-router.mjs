@@ -65,6 +65,7 @@ export class ComputerUseProviderRouter {
         "3.1": "ocr-region-diff-scheduler",
         "3.2": "template-matching-provider",
         "3.3": "som-proposal-provider",
+        "3.4": "per-region-strategy-selector",
         "5.0": "concurrent-controller-guard",
         "5.1": "standard-mcp-multi-client",
         "5.2": "disconnect-cleanup",
