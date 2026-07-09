@@ -17,8 +17,13 @@ export class ComputerUseProviderRouter {
     this.overlayHandle = null;
     this.ocrStarted = false;
     this.artifactRoot = options.artifactRoot;
+    this.clock = options.clock ?? {
+      now: () => Date.now(),
+      iso: (timeMs = Date.now()) => new Date(timeMs).toISOString(),
+    };
     this.activeController = null;
     this.lastCapture = null;
+    this.pendingRepairApproval = null;
     this.auditEvents = [];
     this.actionPolicy = {
       allowedKinds: ["set_value", "click"],
@@ -45,6 +50,7 @@ export class ComputerUseProviderRouter {
         "1.8": "standard-sdk-server-transport",
         "2.0": "doctor-tool",
         "2.1": "repair-approval-gate",
+        "2.2": "repair-approval-state",
       },
       providers: {
         windowCapture: process.platform === "win32" ? "PrintWindow" : "unsupported",
@@ -124,6 +130,31 @@ export class ComputerUseProviderRouter {
     };
     const approved = options.approved === true;
     const dryRun = options.dryRun !== false;
+    const approval = this.resolveRepairApproval({
+      approved,
+      approvalToken: options.approvalToken,
+      requestApproval: options.requestApproval,
+      approvalTtlMs: options.approvalTtlMs,
+      repairPlan,
+    });
+    if (approval.status === "expired") {
+      return {
+        status: "approval_expired",
+        mode: "plan-only",
+        module: "agent-computer-use-mcp",
+        approved: false,
+        dryRun,
+        approval,
+        repairPlan,
+        executesImmediately: false,
+        execution: {
+          status: "not_started",
+          reason: "approval-expired",
+        },
+        includeUserOverlay: false,
+        startsDesktopControl: false,
+      };
+    }
     const status = !approved && actions.length > 0
       ? "approval_required"
       : "planned";
@@ -134,6 +165,7 @@ export class ComputerUseProviderRouter {
       module: "agent-computer-use-mcp",
       approved,
       dryRun,
+      approval,
       repairPlan,
       executesImmediately: false,
       execution: {
@@ -307,6 +339,7 @@ export class ComputerUseProviderRouter {
     const previous = this.activeController;
     this.activeController = null;
     this.lastCapture = null;
+    this.pendingRepairApproval = null;
     await this.stopOverlay();
     this.recordAudit("computer.revoked", {
       controllerId: previous?.controllerId,
@@ -320,6 +353,7 @@ export class ComputerUseProviderRouter {
       status: this.activeController ? "active" : "idle",
       activeController: this.activeController,
       lastCapture: this.lastCapture,
+      pendingRepairApproval: this.getPendingRepairApproval(),
       auditEvents: this.auditEvents.slice(-50),
       includeUserOverlay: false,
     };
@@ -511,6 +545,67 @@ export class ComputerUseProviderRouter {
       provider: "gateway-managed",
       ...payload,
     });
+  }
+
+  resolveRepairApproval({ approved, approvalToken, requestApproval, approvalTtlMs, repairPlan }) {
+    if (approvalToken) {
+      const pending = this.pendingRepairApproval;
+      if (!pending || pending.token !== approvalToken) {
+        return { status: "invalid", token: approvalToken };
+      }
+      if (pending.expiresAtMs <= this.clock.now()) {
+        this.pendingRepairApproval = null;
+        return {
+          status: "expired",
+          token: approvalToken,
+          expiresAt: pending.expiresAt,
+        };
+      }
+      return {
+        status: approved ? "approved" : "pending",
+        token: approvalToken,
+        expiresAt: pending.expiresAt,
+      };
+    }
+    this.expireRepairApproval();
+    if (requestApproval && repairPlan.actions.length > 0) {
+      const ttlMs = Math.max(1, approvalTtlMs ?? 300000);
+      const expiresAtMs = this.clock.now() + ttlMs;
+      const token = randomUUID();
+      this.pendingRepairApproval = {
+        token,
+        status: "pending",
+        requestedAt: this.clock.iso(this.clock.now()),
+        expiresAt: new Date(expiresAtMs).toISOString(),
+        expiresAtMs,
+        actionIds: repairPlan.actions.map((action) => action.id),
+      };
+      return this.getPendingRepairApproval();
+    }
+    if (this.pendingRepairApproval) {
+      return this.getPendingRepairApproval();
+    }
+    return {
+      status: approved ? "missing" : "not_requested",
+    };
+  }
+
+  expireRepairApproval() {
+    if (this.pendingRepairApproval && this.pendingRepairApproval.expiresAtMs <= this.clock.now()) {
+      this.pendingRepairApproval = null;
+    }
+  }
+
+  getPendingRepairApproval() {
+    this.expireRepairApproval();
+    if (!this.pendingRepairApproval) return null;
+    return {
+      token: this.pendingRepairApproval.token,
+      status: this.pendingRepairApproval.status,
+      requestedAt: this.pendingRepairApproval.requestedAt,
+      expiresAt: this.pendingRepairApproval.expiresAt,
+      actionIds: this.pendingRepairApproval.actionIds,
+    };
   }
 
   async stopOverlay() {

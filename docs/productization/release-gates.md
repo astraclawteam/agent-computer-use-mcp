@@ -20,6 +20,7 @@ npm run phase:1.7
 npm run phase:1.8
 npm run phase:2.0
 npm run phase:2.1
+npm run phase:2.2
 npm run phase:1.4
 npm run package:foundation
 npm run package:dry-run
