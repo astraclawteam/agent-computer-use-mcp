@@ -46,7 +46,7 @@
 - Terminal result: `{ status, operation, releaseId, manifestSha256, assetCount, startsDesktopControl:false, includeUserOverlay:false }`
 - Test helper: `createSignedAssetFixture({ root, assets, developmentOnly, expiresAt })`
 
-- [ ] **Step 1: Write failing signature and mutation tests**
+- [x] **Step 1: Write failing signature and mutation tests**
 
 ```js
 test("native installer verifies exact signed asset manifest bytes", async () => {
@@ -69,13 +69,13 @@ test("native installer rejects a manifest changed after signing", async () => {
 
 Add separate failures for unknown key ID, expired manifest, duplicate asset IDs, invalid hash/size, unsupported platform, credential-bearing URL, non-HTTPS production URL, and `vendor-unsigned` without exact upstream provenance.
 
-- [ ] **Step 2: Run the focused test and verify RED**
+- [x] **Step 2: Run the focused test and verify RED**
 
 Run: `node --test test/asset-manifest-trust.test.mjs`
 
 Expected: FAIL because `asset-verify-manifest` is not a supported installer operation.
 
-- [ ] **Step 3: Implement models and exact-byte signature verification**
+- [x] **Step 3: Implement models and exact-byte signature verification**
 
 ```csharp
 internal sealed class AssetManifestVerifier
@@ -100,17 +100,17 @@ internal sealed class AssetManifestVerifier
 
 Validation must implement every fail-closed condition asserted by Step 1. The installer `Main` becomes `async Task<int>` without changing existing release operation output.
 
-- [ ] **Step 4: Extend the Node host for structured asset commands**
+- [x] **Step 4: Extend the Node host for structured asset commands**
 
 `runWindowsInstaller` accepts manifest, signature, keyring, offline root, asset IDs, network permission, operation ID, and environment overrides. It parses one JSON terminal line for existing commands and the final NDJSON record for asset commands.
 
-- [ ] **Step 5: Run focused and existing installer tests**
+- [x] **Step 5: Run focused and existing installer tests**
 
 Run: `node --test test/asset-manifest-trust.test.mjs test/windows-installer-transaction.test.mjs`
 
 Expected: PASS with existing install/upgrade/rollback behavior unchanged.
 
-- [ ] **Step 6: Commit Task 1**
+- [x] **Step 6: Commit Task 1**
 
 ```sh
 git add windows-installer src/windows-installer-host.mjs test/helpers/asset-fixture.mjs test/asset-manifest-trust.test.mjs

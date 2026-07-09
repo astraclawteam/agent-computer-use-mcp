@@ -62,6 +62,14 @@ export async function runWindowsInstaller(operation, options = {}) {
     options.dataRoot,
   ];
   if (options.bundleRoot) args.push("--bundle", options.bundleRoot);
+  if (options.manifestPath) args.push("--manifest", options.manifestPath);
+  if (options.signaturePath) args.push("--signature", options.signaturePath);
+  if (options.keyringPath) args.push("--trust-keyring", options.keyringPath);
+  if (options.offlineRoot) args.push("--offline-root", options.offlineRoot);
+  if (options.assetIds?.length) args.push("--asset-ids", options.assetIds.join(","));
+  if (options.releaseId) args.push("--release-id", options.releaseId);
+  if (options.operationId) args.push("--operation-id", options.operationId);
+  if (options.allowNetwork === true) args.push("--allow-network", "true");
   const result = await runCommand("dotnet", args);
   let report;
   try {

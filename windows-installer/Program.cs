@@ -13,6 +13,24 @@ internal static class Program
             var options = ParseOptions(args.Skip(1).ToArray());
             layout = InstallerLayout.FromOptions(options);
             var engine = new InstallerEngine(layout, new ReleaseVerifier());
+            if (operation == "asset-verify-manifest")
+            {
+                var verified = new AssetManifestVerifier().Verify(
+                    RequireOption(options, "manifest"),
+                    RequireOption(options, "signature"),
+                    RequireOption(options, "trust-keyring"));
+                WriteResult(new AssetVerificationResult
+                {
+                    Status = "verified",
+                    Operation = operation,
+                    ReleaseId = verified.Manifest.ReleaseId,
+                    ManifestSha256 = verified.ManifestSha256,
+                    AssetCount = verified.Manifest.Assets.Count,
+                    StartsDesktopControl = false,
+                    IncludeUserOverlay = false,
+                });
+                return 0;
+            }
             var result = operation switch
             {
                 "install" or "upgrade" => engine.Apply(operation, RequireOption(options, "bundle")),
@@ -88,5 +106,10 @@ internal static class Program
     private static void WriteResult(InstallerResult result)
     {
         Console.Out.WriteLine(JsonSerializer.Serialize(result, InstallerJsonContext.Default.InstallerResult));
+    }
+
+    private static void WriteResult(AssetVerificationResult result)
+    {
+        Console.Out.WriteLine(JsonSerializer.Serialize(result, InstallerJsonContext.Default.AssetVerificationResult));
     }
 }
