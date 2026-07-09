@@ -65,3 +65,16 @@ npm run phase:1.4
 The public API is the MCP tool surface and structured result shape. Any change to tool names, arguments, result fields, environment variables, or installation config must be called out as a contract change in the PR.
 
 Compatibility aliases such as `XIAOZHICLAW_*` may remain, but new documentation and examples must use `AGENT_COMPUTER_USE_*`.
+
+## npm Release Packaging
+
+The repository root is a non-publishable maintainer workspace. Never run a real `npm publish` from the source checkout. Build and verify the release-only staging package with:
+
+```sh
+npm run release:npm:build
+npm run release:npm:smoke
+npm run release:npm:pack
+npm run phase:0.14
+```
+
+The generated tarball must contain only protected `dist` runtime files and approved metadata. Source trees, tests, C#/Python source, and Source Maps block release.

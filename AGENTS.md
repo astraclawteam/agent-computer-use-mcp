@@ -51,6 +51,8 @@ If a host product provides a stricter instruction, follow the stricter rule.
 - Coordinate/pixel actions must be marked as `pixelLimitedAction=true`.
 - Keep `AGENT_COMPUTER_USE_*` environment variables as the public names. `XIAOZHICLAW_*` aliases are compatibility-only.
 - Do not commit generated artifacts: `node_modules/`, `.NET bin/obj`, OCR model packs, captures, logs, or temp files.
+- The source workspace is never published to npm. Build, smoke, and pack only `artifacts/npm-release/package` through the protected release scripts.
+- Published npm artifacts must not contain first-party source, tests, C#/Python source, Source Maps, or `sourceMappingURL` comments.
 - Keep files focused. If a file becomes hard to review, split by responsibility with tests.
 
 ## Required Verification

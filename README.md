@@ -50,6 +50,10 @@ Example MCP client config:
 - `npm run phase:0.11`: verify the alpha release readiness command manifest, required evidence, and release blockers.
 - `npm run phase:0.12`: verify release artifact hashes and Windows helper signing evidence.
 - `npm run phase:0.13`: verify Windows helper signing inventory coverage for required and reserved helpers.
+- `npm run phase:0.14`: build, integrity-check, MCP-smoke, and pack the protected npm release.
+- `npm run release:npm:build`: create release-only staging with bundled, minified, obfuscated runtime files and no Source Maps.
+- `npm run release:npm:smoke`: verify SHA-256 and exercise the protected runtime with the official MCP SDK.
+- `npm run release:npm:pack`: create the publish-ready tarball under ignored `artifacts/npm-release/`.
 - `npm run phase:1.6`: print the local MCP install/config contract.
 - `npm run phase:1.7`: verify a standalone official MCP SDK client can connect.
 - `npm run phase:1.8`: verify the server path uses the official MCP SDK transport.
@@ -141,3 +145,5 @@ Commercial-readiness planning lives in:
 New productization work should use the GitHub issue templates for productization phases and app smokes.
 
 The native installer consumes a prebuilt local release bundle, verifies every payload file by SHA-256, stages an immutable version, and atomically updates `state/install-state.json`. It never downloads assets or starts Computer Use; asset acquisition and user-facing installer UI are separate product layers.
+
+The repository root is intentionally non-publishable. npm distribution is built from a separate staging package containing only protected `dist` runtime files, release integrity metadata, and license/readme/changelog files. The gate rejects source trees, C#/Python source, tests, Source Maps, and unbundled first-party imports. Because this repository is open source, obfuscation is defense in depth rather than a secrecy boundary.

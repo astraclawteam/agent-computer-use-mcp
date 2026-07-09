@@ -50,6 +50,7 @@ export class ComputerUseProviderRouter {
         "0.11": "release-readiness-gate",
         "0.12": "release-artifact-verification",
         "0.13": "signed-helper-inventory",
+        "0.14": "protected-npm-release",
         "1.0": "stdio-mcp-server",
         "1.1": "provider-router",
         "1.2": "packaging-health-contract",

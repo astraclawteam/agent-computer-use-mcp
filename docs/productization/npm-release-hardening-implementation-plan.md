@@ -39,7 +39,7 @@
 - Produces: `validateProtectedRuntime({ files, protection })`
 - Required entries: `package.json`, `LICENSE`, `README.md`, `CHANGELOG.md`, `release-integrity.json`, `dist/launcher.mjs`, `dist/computer-use-mcp-server.mjs`, `dist/ocr-sidecar.mjs`
 
-- [ ] **Step 1: Write failing policy tests**
+- [x] **Step 1: Write failing policy tests**
 
 ```js
 test("protected npm inventory accepts only approved runtime entries", () => {
@@ -65,17 +65,17 @@ test("protected npm inventory rejects source and Source Maps", () => {
 });
 ```
 
-- [ ] **Step 2: Run the focused test and verify RED**
+- [x] **Step 2: Run the focused test and verify RED**
 
 Run: `node --test test/npm-release-policy.test.mjs`
 
 Expected: FAIL because `src/npm-release-policy.mjs` does not exist.
 
-- [ ] **Step 3: Implement fail-closed inventory and protection validation**
+- [x] **Step 3: Implement fail-closed inventory and protection validation**
 
 Normalize separators and optional `package/` prefixes. Reject unknown top-level roots, forbidden source extensions, Source Maps, map comments in runtime contents, missing required entries, unminified first-party import paths, and missing protection metadata.
 
-- [ ] **Step 4: Run focused and full tests**
+- [x] **Step 4: Run focused and full tests**
 
 Run: `node --test test/npm-release-policy.test.mjs`
 
@@ -83,7 +83,7 @@ Run: `npm test`
 
 Expected: all tests PASS.
 
-- [ ] **Step 5: Commit Task 1**
+- [x] **Step 5: Commit Task 1**
 
 ```sh
 git add src/npm-release-policy.mjs test/npm-release-policy.test.mjs
@@ -111,7 +111,7 @@ git commit -m "feat: add protected npm inventory policy"
 - Output metadata: `{ status, packageRoot, runtimeFiles, protection, integrity }`
 - Root publish blocker: `npm publish` from the repository exits non-zero with `release.source_publish_blocked`.
 
-- [ ] **Step 1: Write failing staging tests**
+- [x] **Step 1: Write failing staging tests**
 
 ```js
 test("protected npm build emits only protected release staging", async () => {
@@ -127,13 +127,13 @@ test("protected npm build emits only protected release staging", async () => {
 
 Add tests that package JSON points `bin.agent-computer-use-mcp` at `dist/launcher.mjs`, contains runtime dependencies but no dev dependencies or maintainer scripts, and the original identifiers/import paths are absent from protected server output.
 
-- [ ] **Step 2: Run focused tests and verify RED**
+- [x] **Step 2: Run focused tests and verify RED**
 
 Run: `node --test test/protected-npm-build.test.mjs test/ocr-sidecar.test.mjs test/phase-1-6-installation.test.mjs`
 
 Expected: FAIL because the release builder and protected path resolution do not exist.
 
-- [ ] **Step 3: Pin build-only dependencies and block root publication**
+- [x] **Step 3: Pin build-only dependencies and block root publication**
 
 ```json
 {
@@ -149,15 +149,15 @@ Expected: FAIL because the release builder and protected path resolution do not 
 }
 ```
 
-- [ ] **Step 4: Add development and protected runtime path selection**
+- [x] **Step 4: Add development and protected runtime path selection**
 
 `computer.installation` uses `dist/launcher.mjs` when present and `src/computer-use-mcp-server.mjs` in a source checkout. OCR resolves an explicit environment override first, then co-located `dist/ocr-sidecar.mjs`, then the development sidecar path.
 
-- [ ] **Step 5: Implement bundle, minify, obfuscate, and staging metadata**
+- [x] **Step 5: Implement bundle, minify, obfuscate, and staging metadata**
 
 Use esbuild with `bundle:true`, `platform:"node"`, `format:"esm"`, `packages:"external"`, `minify:true`, `sourcemap:false`, and `legalComments:"none"`. Apply JavaScript Obfuscator last with `target:"node"`, `sourceMap:false`, `selfDefending:true`, `identifierNamesGenerator:"hexadecimal"`, `stringArray:true`, `stringArrayEncoding:["base64"]`, `stringArrayThreshold:0.75`, and all high-risk transforms disabled.
 
-- [ ] **Step 6: Run focused tests and verify GREEN**
+- [x] **Step 6: Run focused tests and verify GREEN**
 
 Run: `node --test test/protected-npm-build.test.mjs test/ocr-sidecar.test.mjs test/phase-1-6-installation.test.mjs`
 
@@ -165,7 +165,7 @@ Run: `npm run release:npm:build`
 
 Expected: protected staging validates with no source/map violations.
 
-- [ ] **Step 7: Commit Task 2**
+- [x] **Step 7: Commit Task 2**
 
 ```sh
 git add package.json package-lock.json scripts src test
@@ -188,7 +188,7 @@ git commit -m "feat: build protected npm release staging"
 - Integrity manifest: `{ schemaVersion: 1, packageName, packageVersion, protection, files: [{ path, bytes, sha256 }] }`
 - Smoke report: `{ status, toolCount, health, integrityVerified, sourceEntries, sourceMaps, startsDesktopControl:false, includeUserOverlay:false }`
 
-- [ ] **Step 1: Write failing launcher and MCP smoke tests**
+- [x] **Step 1: Write failing launcher and MCP smoke tests**
 
 ```js
 test("protected package launcher verifies integrity and serves standard MCP", async () => {
@@ -202,21 +202,21 @@ test("protected package launcher verifies integrity and serves standard MCP", as
 
 Add a tamper test that modifies the protected server after build and expects the launcher to exit before MCP initialization with `release.integrity_mismatch`.
 
-- [ ] **Step 2: Run focused smoke tests and verify RED**
+- [x] **Step 2: Run focused smoke tests and verify RED**
 
 Run: `node --test test/protected-npm-smoke.test.mjs`
 
 Expected: FAIL because the integrity launcher and smoke runner do not exist.
 
-- [ ] **Step 3: Implement final-pass launcher and integrity manifest**
+- [x] **Step 3: Implement final-pass launcher and integrity manifest**
 
 The builder hashes protected server and sidecar output, writes `release-integrity.json`, bundles/minifies/obfuscates the launcher last, and never modifies any protected file afterward. The launcher validates relative paths and SHA-256 before importing the server.
 
-- [ ] **Step 4: Implement official MCP SDK release smoke**
+- [x] **Step 4: Implement official MCP SDK release smoke**
 
 Start staging `dist/launcher.mjs` with `StdioClientTransport`, initialize, list tools, call `computer.health({fast:true})`, close, and report only release-safe metadata.
 
-- [ ] **Step 5: Run focused and full verification**
+- [x] **Step 5: Run focused and full verification**
 
 Run: `npm run release:npm:smoke`
 
@@ -224,7 +224,7 @@ Run: `npm test`
 
 Expected: all tests PASS; tampered runtime fails before MCP initialization.
 
-- [ ] **Step 6: Commit Task 3**
+- [x] **Step 6: Commit Task 3**
 
 ```sh
 git add scripts test package.json
@@ -257,21 +257,21 @@ git commit -m "test: verify protected npm runtime over standard mcp"
 - `npm run package:dry-run` builds and inspects the staging package, never the source workspace.
 - Tarball output: `artifacts/npm-release/*.tgz`
 
-- [ ] **Step 1: Write failing tarball and release-gate tests**
+- [x] **Step 1: Write failing tarball and release-gate tests**
 
 Assert the tarball passes `validateProtectedNpmEntries`, has zero source/Source Map entries, includes the obfuscated runtime and integrity manifest, and Phase 0.14 is required by release readiness.
 
-- [ ] **Step 2: Run focused tests and verify RED**
+- [x] **Step 2: Run focused tests and verify RED**
 
 Run: `node --test test/package-foundation.test.mjs test/phase-0-11-release-readiness.test.mjs test/phase-0-14-protected-npm-release.test.mjs`
 
 Expected: FAIL because protected pack and Phase 0.14 are absent.
 
-- [ ] **Step 3: Implement protected pack, phase report, CI, and docs**
+- [x] **Step 3: Implement protected pack, phase report, CI, and docs**
 
 Use `npm pack --json <staging-directory>` and move the resulting tarball only inside ignored `artifacts/npm-release/`. Add explicit CI steps for protected build, smoke, pack, and Phase 0.14.
 
-- [ ] **Step 4: Run final verification**
+- [x] **Step 4: Run final verification**
 
 Run: `npm run release:npm:build`
 
@@ -297,7 +297,7 @@ Run: `git diff --check`
 
 Expected: every command exits `0`, release tarball has no forbidden entries, runtime smoke passes, and no generated output is tracked.
 
-- [ ] **Step 5: Commit Task 4**
+- [x] **Step 5: Commit Task 4**
 
 ```sh
 git add .github package.json package-lock.json scripts src test docs README.md CHANGELOG.md

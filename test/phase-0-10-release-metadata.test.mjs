@@ -33,6 +33,7 @@ test("release metadata matches package version, tag, changelog, and upgrade poli
     "release-readiness-gate",
     "release-artifact-verification",
     "signed-helper-inventory",
+    "protected-npm-release",
     "offline-install-proof",
     "first-enable-safety",
     "repair-entrypoint-catalog",
@@ -48,6 +49,7 @@ test("release metadata matches package version, tag, changelog, and upgrade poli
     "runtime-cleanup-doctor-repair",
     "perception-latency-budget",
   ]);
+  assert.equal(metadata.artifacts[0].command, "npm run release:npm:pack");
   assert.equal(validation.status, "passed");
   assert.deepEqual(validation.violations, []);
 });
@@ -86,7 +88,7 @@ test("Phase 0.10 has changelog and executable release metadata smoke script", as
   assert.equal(report.phase, "0.10");
   assert.equal(report.releaseTag, `v${packageJson.version}`);
   assert.equal(report.changelogEntryPresent, true);
-  assert.equal(report.artifactCount, 20);
+  assert.equal(report.artifactCount, 21);
   assert.equal(report.includeUserOverlay, false);
   assert.equal(report.startsDesktopControl, false);
 });
