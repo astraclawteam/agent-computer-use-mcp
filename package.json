@@ -82,6 +82,7 @@
     "phase:3.2": "node src/phase-3-2-template-matching-provider.mjs",
     "phase:3.3": "node src/phase-3-3-som-proposal-provider.mjs",
     "phase:3.4": "node src/phase-3-4-perception-strategy-selector.mjs",
+    "phase:3.5": "node src/phase-3-5-perception-latency-report.mjs",
     "phase:4.0": "node src/phase-4-0-overlay-placement-planner.mjs",
     "phase:4.1": "node src/phase-4-1-overlay-theme-cursor-tokens.mjs",
     "phase:4.2": "node src/phase-4-2-overlay-target-tracker.mjs",

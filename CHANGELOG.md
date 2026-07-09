@@ -18,3 +18,4 @@ All notable changes to `agent-computer-use-mcp` are tracked here.
 - Daemon session doctor/repair proof for exposing degraded child state and approval-gated recovery through standard MCP tools.
 - Runtime cleanup proof for stale daemon locks and expired runtime temp files without desktop control.
 - Runtime cleanup doctor/repair proof for exposing cleanup actions through standard MCP tools.
+- Perception latency budget proof for warm OCR crop, ordinary region, and diagnostic full-window OCR targets.
