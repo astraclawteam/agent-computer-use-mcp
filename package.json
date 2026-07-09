@@ -40,7 +40,7 @@
     "node": ">=20"
   },
   "scripts": {
-    "test": "node --test test/*.test.mjs",
+    "test": "node --test",
     "mcp": "node src/computer-use-mcp-server.mjs",
     "smoke": "node src/smoke.mjs",
     "phase:0.6": "node src/phase-0-6.mjs",

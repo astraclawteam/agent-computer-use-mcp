@@ -99,6 +99,7 @@ test("package files policy rejects generated artifacts and local caches", () => 
 
 test("package dry-run script emits a JSON report", async () => {
   const packageJson = JSON.parse(readFileSync("package.json", "utf8"));
+  assert.equal(packageJson.scripts.test, "node --test");
   assert.equal(packageJson.scripts["package:dry-run"], "node scripts/package-dry-run.mjs");
   assert.equal(packageJson.scripts["package:foundation"], "node scripts/package-foundation-report.mjs");
   assert.equal(packageJson.scripts["assets:manifest"], "node scripts/offline-asset-manifest.mjs");
