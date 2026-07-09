@@ -43,6 +43,7 @@ npm run phase:5.0
 npm run phase:5.1
 npm run phase:5.2
 npm run phase:5.3
+npm run phase:5.4
 npm run phase:6.0
 npm run phase:1.4
 npm run package:foundation
@@ -79,6 +80,7 @@ Required evidence:
 - `npm run phase:5.1` verifies two standard MCP SDK clients can connect and call read-only tools concurrently.
 - `npm run phase:5.2` verifies disconnect cleanup revokes active control state and stops overlay.
 - `npm run phase:5.3` verifies all public MCP tools declare versioned strict output schemas through `tools/list`.
+- `npm run phase:5.4` verifies MCP Inspector-style initialization, tool listing, and read-only tool calls.
 - `npm run phase:6.0` verifies the app smoke matrix result schema and required category coverage.
 - No generated build output or model packs in Git.
 - `computer.health({fast:true})` is ready or structured degraded.
@@ -111,6 +113,7 @@ Required evidence:
 - Multi-client connection report from `npm run phase:5.1`.
 - Disconnect cleanup report from `npm run phase:5.2`.
 - Strict output schema report from `npm run phase:5.3`.
+- MCP Inspector smoke report from `npm run phase:5.4`.
 - App smoke matrix contract report from `npm run phase:6.0`.
 - OCR latency report with warm p95 values.
 - App matrix report in `docs/productization/app-smoke-matrix.md`.
