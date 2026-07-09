@@ -27,6 +27,7 @@ export class ComputerUseProviderRouter {
     };
     this.controllerRequestInProgress = false;
     this.activeController = null;
+    this.pendingAccessApproval = null;
     this.lastCapture = null;
     this.pendingRepairApproval = null;
     this.auditEvents = [];
@@ -56,6 +57,7 @@ export class ComputerUseProviderRouter {
         "1.9": "permission-policy-engine",
         "1.10": "controller-lease-timeout",
         "1.11": "policy-deny-proof",
+        "1.12": "control-approval-state",
         "2.0": "doctor-tool",
         "2.1": "repair-approval-gate",
         "2.2": "repair-approval-state",
@@ -300,51 +302,135 @@ export class ComputerUseProviderRouter {
         controllerId: this.activeController.controllerId,
       });
     }
+    this.expireAccessApproval();
+    if (this.pendingAccessApproval) {
+      fail("controller.approval_pending", "A Gateway-managed Computer Use approval request is already pending.", {
+        token: this.pendingAccessApproval.token,
+        expiresAt: this.pendingAccessApproval.expiresAt,
+        includeUserOverlay: false,
+      });
+    }
     this.controllerRequestInProgress = true;
     try {
       const tier = args.tier ?? "full";
       const window = await this.driver.findWindow({ titlePart: args.titlePart });
       this.enforcePolicyDecision(this.policy.evaluateAccessRequest({ tier, window }));
+      if (args.approvalRequired === true) {
+        const approvalTtlMs = Math.max(1, args.approvalTtlMs ?? 300000);
+        const requestedAtMs = this.clock.now();
+        const expiresAtMs = requestedAtMs + approvalTtlMs;
+        this.pendingAccessApproval = {
+          token: randomUUID(),
+          status: "pending",
+          action: "computer.request_access",
+          requestedAt: this.clock.iso(requestedAtMs),
+          expiresAt: this.clock.iso(expiresAtMs),
+          expiresAtMs,
+          approvalTtlMs,
+          request: {
+            titlePart: args.titlePart,
+            tier,
+            agentId: args.agentId ?? "unknown",
+            reason: args.reason ?? null,
+            leaseTtlMs: args.leaseTtlMs,
+            window,
+          },
+        };
+        this.recordAudit("computer.access.approval_requested", {
+          token: this.pendingAccessApproval.token,
+          title: window.title,
+          tier,
+        });
+        return {
+          status: "approval_required",
+          approval: this.getPendingAccessApproval(),
+          controller: null,
+          overlay: null,
+          startsDesktopControl: false,
+          includeUserOverlay: false,
+        };
+      }
       const leaseTtlMs = Math.max(1, args.leaseTtlMs ?? 300000);
-      const startedAtMs = this.clock.now();
-      const expiresAtMs = startedAtMs + leaseTtlMs;
-      this.activeController = {
-        controllerId: randomUUID(),
-        provider: "gateway-managed",
+      return await this.grantAccessController({
         tier,
         agentId: args.agentId ?? "unknown",
-        status: "active",
         window,
-        startedAt: this.clock.iso(startedAtMs),
-        expiresAt: this.clock.iso(expiresAtMs),
-        expiresAtMs,
         leaseTtlMs,
-        includeUserOverlay: false,
-      };
-      if (this.overlayRuntime?.start) {
-        this.overlayHandle = await this.overlayRuntime.start({ targetRect: window.bounds ? {
-          windowId: window.windowId,
-          title: window.title,
-          x: window.bounds.x,
-          y: window.bounds.y,
-          width: window.bounds.width,
-          height: window.bounds.height,
-        } : undefined });
-      }
-      this.recordAudit("computer.access.granted", {
-        controllerId: this.activeController.controllerId,
-        title: window.title,
-        tier: this.activeController.tier,
+        approval: { status: "not_required" },
       });
-      return {
-        status: "granted",
-        controller: this.activeController,
-        overlay: this.overlayHandle,
-        includeUserOverlay: false,
-      };
     } finally {
       this.controllerRequestInProgress = false;
     }
+  }
+
+  async approveAccess(args = {}) {
+    await this.expireActiveController({ throwOnExpire: false });
+    const pending = this.pendingAccessApproval;
+    if (!args.approvalToken || !pending || pending.token !== args.approvalToken) {
+      return {
+        status: "approval_invalid",
+        approval: { status: "invalid", token: args.approvalToken ?? null },
+        controller: null,
+        overlay: null,
+        startsDesktopControl: false,
+        includeUserOverlay: false,
+      };
+    }
+    if (pending.expiresAtMs <= this.clock.now()) {
+      this.pendingAccessApproval = null;
+      this.recordAudit("computer.access.approval_expired", {
+        token: pending.token,
+        expiresAt: pending.expiresAt,
+      });
+      return {
+        status: "approval_expired",
+        approval: { ...this.serializeAccessApproval(pending), status: "expired" },
+        controller: null,
+        overlay: null,
+        startsDesktopControl: false,
+        includeUserOverlay: false,
+      };
+    }
+    if (args.denied === true) {
+      this.pendingAccessApproval = null;
+      this.recordAudit("computer.access.approval_denied", {
+        token: pending.token,
+        reason: args.reason ?? "denied",
+      });
+      return {
+        status: "approval_denied",
+        approval: { ...this.serializeAccessApproval(pending), status: "denied" },
+        controller: null,
+        overlay: null,
+        startsDesktopControl: false,
+        includeUserOverlay: false,
+      };
+    }
+    if (args.approved !== true) {
+      return {
+        status: "approval_pending",
+        approval: this.getPendingAccessApproval(),
+        controller: null,
+        overlay: null,
+        startsDesktopControl: false,
+        includeUserOverlay: false,
+      };
+    }
+    if (this.activeController) {
+      fail("controller.already_active", "A Gateway-managed Computer Use controller is already active.", {
+        controllerId: this.activeController.controllerId,
+      });
+    }
+    const { request } = pending;
+    this.enforcePolicyDecision(this.policy.evaluateAccessRequest({ tier: request.tier, window: request.window }));
+    this.pendingAccessApproval = null;
+    return await this.grantAccessController({
+      tier: request.tier,
+      agentId: request.agentId,
+      window: request.window,
+      leaseTtlMs: Math.max(1, args.leaseTtlMs ?? request.leaseTtlMs ?? 300000),
+      approval: { ...this.serializeAccessApproval(pending), status: "approved" },
+    });
   }
 
   async capture(args = {}) {
@@ -446,33 +532,41 @@ export class ComputerUseProviderRouter {
 
   async cancel(args = {}) {
     const previous = this.activeController;
+    const previousApproval = this.getPendingAccessApproval();
+    this.pendingAccessApproval = null;
     this.activeController = null;
     await this.stopOverlay();
     this.recordAudit("computer.cancelled", {
       controllerId: previous?.controllerId,
+      approvalToken: previousApproval?.token,
       reason: args.reason ?? "cancelled",
     });
-    return { status: "cancelled", previousController: previous, includeUserOverlay: false };
+    return { status: "cancelled", previousController: previous, previousApproval, includeUserOverlay: false };
   }
 
   async revoke(args = {}) {
     const previous = this.activeController;
+    const previousApproval = this.getPendingAccessApproval();
+    this.pendingAccessApproval = null;
     this.activeController = null;
     this.lastCapture = null;
     this.pendingRepairApproval = null;
     await this.stopOverlay();
     this.recordAudit("computer.revoked", {
       controllerId: previous?.controllerId,
+      approvalToken: previousApproval?.token,
       reason: args.reason ?? "revoked",
     });
-    return { status: "revoked", previousController: previous, includeUserOverlay: false };
+    return { status: "revoked", previousController: previous, previousApproval, includeUserOverlay: false };
   }
 
   async listState() {
     await this.expireActiveController({ throwOnExpire: false });
+    this.expireAccessApproval();
     return {
       status: this.activeController ? "active" : "idle",
       activeController: this.activeController,
+      pendingAccessApproval: this.getPendingAccessApproval(),
       lastCapture: this.lastCapture,
       pendingRepairApproval: this.getPendingRepairApproval(),
       auditEvents: this.auditEvents.slice(-50),
@@ -577,6 +671,7 @@ export class ComputerUseProviderRouter {
     this.activeController = null;
     this.lastCapture = null;
     this.pendingRepairApproval = null;
+    this.pendingAccessApproval = null;
     this.controllerRequestInProgress = false;
     await this.stopOverlay();
     if (previous) {
@@ -659,6 +754,81 @@ export class ComputerUseProviderRouter {
       });
     }
     return true;
+  }
+
+  expireAccessApproval() {
+    if (this.pendingAccessApproval && this.pendingAccessApproval.expiresAtMs <= this.clock.now()) {
+      const pending = this.pendingAccessApproval;
+      this.pendingAccessApproval = null;
+      this.recordAudit("computer.access.approval_expired", {
+        token: pending.token,
+        expiresAt: pending.expiresAt,
+      });
+      return pending;
+    }
+    return null;
+  }
+
+  getPendingAccessApproval() {
+    this.expireAccessApproval();
+    if (!this.pendingAccessApproval) return null;
+    return this.serializeAccessApproval(this.pendingAccessApproval);
+  }
+
+  serializeAccessApproval(approval) {
+    return {
+      token: approval.token,
+      status: approval.status,
+      action: approval.action,
+      requestedAt: approval.requestedAt,
+      expiresAt: approval.expiresAt,
+      tier: approval.request.tier,
+      agentId: approval.request.agentId,
+      title: approval.request.window.title,
+      reason: approval.request.reason,
+    };
+  }
+
+  async grantAccessController({ tier, agentId, window, leaseTtlMs, approval }) {
+    const startedAtMs = this.clock.now();
+    const expiresAtMs = startedAtMs + leaseTtlMs;
+    this.activeController = {
+      controllerId: randomUUID(),
+      provider: "gateway-managed",
+      tier,
+      agentId,
+      status: "active",
+      window,
+      startedAt: this.clock.iso(startedAtMs),
+      expiresAt: this.clock.iso(expiresAtMs),
+      expiresAtMs,
+      leaseTtlMs,
+      includeUserOverlay: false,
+    };
+    if (this.overlayRuntime?.start) {
+      this.overlayHandle = await this.overlayRuntime.start({ targetRect: window.bounds ? {
+        windowId: window.windowId,
+        title: window.title,
+        x: window.bounds.x,
+        y: window.bounds.y,
+        width: window.bounds.width,
+        height: window.bounds.height,
+      } : undefined });
+    }
+    this.recordAudit("computer.access.granted", {
+      controllerId: this.activeController.controllerId,
+      title: window.title,
+      tier: this.activeController.tier,
+      approvalStatus: approval.status,
+    });
+    return {
+      status: "granted",
+      approval,
+      controller: this.activeController,
+      overlay: this.overlayHandle,
+      startsDesktopControl: true,
+      includeUserOverlay: false,
+    };
   }
 
   validateAction(action) {

@@ -167,14 +167,58 @@ export const COMPUTER_USE_MCP_TOOLS = [
           type: "number",
           description: "Controller lease TTL in milliseconds. Expired leases are revoked before capture or action.",
         },
+        approvalRequired: {
+          type: "boolean",
+          description: "When true, create a pending approval instead of starting desktop control.",
+        },
+        approvalTtlMs: {
+          type: "number",
+          description: "Pending approval TTL in milliseconds before it fails closed.",
+        },
       },
       additionalProperties: false,
     },
     outputSchema: outputSchema({
       status: { type: "string" },
-      controller: ANY_OBJECT,
+      approval: { anyOf: [ANY_OBJECT, { type: "null" }] },
+      controller: { anyOf: [ANY_OBJECT, { type: "null" }] },
       overlay: { anyOf: [ANY_OBJECT, { type: "null" }] },
+      startsDesktopControl: { type: "boolean" },
     }, ["status", "controller"]),
+  },
+  {
+    name: "computer.approve",
+    title: "Approve Computer Use",
+    description: "Approve or deny a pending Gateway-managed computer control request.",
+    annotations: { phase: "1.12", destructiveHint: true },
+    inputSchema: {
+      type: "object",
+      required: ["approvalToken"],
+      properties: {
+        approvalToken: { type: "string" },
+        approved: {
+          type: "boolean",
+          description: "When true, grant the pending controller request and start the user-only overlay.",
+        },
+        denied: {
+          type: "boolean",
+          description: "When true, deny and clear the pending controller request.",
+        },
+        reason: { type: "string" },
+        leaseTtlMs: {
+          type: "number",
+          description: "Optional controller lease TTL to apply after approval.",
+        },
+      },
+      additionalProperties: false,
+    },
+    outputSchema: outputSchema({
+      status: { type: "string" },
+      approval: ANY_OBJECT,
+      controller: { anyOf: [ANY_OBJECT, { type: "null" }] },
+      overlay: { anyOf: [ANY_OBJECT, { type: "null" }] },
+      startsDesktopControl: { type: "boolean" },
+    }, ["status", "approval", "controller", "startsDesktopControl"]),
   },
   {
     name: "computer.capture",

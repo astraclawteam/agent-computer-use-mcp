@@ -24,6 +24,7 @@ npm run phase:1.8
 npm run phase:1.9
 npm run phase:1.10
 npm run phase:1.11
+npm run phase:1.12
 npm run phase:2.0
 npm run phase:2.1
 npm run phase:2.2
@@ -74,6 +75,7 @@ Required evidence:
 - `npm run phase:1.9` verifies permission tiers, unsafe-window deny policy, and secure-field fail-closed behavior.
 - `npm run phase:1.10` verifies controller lease timeout cleanup stops overlay and blocks stale actions.
 - `npm run phase:1.11` verifies commercial policy-deny proof for password, payment, credential, and private surfaces.
+- `npm run phase:1.12` verifies computer control approval, deny, cancel, revoke, and timeout state transitions.
 - `npm run phase:2.3` records trace/log/artifact roots and verifies diagnostics redaction.
 - `npm run phase:2.4` verifies redacted JSONL trace output and blocks screenshot/overlay payloads.
 - `npm run phase:2.5` verifies retention cleanup only deletes expired trace/log/artifact files.
@@ -162,6 +164,7 @@ Required evidence:
 - Signing verification output from `npm run phase:0.12`.
 - Offline install proof from `npm run phase:7.4`.
 - Policy-deny proof for password/payment/private surfaces from `npm run phase:1.11`.
+- Control approval state proof from `npm run phase:1.12`.
 - Concurrency and disconnect test reports.
 - Human review of public MCP contract changes.
 
