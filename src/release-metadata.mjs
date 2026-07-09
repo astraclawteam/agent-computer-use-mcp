@@ -79,6 +79,11 @@ export function buildReleaseMetadata(options = {}) {
         command: "npm run phase:2.12",
         required: true,
       },
+      {
+        name: "runtime-cleanup-doctor-repair",
+        command: "npm run phase:2.13",
+        required: true,
+      },
     ],
     includeUserOverlay: false,
     startsDesktopControl: false,

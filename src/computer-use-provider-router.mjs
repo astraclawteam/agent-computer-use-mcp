@@ -11,6 +11,7 @@ import { buildDiagnosticsPolicy } from "./diagnostics-policy.mjs";
 import { captureWindowPngByTitle } from "./real-window-capture.mjs";
 import { createComputerUsePolicy } from "./computer-use-policy.mjs";
 import { createRepairProgressPlan } from "./repair-progress-plan.mjs";
+import { cleanupRuntimeState } from "./runtime-cleanup.mjs";
 
 export class ComputerUseProviderRouter {
   constructor(options = {}) {
@@ -19,6 +20,8 @@ export class ComputerUseProviderRouter {
     this.overlayRuntime = options.overlayRuntime ?? null;
     this.processSupervisor = options.processSupervisor ?? null;
     this.daemonSession = options.daemonSession ?? null;
+    this.runtimeCleanup = options.runtimeCleanup ?? null;
+    this.runtimeCleanupOptions = options.runtimeCleanupOptions ?? {};
     this.overlayHandle = null;
     this.ocrStarted = false;
     this.artifactRoot = options.artifactRoot;
@@ -72,6 +75,7 @@ export class ComputerUseProviderRouter {
         "2.10": "daemon-session",
         "2.11": "daemon-session-doctor-repair",
         "2.12": "runtime-cleanup",
+        "2.13": "runtime-cleanup-doctor-repair",
         "3.0": "ocr-model-pack-manager",
         "3.1": "ocr-region-diff-scheduler",
         "3.2": "template-matching-provider",
@@ -136,9 +140,11 @@ export class ComputerUseProviderRouter {
     const daemonSession = this.daemonSession?.health
       ? this.daemonSession.health()
       : null;
-    const status = deriveDoctorStatus([runtime.status, installCache?.status, runtimeSupervisor?.status, daemonSession?.status]);
+    const runtimeCleanup = await this.inspectRuntimeCleanup();
+    const status = deriveDoctorStatus([runtime.status, installCache?.status, runtimeSupervisor?.status, daemonSession?.status, runtimeCleanup?.status]);
     const repairPlan = mergeRepairPlans(
       installCache?.repairPlan,
+      runtimeCleanup?.repairPlan?.actions,
       runtimeSupervisor?.recoverActions,
       daemonSession?.recoverActions,
     );
@@ -150,6 +156,7 @@ export class ComputerUseProviderRouter {
       runtime,
       runtimeSupervisor,
       daemonSession,
+      runtimeCleanup,
       installCache,
       diagnostics,
       repairPlan,
@@ -262,11 +269,18 @@ export class ComputerUseProviderRouter {
     }
     const executableProcessActions = actions
       .filter((action) => action.kind === "process-restart");
-    const shouldExecuteProcessRestart = approved && dryRun === false && executableProcessActions.length > 0;
-    const executionResults = shouldExecuteProcessRestart
-      ? executableProcessActions.map((action) => this.recoverProcessAction(action))
+    const executableRuntimeCleanupActions = actions
+      .filter((action) => action.kind === "runtime-cleanup");
+    const shouldExecuteRepairActions = approved
+      && dryRun === false
+      && (executableProcessActions.length > 0 || executableRuntimeCleanupActions.length > 0);
+    const executionResults = shouldExecuteRepairActions
+      ? await Promise.all([
+        ...executableProcessActions.map((action) => this.recoverProcessAction(action)),
+        ...executableRuntimeCleanupActions.map((action) => this.executeRuntimeCleanupAction(action)),
+      ])
       : [];
-    const status = shouldExecuteProcessRestart
+    const status = shouldExecuteRepairActions
       ? "repaired"
       : !approved && actions.length > 0
       ? "approval_required"
@@ -282,11 +296,11 @@ export class ComputerUseProviderRouter {
       approval,
       repairPlan,
       progressPlan,
-      executesImmediately: shouldExecuteProcessRestart,
+      executesImmediately: shouldExecuteRepairActions,
       execution: {
-        status: shouldExecuteProcessRestart ? "completed" : "not_started",
-        reason: shouldExecuteProcessRestart
-          ? "approved-process-restart"
+        status: shouldExecuteRepairActions ? "completed" : "not_started",
+        reason: shouldExecuteRepairActions
+          ? "approved-repair-actions"
           : approved
             ? "execution-not-implemented"
             : "approval-required",
@@ -295,6 +309,26 @@ export class ComputerUseProviderRouter {
       includeUserOverlay: false,
       startsDesktopControl: false,
     };
+  }
+
+  async inspectRuntimeCleanup() {
+    const report = this.runtimeCleanup?.inspect
+      ? await this.runtimeCleanup.inspect({ dryRun: true })
+      : await cleanupRuntimeState({
+        ...this.runtimeCleanupOptions,
+        dryRun: true,
+      });
+    return normalizeRuntimeCleanupDoctor(report);
+  }
+
+  async executeRuntimeCleanupAction() {
+    if (this.runtimeCleanup?.cleanup) {
+      return await this.runtimeCleanup.cleanup({ dryRun: false });
+    }
+    return await cleanupRuntimeState({
+      ...this.runtimeCleanupOptions,
+      dryRun: false,
+    });
   }
 
   recoverProcessAction(action) {
@@ -1007,6 +1041,34 @@ function mergeRepairPlans(installRepairPlan, ...recoverActionGroups) {
     ...installPlan,
     actions,
     requiresApproval: actions.length > 0,
+  };
+}
+
+function normalizeRuntimeCleanupDoctor(report) {
+  const staleLockCount = report.staleLocks?.length ?? 0;
+  const expiredFileCount = report.expired?.length ?? 0;
+  const needsCleanup = staleLockCount + expiredFileCount > 0;
+  return {
+    ...report,
+    status: needsCleanup ? "degraded" : "healthy",
+    cleanupStatus: report.status,
+    repairPlan: {
+      mode: "plan-only",
+      requiresApproval: needsCleanup,
+      actions: needsCleanup ? [
+        {
+          id: "cleanup-runtime-state",
+          kind: "runtime-cleanup",
+          reason: "stale-daemon-locks-or-expired-runtime-files",
+          staleLockCount,
+          expiredFileCount,
+          source: "runtime-cleanup",
+          executesImmediately: false,
+        },
+      ] : [],
+    },
+    includeUserOverlay: false,
+    startsDesktopControl: false,
   };
 }
 

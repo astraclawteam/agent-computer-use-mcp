@@ -76,6 +76,7 @@
     "phase:2.10": "node src/phase-2-10-daemon-session.mjs",
     "phase:2.11": "node src/phase-2-11-daemon-session-doctor-repair.mjs",
     "phase:2.12": "node src/phase-2-12-runtime-cleanup.mjs",
+    "phase:2.13": "node src/phase-2-13-runtime-cleanup-repair.mjs",
     "phase:3.0": "node src/phase-3-0-ocr-model-pack.mjs",
     "phase:3.1": "node src/phase-3-1-ocr-region-scheduler.mjs",
     "phase:3.2": "node src/phase-3-2-template-matching-provider.mjs",
