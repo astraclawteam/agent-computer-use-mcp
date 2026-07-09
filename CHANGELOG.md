@@ -9,3 +9,4 @@ All notable changes to `agent-computer-use-mcp` are tracked here.
 - Gateway-managed desktop control lifecycle with `cua-driver mcp`, local overlay, and cursor affordance.
 - Productization gates for package foundation, permission policy, runtime recovery, perception hardening, overlay safety, MCP compatibility, app smoke coverage, and install experience.
 - Release readiness gate for alpha command manifests, required evidence, and release-blocking invariants.
+- Release artifact hash and Windows helper signing verification gate.

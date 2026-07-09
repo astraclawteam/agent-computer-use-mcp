@@ -24,6 +24,22 @@ test("checkCuaDriverHealth reports not-found without running a missing driver", 
   assert.equal(result.driverPath, undefined);
 });
 
+test("checkCuaDriverHealth treats PATH lookup failures as unavailable instead of throwing", async () => {
+  const result = await checkCuaDriverHealth({
+    env: {},
+    lookupOnPath: async () => {
+      throw new Error("cua-driver lookup timed out after 5000ms");
+    },
+    runDriver: async () => {
+      throw new Error("should not run");
+    },
+  });
+
+  assert.equal(result.status, "unavailable");
+  assert.equal(result.reason, "lookup-error");
+  assert.match(result.detail, /lookup timed out/);
+});
+
 test("checkCuaDriverHealth reports healthy when the driver answers --version", async () => {
   const result = await checkCuaDriverHealth({
     env: {},

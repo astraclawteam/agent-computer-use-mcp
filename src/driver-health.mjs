@@ -24,7 +24,17 @@ export async function checkCuaDriverHealth(options = {}) {
   const checkedAt = (options.now ?? (() => new Date()))().toISOString();
   const lookupOnPath = options.lookupOnPath ?? defaultLookupOnPath;
   const runDriver = options.runDriver ?? defaultRunDriver;
-  const driverPath = resolveCuaDriverCandidate(env) ?? await lookupOnPath(DRIVER_BINARY, env);
+  let driverPath;
+  try {
+    driverPath = resolveCuaDriverCandidate(env) ?? await lookupOnPath(DRIVER_BINARY, env);
+  } catch (error) {
+    return {
+      status: "unavailable",
+      reason: "lookup-error",
+      checkedAt,
+      detail: truncateDetail(error instanceof Error ? error.message : String(error)),
+    };
+  }
 
   if (!driverPath) {
     return {

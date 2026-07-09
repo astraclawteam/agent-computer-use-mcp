@@ -4,6 +4,7 @@ export const ALPHA_RELEASE_COMMANDS = [
   "npm test",
   "npm run phase:0.10",
   "npm run phase:0.11",
+  "npm run phase:0.12",
   "npm run phase:1.6",
   "npm run phase:1.7",
   "npm run phase:1.8",
@@ -67,6 +68,7 @@ export const REQUIRED_RELEASE_INVARIANTS = [
 export const REQUIRED_RELEASE_EVIDENCE = [
   ["release-metadata-changelog", "npm run phase:0.10"],
   ["release-readiness-gate", "npm run phase:0.11"],
+  ["release-artifact-verification", "npm run phase:0.12"],
   ["package-foundation", "npm run package:foundation"],
   ["package-dry-run", "npm run package:dry-run"],
   ["offline-asset-manifest", "npm run assets:manifest"],
