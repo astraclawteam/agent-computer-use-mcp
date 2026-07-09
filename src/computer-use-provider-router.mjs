@@ -68,6 +68,7 @@ export class ComputerUseProviderRouter {
         "2.7": "process-supervisor-recovery",
         "2.8": "supervisor-doctor-repair",
         "2.9": "repair-deny-state",
+        "2.10": "daemon-session",
         "3.0": "ocr-model-pack-manager",
         "3.1": "ocr-region-diff-scheduler",
         "3.2": "template-matching-provider",

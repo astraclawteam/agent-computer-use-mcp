@@ -83,6 +83,7 @@ export function createProcessSupervisor(options = {}) {
         };
       }
 
+      child.handle?.kill?.();
       const restarted = startChild({
         name: child.name,
         spec: child.spec,
@@ -95,6 +96,24 @@ export function createProcessSupervisor(options = {}) {
         child: child.name,
         pid: restarted.pid,
         executesImmediately: true,
+        includeUserOverlay: false,
+      };
+    },
+
+    stopAll(options = {}) {
+      const stopped = [];
+      for (const child of children.values()) {
+        if (child.status !== "stopped") {
+          child.handle?.kill?.();
+          child.status = "stopped";
+        }
+        stopped.push(toStructuredChild(child));
+      }
+      return {
+        status: "stopped",
+        reason: options.reason ?? "session-close",
+        stoppedChildren: stopped.length,
+        children: stopped,
         includeUserOverlay: false,
       };
     },

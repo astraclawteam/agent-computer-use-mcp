@@ -64,6 +64,11 @@ export function buildReleaseMetadata(options = {}) {
         command: "npm run phase:5.5",
         required: true,
       },
+      {
+        name: "daemon-session",
+        command: "npm run phase:2.10",
+        required: true,
+      },
     ],
     includeUserOverlay: false,
     startsDesktopControl: false,
