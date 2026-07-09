@@ -48,6 +48,7 @@
     "test": "node --test",
     "prepublishOnly": "node scripts/block-source-publish.mjs",
     "release:npm:build": "node scripts/build-protected-npm-package.mjs",
+    "release:npm:smoke": "node scripts/protected-npm-smoke.mjs",
     "mcp": "node src/computer-use-mcp-server.mjs",
     "smoke": "node src/smoke.mjs",
     "phase:0.6": "node src/phase-0-6.mjs",

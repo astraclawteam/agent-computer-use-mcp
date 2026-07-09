@@ -75,8 +75,7 @@ export async function buildProtectedNpmPackage(options = {}) {
     const integrity = await createIntegrityManifest(stageRoot, packageJson, runtimeFiles);
     await writeJson(join(stageRoot, "release-integrity.json"), integrity);
 
-    const launcherSource = "#!/usr/bin/env node\nawait import('./computer-use-mcp-server.mjs');\n";
-    const launcher = obfuscateRuntime(launcherSource);
+    const launcher = await buildProtectedRuntime("scripts/npm-release-launcher-template.mjs");
     await writeFile(join(stageRoot, "dist/launcher.mjs"), launcher, "utf8");
     await chmod(join(stageRoot, "dist/launcher.mjs"), 0o755);
 
