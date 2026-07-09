@@ -67,6 +67,7 @@ Example MCP client config:
 - `npm run phase:2.8`: verify supervisor crash recovery appears in `computer.doctor` and executes through approval-gated `computer.repair`.
 - `npm run phase:2.9`: verify repair approval denial clears pending state and never executes repair actions.
 - `npm run phase:2.10`: verify daemon session lock ownership, duplicate startup blocking, child supervision, recovery, and clean shutdown.
+- `npm run phase:2.11`: verify daemon session health and approved recovery surface through `computer.doctor` and `computer.repair`.
 - `npm run phase:3.0`: verify the OCR model pack manifest and file-level doctor contract.
 - `npm run phase:3.1`: verify dirty-region OCR scheduling, cache keys, and full-window OCR gating for action loops.
 - `npm run phase:3.2`: verify local template matching for static/repeated controls and pixel-limited observation output.

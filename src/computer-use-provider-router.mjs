@@ -18,6 +18,7 @@ export class ComputerUseProviderRouter {
     this.driver = options.driver ?? null;
     this.overlayRuntime = options.overlayRuntime ?? null;
     this.processSupervisor = options.processSupervisor ?? null;
+    this.daemonSession = options.daemonSession ?? null;
     this.overlayHandle = null;
     this.ocrStarted = false;
     this.artifactRoot = options.artifactRoot;
@@ -69,6 +70,7 @@ export class ComputerUseProviderRouter {
         "2.8": "supervisor-doctor-repair",
         "2.9": "repair-deny-state",
         "2.10": "daemon-session",
+        "2.11": "daemon-session-doctor-repair",
         "3.0": "ocr-model-pack-manager",
         "3.1": "ocr-region-diff-scheduler",
         "3.2": "template-matching-provider",
@@ -130,10 +132,14 @@ export class ComputerUseProviderRouter {
     const runtimeSupervisor = this.processSupervisor?.health
       ? this.processSupervisor.health()
       : null;
-    const status = deriveDoctorStatus([runtime.status, installCache?.status, runtimeSupervisor?.status]);
+    const daemonSession = this.daemonSession?.health
+      ? this.daemonSession.health()
+      : null;
+    const status = deriveDoctorStatus([runtime.status, installCache?.status, runtimeSupervisor?.status, daemonSession?.status]);
     const repairPlan = mergeRepairPlans(
       installCache?.repairPlan,
       runtimeSupervisor?.recoverActions,
+      daemonSession?.recoverActions,
     );
     const diagnostics = buildDiagnosticsPolicy();
 
@@ -142,6 +148,7 @@ export class ComputerUseProviderRouter {
       module: "agent-computer-use-mcp",
       runtime,
       runtimeSupervisor,
+      daemonSession,
       installCache,
       diagnostics,
       repairPlan,
@@ -256,7 +263,7 @@ export class ComputerUseProviderRouter {
       .filter((action) => action.kind === "process-restart");
     const shouldExecuteProcessRestart = approved && dryRun === false && executableProcessActions.length > 0;
     const executionResults = shouldExecuteProcessRestart
-      ? executableProcessActions.map((action) => this.processSupervisor.recover(action.id, { approved: true }))
+      ? executableProcessActions.map((action) => this.recoverProcessAction(action))
       : [];
     const status = shouldExecuteProcessRestart
       ? "repaired"
@@ -286,6 +293,25 @@ export class ComputerUseProviderRouter {
       },
       includeUserOverlay: false,
       startsDesktopControl: false,
+    };
+  }
+
+  recoverProcessAction(action) {
+    if (action.source === "daemon-session" && this.daemonSession?.recover) {
+      return this.daemonSession.recover(action.id, { approved: true });
+    }
+    if (this.processSupervisor?.recover) {
+      const result = this.processSupervisor.recover(action.id, { approved: true });
+      if (result?.status !== "not_found") return result;
+    }
+    if (this.daemonSession?.recover) {
+      return this.daemonSession.recover(action.id, { approved: true });
+    }
+    return {
+      status: "not_found",
+      actionId: action.id,
+      executesImmediately: false,
+      includeUserOverlay: false,
     };
   }
 
@@ -960,16 +986,18 @@ function deriveDoctorStatus(statuses) {
   return "healthy";
 }
 
-function mergeRepairPlans(installRepairPlan, recoverActions = []) {
+function mergeRepairPlans(installRepairPlan, ...recoverActionGroups) {
   const installPlan = installRepairPlan ?? {
     mode: "plan-only",
     requiresApproval: false,
     actions: [],
   };
-  const processActions = (recoverActions ?? []).map((action) => ({
-    ...action,
-    executesImmediately: false,
-  }));
+  const processActions = recoverActionGroups.flatMap((recoverActions = []) => (
+    (recoverActions ?? []).map((action) => ({
+      ...action,
+      executesImmediately: false,
+    }))
+  ));
   const actions = [
     ...installPlan.actions,
     ...processActions,
