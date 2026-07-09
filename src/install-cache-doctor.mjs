@@ -1,7 +1,7 @@
 import { access } from "node:fs/promises";
-import { join } from "node:path";
 import { buildOfflineAssetManifest, getInstallLayout } from "./package-foundation.mjs";
 import { checkCuaDriverHealth } from "./driver-health.mjs";
+import { checkOcrModelPackHealth } from "./ocr-model-pack.mjs";
 
 export async function runInstallCacheDoctor(options = {}) {
   const platform = options.platform ?? process.platform;
@@ -13,6 +13,7 @@ export async function runInstallCacheDoctor(options = {}) {
     driverHealth: defaultDriverHealth,
     webView2Health: defaultWebView2Health,
     ocrRuntimeHealth: defaultOcrRuntimeHealth,
+    ocrModelPackHealth: defaultOcrModelPackHealth,
     permissionsHealth: defaultPermissionsHealth,
     signatureHealth: defaultSignatureHealth,
     ...options.probes,
@@ -22,8 +23,7 @@ export async function runInstallCacheDoctor(options = {}) {
   const overlayPath = layout.overlayRoot;
   const overlayExists = await probes.pathExists(overlayPath);
   const ocrRuntimeHealth = await probes.ocrRuntimeHealth({ env, layout });
-  const modelRoot = joinPath(layout.modelRoot, "pp-ocrv6-small");
-  const modelExists = await probes.pathExists(modelRoot);
+  const ocrModelPackHealth = await probes.ocrModelPackHealth({ env, layout, probes });
   const webView2 = await probes.webView2Health({ env, layout, platform });
   const permissions = await probes.permissionsHealth({ env, layout });
   const overlaySignature = await probes.signatureHealth({ id: "gateway-overlay-windows", path: overlayPath });
@@ -58,8 +58,9 @@ export async function runInstallCacheDoctor(options = {}) {
     {
       id: "ocr-model-pp-ocrv6-small",
       kind: "model-pack",
-      path: modelRoot,
-      status: modelExists ? "healthy" : "missing",
+      path: ocrModelPackHealth.root,
+      status: ocrModelPackHealth.status === "healthy" ? "healthy" : "missing",
+      health: ocrModelPackHealth,
       repair: "cache-model-pack",
     },
     {
@@ -154,7 +155,13 @@ function repairActionForAsset(asset) {
       id: "cache-ocr-model-pp-ocrv6-small",
       kind: "model-pack",
       target: asset.path,
-      reason: "missing",
+      reason: asset.health?.missingFiles?.length
+        ? `missing:${asset.health.missingFiles.map((file) => file.role).join(",")}`
+        : "missing",
+      missingFiles: asset.health?.missingFiles?.map((file) => ({
+        role: file.role,
+        path: file.path,
+      })) ?? [],
       executesImmediately: false,
     };
   }
@@ -201,6 +208,13 @@ async function defaultOcrRuntimeHealth() {
   }
 }
 
+async function defaultOcrModelPackHealth({ layout, probes }) {
+  return checkOcrModelPackHealth({
+    modelRoot: layout.modelRoot,
+    probes,
+  });
+}
+
 async function defaultPermissionsHealth() {
   return { status: "healthy", reason: "not-required-for-doctor" };
 }
@@ -216,9 +230,4 @@ async function pathExists(targetPath) {
   } catch {
     return false;
   }
-}
-
-function joinPath(root, child) {
-  if (root.includes("\\")) return `${root}\\${child}`;
-  return join(root, child).replace(/\\/g, "/");
 }

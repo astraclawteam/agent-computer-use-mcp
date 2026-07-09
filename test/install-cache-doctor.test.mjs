@@ -38,7 +38,9 @@ test("install cache doctor reports degraded state and repair actions for missing
   const missing = new Set([
     "C:\\Users\\demo\\AppData\\Local\\Programs\\AgentComputerUse\\cua-driver",
     "C:\\Users\\demo\\AppData\\Local\\Programs\\AgentComputerUse\\overlay",
-    "C:\\Users\\demo\\AppData\\Local\\AgentComputerUse\\models\\pp-ocrv6-small",
+    "C:\\Users\\demo\\AppData\\Local\\AgentComputerUse\\models\\pp-ocrv6-small\\det.onnx",
+    "C:\\Users\\demo\\AppData\\Local\\AgentComputerUse\\models\\pp-ocrv6-small\\rec.onnx",
+    "C:\\Users\\demo\\AppData\\Local\\AgentComputerUse\\models\\pp-ocrv6-small\\cls.onnx",
   ]);
   const doctor = await runInstallCacheDoctor({
     platform: "win32",
@@ -56,6 +58,10 @@ test("install cache doctor reports degraded state and repair actions for missing
   assert.equal(doctor.status, "degraded");
   assert.equal(doctor.assets.find((asset) => asset.id === "cua-driver-windows-x64").status, "missing");
   assert.equal(doctor.assets.find((asset) => asset.id === "ocr-model-pp-ocrv6-small").status, "missing");
+  assert.deepEqual(
+    doctor.assets.find((asset) => asset.id === "ocr-model-pp-ocrv6-small").health.missingFiles.map((file) => file.role),
+    ["det", "rec", "cls"],
+  );
   assert.equal(doctor.permissions.status, "degraded");
   assert.deepEqual(doctor.repairPlan.actions.map((action) => action.id), [
     "install-cua-driver-windows-x64",
