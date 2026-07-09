@@ -74,6 +74,7 @@ export class ComputerUseProviderRouter {
         "5.1": "standard-mcp-multi-client",
         "5.2": "disconnect-cleanup",
         "5.3": "strict-tool-output-schemas",
+        "5.4": "mcp-inspector-smoke",
         "6.0": "app-smoke-matrix-contract",
       },
       providers: {
