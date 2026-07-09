@@ -68,6 +68,7 @@
     "phase:2.8": "node src/phase-2-8-supervisor-repair.mjs",
     "phase:2.9": "node src/phase-2-9-repair-deny.mjs",
     "phase:3.0": "node src/phase-3-0-ocr-model-pack.mjs",
+    "phase:3.1": "node src/phase-3-1-ocr-region-scheduler.mjs",
     "phase:5.0": "node src/phase-5-0-concurrent-controller.mjs",
     "phase:5.1": "node src/phase-5-1-multi-client.mjs",
     "phase:5.2": "node src/phase-5-2-disconnect-cleanup.mjs",

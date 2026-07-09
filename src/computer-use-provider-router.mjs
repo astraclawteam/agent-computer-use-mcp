@@ -62,6 +62,7 @@ export class ComputerUseProviderRouter {
         "2.8": "supervisor-doctor-repair",
         "2.9": "repair-deny-state",
         "3.0": "ocr-model-pack-manager",
+        "3.1": "ocr-region-diff-scheduler",
         "5.0": "concurrent-controller-guard",
         "5.1": "standard-mcp-multi-client",
         "5.2": "disconnect-cleanup",
