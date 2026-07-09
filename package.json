@@ -57,6 +57,7 @@
     "phase:1.8": "node src/phase-1-8-standard-mcp-server.mjs",
     "phase:2.0": "node src/phase-2-0-doctor.mjs",
     "phase:2.1": "node src/phase-2-1-repair.mjs",
+    "phase:2.2": "node src/phase-2-2-repair-approval.mjs",
     "package:dry-run": "node scripts/package-dry-run.mjs",
     "package:foundation": "node scripts/package-foundation-report.mjs",
     "assets:manifest": "node scripts/offline-asset-manifest.mjs",

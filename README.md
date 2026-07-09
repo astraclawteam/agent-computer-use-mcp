@@ -51,6 +51,7 @@ Example MCP client config:
 - `npm run phase:1.8`: verify the server path uses the official MCP SDK transport.
 - `npm run phase:2.0`: verify `computer.doctor` over the official MCP SDK without starting desktop control.
 - `npm run phase:2.1`: verify `computer.repair` remains approval-gated and plan-only by default.
+- `npm run phase:2.2`: verify repair approval tokens expire and revoke clears pending approval state.
 - `npm run phase:1.4`: run the real `cua-driver mcp` desktop action lifecycle smoke.
 - `npm run package:foundation`: print install layout, version policy, packaging policy, and offline asset manifest.
 - `npm run package:dry-run`: run `npm pack --dry-run --json` and fail if generated artifacts would enter the package.
