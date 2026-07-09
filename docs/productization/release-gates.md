@@ -22,6 +22,7 @@ npm run phase:2.0
 npm run phase:2.1
 npm run phase:2.2
 npm run phase:2.3
+npm run phase:2.4
 npm run phase:1.4
 npm run package:foundation
 npm run package:dry-run
@@ -36,6 +37,7 @@ Required evidence:
 - `npm run assets:manifest` records offline/cacheable asset packs.
 - `npm run doctor:install-cache` records readiness and repair actions without starting desktop control.
 - `npm run phase:2.3` records trace/log/artifact roots and verifies diagnostics redaction.
+- `npm run phase:2.4` verifies redacted JSONL trace output and blocks screenshot/overlay payloads.
 - No generated build output or model packs in Git.
 - `computer.health({fast:true})` is ready or structured degraded.
 - User overlay is excluded from observations.
