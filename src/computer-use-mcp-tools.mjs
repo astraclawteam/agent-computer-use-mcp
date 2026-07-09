@@ -331,10 +331,11 @@ export const COMPUTER_USE_MCP_TOOLS = [
     outputSchema: outputSchema({
       status: { type: "string" },
       activeController: { anyOf: [ANY_OBJECT, { type: "null" }] },
+      pendingAccessApproval: { anyOf: [ANY_OBJECT, { type: "null" }] },
       lastCapture: { anyOf: [ANY_OBJECT, { type: "null" }] },
       pendingRepairApproval: { anyOf: [ANY_OBJECT, { type: "null" }] },
       auditEvents: ANY_ARRAY,
-    }, ["status", "activeController", "lastCapture", "pendingRepairApproval", "auditEvents"]),
+    }, ["status", "activeController", "pendingAccessApproval", "lastCapture", "pendingRepairApproval", "auditEvents"]),
   },
   {
     name: "computer.capture_window",

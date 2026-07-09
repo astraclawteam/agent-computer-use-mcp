@@ -87,6 +87,7 @@
     "phase:5.2": "node src/phase-5-2-disconnect-cleanup.mjs",
     "phase:5.3": "node src/phase-5-3-tool-schemas.mjs",
     "phase:5.4": "node src/phase-5-4-mcp-inspector-smoke.mjs",
+    "phase:5.5": "node src/phase-5-5-approval-compatibility.mjs",
     "phase:6.0": "node src/phase-6-0-app-smoke-matrix.mjs",
     "phase:6.1": "node src/phase-6-1-app-smoke-coverage.mjs",
     "phase:7.0": "node src/phase-7-0-first-run-readiness.mjs",

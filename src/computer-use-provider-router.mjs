@@ -82,6 +82,7 @@ export class ComputerUseProviderRouter {
         "5.2": "disconnect-cleanup",
         "5.3": "strict-tool-output-schemas",
         "5.4": "mcp-inspector-smoke",
+        "5.5": "approval-compatibility",
         "6.0": "app-smoke-matrix-contract",
         "6.1": "app-smoke-coverage-gate",
         "7.0": "first-run-readiness",
@@ -668,6 +669,7 @@ export class ComputerUseProviderRouter {
 
   async close(args = {}) {
     const previous = this.activeController;
+    const previousAccessApproval = this.getPendingAccessApproval();
     this.activeController = null;
     this.lastCapture = null;
     this.pendingRepairApproval = null;
@@ -677,6 +679,12 @@ export class ComputerUseProviderRouter {
     if (previous) {
       this.recordAudit("computer.controller.closed", {
         controllerId: previous.controllerId,
+        reason: args.reason ?? "router-close",
+      });
+    }
+    if (previousAccessApproval) {
+      this.recordAudit("computer.access.approval_closed", {
+        token: previousAccessApproval.token,
         reason: args.reason ?? "router-close",
       });
     }

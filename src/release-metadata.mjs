@@ -59,6 +59,11 @@ export function buildReleaseMetadata(options = {}) {
         command: "npm run phase:1.12",
         required: true,
       },
+      {
+        name: "mcp-approval-compatibility",
+        command: "npm run phase:5.5",
+        required: true,
+      },
     ],
     includeUserOverlay: false,
     startsDesktopControl: false,
