@@ -1,0 +1,46 @@
+name: Productization phase
+description: Track a commercial-readiness phase or release gate.
+title: "[Productization]: "
+labels: ["productization"]
+body:
+  - type: textarea
+    id: goal
+    attributes:
+      label: Goal
+      description: What commercial-readiness capability does this issue deliver?
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Package foundation
+        - Permission and policy
+        - Stable runtime
+        - Perception hardening
+        - Commercial overlay
+        - MCP compatibility
+        - Real software matrix
+        - Install experience
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      description: List exact commands, scripts, or evidence required to close this.
+      placeholder: |
+        - npm test passes
+        - phase script returns status=passed
+        - docs/productization/app-smoke-matrix.md updated
+    validations:
+      required: true
+  - type: textarea
+    id: risks
+    attributes:
+      label: Risks and constraints
+      description: Note platform, dependency, model size, offline, security, or UX risks.
+    validations:
+      required: true
+

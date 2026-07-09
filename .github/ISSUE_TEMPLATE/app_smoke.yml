@@ -1,0 +1,41 @@
+name: App smoke
+description: Add or track a real local application smoke test.
+title: "[App Smoke]: "
+labels: ["app-smoke"]
+body:
+  - type: input
+    id: app
+    attributes:
+      label: Application
+      placeholder: "Notepad, Chrome, VS Code, Qt sample..."
+    validations:
+      required: true
+  - type: textarea
+    id: flow
+    attributes:
+      label: Minimum flow
+      description: Describe the smallest safe flow this smoke should validate.
+    validations:
+      required: true
+  - type: dropdown
+    id: source
+    attributes:
+      label: Expected capability source
+      options:
+        - uia-som
+        - ocr
+        - template
+        - cv
+        - browser-semantic
+        - manual-only
+        - insufficient
+    validations:
+      required: true
+  - type: textarea
+    id: safety
+    attributes:
+      label: Safety notes
+      description: Include private data, password, payment, or destructive-action risks.
+    validations:
+      required: true
+

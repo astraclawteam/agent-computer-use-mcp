@@ -71,3 +71,13 @@ The overlay is a user-only affordance. It must be visible while Gateway-managed 
 
 The MCP module does not disable or restrict native computer-use capabilities provided by third-party agents. Gateway-managed actions and agent-native actions should be reported separately by host products.
 
+## Productization
+
+Commercial-readiness planning lives in:
+
+- `docs/productization/roadmap.md`
+- `docs/productization/release-gates.md`
+- `docs/productization/app-smoke-matrix.md`
+
+New productization work should use the GitHub issue templates for productization phases and app smokes.
+
