@@ -30,6 +30,8 @@ Deliverables:
 Acceptance:
 
 - `npm pack --dry-run` contains only intended files.
+- `npm run package:foundation` emits install layout, version policy, signing placeholders, package file policy, and offline asset manifest.
+- `npm run assets:manifest` emits a standalone offline asset manifest.
 - `npm run phase:1.6` emits install paths using `AGENT_COMPUTER_USE_*`.
 - A clean Windows VM can install, run `computer.health({fast:true})`, and produce a clear degraded state when optional assets are missing.
 
@@ -185,4 +187,3 @@ Acceptance:
 ## Release Gates
 
 See `docs/productization/release-gates.md`.
-

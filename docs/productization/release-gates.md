@@ -19,11 +19,16 @@ npm run phase:1.6
 npm run phase:1.7
 npm run phase:1.8
 npm run phase:1.4
+npm run package:foundation
+npm run package:dry-run
+npm run assets:manifest
 ```
 
 Required evidence:
 
-- `npm pack --dry-run` reviewed.
+- `npm run package:dry-run` passes with no generated artifacts.
+- `npm run package:foundation` records install layout, version policy, and package file policy.
+- `npm run assets:manifest` records offline/cacheable asset packs.
 - No generated build output or model packs in Git.
 - `computer.health({fast:true})` is ready or structured degraded.
 - User overlay is excluded from observations.
@@ -74,4 +79,3 @@ Any of these block release:
 - Full-window OCR becomes the default action loop.
 - `main` receives non-admin direct pushes after branch protection is enabled.
 - CI required checks are bypassed for non-admin merges.
-
