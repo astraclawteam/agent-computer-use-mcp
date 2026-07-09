@@ -63,6 +63,7 @@ Example MCP client config:
 - `npm run phase:2.9`: verify repair approval denial clears pending state and never executes repair actions.
 - `npm run phase:3.0`: verify the OCR model pack manifest and file-level doctor contract.
 - `npm run phase:3.1`: verify dirty-region OCR scheduling, cache keys, and full-window OCR gating for action loops.
+- `npm run phase:3.2`: verify local template matching for static/repeated controls and pixel-limited observation output.
 - `npm run phase:5.0`: verify concurrent `request_access` calls cannot create multiple active controllers.
 - `npm run phase:5.1`: verify two standard MCP SDK clients can connect and call read-only tools concurrently.
 - `npm run phase:5.2`: verify disconnect cleanup revokes active control state and stops overlay.
