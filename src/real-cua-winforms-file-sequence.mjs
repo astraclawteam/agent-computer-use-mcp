@@ -3,6 +3,7 @@ import { mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, join, resolve } from "node:path";
 import { CuaDriverMcpClient } from "./cua-driver-mcp-driver.mjs";
+import { DEFAULT_AGENT_CURSOR_STYLE } from "./overlay-theme-cursor-tokens.mjs";
 
 const driverPath = process.env.AGENT_COMPUTER_USE_CUA_DRIVER
   ?? process.env.XIAOZHICLAW_CUA_DRIVER
@@ -55,11 +56,7 @@ try {
   await mcp.callTool("start_session", { session });
   sessionStarted = true;
   await mcp.callTool("set_agent_cursor_enabled", { enabled: true, cursor_id: "default" });
-  await mcp.callTool("set_agent_cursor_style", {
-    cursor_id: "default",
-    gradient_colors: ["#D97757", "#F7D2C3"],
-    bloom_color: "#D97757",
-  });
+  await mcp.callTool("set_agent_cursor_style", DEFAULT_AGENT_CURSOR_STYLE);
   let cursorState = null;
 
   const lab = spawn(labExe, [filePath], {

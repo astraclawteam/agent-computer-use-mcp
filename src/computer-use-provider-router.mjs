@@ -67,6 +67,7 @@ export class ComputerUseProviderRouter {
         "3.3": "som-proposal-provider",
         "3.4": "per-region-strategy-selector",
         "4.0": "overlay-placement-planner",
+        "4.1": "overlay-theme-cursor-tokens",
         "5.0": "concurrent-controller-guard",
         "5.1": "standard-mcp-multi-client",
         "5.2": "disconnect-cleanup",

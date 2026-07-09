@@ -3,13 +3,9 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { normalizeCuaObservation } from "./computer-observation.mjs";
 import { checkCuaDriverHealth, resolveCuaDriverCandidate } from "./driver-health.mjs";
+import { DEFAULT_AGENT_CURSOR_STYLE } from "./overlay-theme-cursor-tokens.mjs";
 
 const DEFAULT_DRIVER_PATH = `${process.env.LOCALAPPDATA}\\Programs\\Cua\\cua-driver\\bin\\cua-driver.exe`;
-const DEFAULT_CURSOR_STYLE = {
-  cursor_id: "default",
-  gradient_colors: ["#D97757", "#F7D2C3"],
-  bloom_color: "#D97757",
-};
 
 export class CuaDriverMcpDriver {
   constructor(options = {}) {
@@ -25,7 +21,7 @@ export class CuaDriverMcpDriver {
     await this.client.start();
     await this.client.callTool("start_session", { session: this.session });
     await this.client.callTool("set_agent_cursor_enabled", { enabled: true, cursor_id: "default" });
-    await this.client.callTool("set_agent_cursor_style", DEFAULT_CURSOR_STYLE);
+    await this.client.callTool("set_agent_cursor_style", DEFAULT_AGENT_CURSOR_STYLE);
     this.started = true;
   }
 
