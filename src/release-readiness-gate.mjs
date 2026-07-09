@@ -54,6 +54,7 @@ export const ALPHA_RELEASE_COMMANDS = [
   "npm run phase:7.4",
   "npm run phase:7.5",
   "npm run phase:7.6",
+  "npm run phase:7.7",
   "npm run phase:1.4",
   "npm run package:foundation",
   "npm run package:dry-run",
@@ -128,6 +129,7 @@ export const REQUIRED_RELEASE_EVIDENCE = [
   ["offline-install-proof", "npm run phase:7.4"],
   ["first-enable-safety", "npm run phase:7.5"],
   ["repair-entrypoint-catalog", "npm run phase:7.6"],
+  ["clean-install-degraded-proof", "npm run phase:7.7"],
 ];
 
 export function buildReleaseReadinessGate(options = {}) {
