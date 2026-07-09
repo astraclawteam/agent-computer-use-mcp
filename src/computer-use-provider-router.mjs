@@ -78,6 +78,7 @@ export class ComputerUseProviderRouter {
         "6.0": "app-smoke-matrix-contract",
         "6.1": "app-smoke-coverage-gate",
         "7.0": "first-run-readiness",
+        "7.1": "offline-bundle-readiness",
       },
       providers: {
         windowCapture: process.platform === "win32" ? "PrintWindow" : "unsupported",
