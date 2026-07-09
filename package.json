@@ -53,6 +53,7 @@
     "phase:0.7:bench": "node src/phase-0-7-benchmark.mjs",
     "phase:0.8": "node src/phase-0-8-real-window-diff-ocr.mjs",
     "phase:0.10": "node src/phase-0-10-release-metadata.mjs",
+    "phase:0.11": "node src/phase-0-11-release-readiness.mjs",
     "phase:1.4": "node src/phase-1-4-real-mcp-action.mjs",
     "phase:1.6": "node src/phase-1-6-installation.mjs",
     "phase:1.7": "node src/phase-1-7-standard-mcp-client.mjs",
@@ -93,6 +94,7 @@
     "package:foundation": "node scripts/package-foundation-report.mjs",
     "assets:manifest": "node scripts/offline-asset-manifest.mjs",
     "doctor:install-cache": "node scripts/install-cache-doctor.mjs --json",
+    "release:readiness": "node src/phase-0-11-release-readiness.mjs",
     "governance:protect-main": "node scripts/configure-branch-protection.mjs",
     "serve": "node src/server.mjs"
   },
