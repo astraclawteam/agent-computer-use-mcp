@@ -54,6 +54,7 @@ Example MCP client config:
 - `npm run phase:1.8`: verify the server path uses the official MCP SDK transport.
 - `npm run phase:1.9`: verify permission tiers, unsafe-window deny policy, and secure-field fail-closed behavior.
 - `npm run phase:1.10`: verify controller lease timeout cleanup stops overlay and blocks stale actions.
+- `npm run phase:1.11`: verify commercial policy-deny proof for password, payment, credential, and private surfaces.
 - `npm run phase:2.0`: verify `computer.doctor` over the official MCP SDK without starting desktop control.
 - `npm run phase:2.1`: verify `computer.repair` remains approval-gated and plan-only by default.
 - `npm run phase:2.2`: verify repair approval tokens expire and revoke clears pending approval state.

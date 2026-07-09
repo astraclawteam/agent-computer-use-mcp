@@ -49,6 +49,11 @@ export function buildReleaseMetadata(options = {}) {
         command: "npm run phase:7.4",
         required: true,
       },
+      {
+        name: "policy-deny-proof",
+        command: "npm run phase:1.11",
+        required: true,
+      },
     ],
     includeUserOverlay: false,
     startsDesktopControl: false,
