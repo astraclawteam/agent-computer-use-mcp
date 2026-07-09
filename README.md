@@ -55,6 +55,7 @@ Example MCP client config:
 - `npm run phase:2.3`: verify trace/log/artifact roots and diagnostics redaction policy.
 - `npm run phase:2.4`: verify the redacted JSONL trace writer rejects screenshot and overlay payloads.
 - `npm run phase:2.5`: verify diagnostics retention cleanup deletes only expired trace/log/artifact files.
+- `npm run phase:2.6`: verify daemon lifecycle lock acquisition, duplicate startup detection, stale lock recovery, and release cleanup.
 - `npm run phase:1.4`: run the real `cua-driver mcp` desktop action lifecycle smoke.
 - `npm run package:foundation`: print install layout, version policy, packaging policy, and offline asset manifest.
 - `npm run package:dry-run`: run `npm pack --dry-run --json` and fail if generated artifacts would enter the package.
