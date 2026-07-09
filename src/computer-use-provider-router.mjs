@@ -44,6 +44,7 @@ export class ComputerUseProviderRouter {
         "1.7": "standard-sdk-client-smoke",
         "1.8": "standard-sdk-server-transport",
         "2.0": "doctor-tool",
+        "2.1": "repair-approval-gate",
       },
       providers: {
         windowCapture: process.platform === "win32" ? "PrintWindow" : "unsupported",
@@ -99,6 +100,48 @@ export class ComputerUseProviderRouter {
         tier: this.activeController.tier,
         window: this.activeController.window,
       } : null,
+      includeUserOverlay: false,
+      startsDesktopControl: false,
+    };
+  }
+
+  async repair(options = {}) {
+    const doctor = await this.doctor({
+      fast: true,
+      includeInstallCache: true,
+    });
+    const actionIds = new Set(options.actionIds ?? []);
+    const actions = doctor.repairPlan.actions
+      .filter((action) => actionIds.size === 0 || actionIds.has(action.id))
+      .map((action) => ({
+        ...action,
+        executesImmediately: false,
+      }));
+    const repairPlan = {
+      ...doctor.repairPlan,
+      actions,
+      requiresApproval: actions.length > 0,
+    };
+    const approved = options.approved === true;
+    const dryRun = options.dryRun !== false;
+    const status = !approved && actions.length > 0
+      ? "approval_required"
+      : "planned";
+
+    return {
+      status,
+      mode: "plan-only",
+      module: "agent-computer-use-mcp",
+      approved,
+      dryRun,
+      repairPlan,
+      executesImmediately: false,
+      execution: {
+        status: "not_started",
+        reason: approved
+          ? "execution-not-implemented"
+          : "approval-required",
+      },
       includeUserOverlay: false,
       startsDesktopControl: false,
     };
