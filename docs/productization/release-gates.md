@@ -48,6 +48,7 @@ npm run phase:6.0
 npm run phase:6.1
 npm run phase:7.0
 npm run phase:7.1
+npm run phase:7.2
 npm run phase:1.4
 npm run package:foundation
 npm run package:dry-run
@@ -88,6 +89,7 @@ Required evidence:
 - `npm run phase:6.1` verifies the app smoke matrix has 20-50 commercial beta coverage rows and fail-closed audit notes.
 - `npm run phase:7.0` verifies first-run readiness keeps setup plan-only, offline-capable, and progress-aware.
 - `npm run phase:7.1` verifies offline bundle readiness fail-closes before first enable when required cache metadata is missing.
+- `npm run phase:7.2` verifies repair progress plans make long setup operations approval-gated, cancellable, and no-download by default.
 - No generated build output or model packs in Git.
 - `computer.health({fast:true})` is ready or structured degraded.
 - User overlay is excluded from observations.
@@ -124,6 +126,7 @@ Required evidence:
 - App smoke coverage report from `npm run phase:6.1`.
 - First-run readiness report from `npm run phase:7.0`.
 - Offline bundle readiness report from `npm run phase:7.1`.
+- Repair progress plan report from `npm run phase:7.2`.
 - OCR latency report with warm p95 values.
 - App matrix report in `docs/productization/app-smoke-matrix.md`.
 
