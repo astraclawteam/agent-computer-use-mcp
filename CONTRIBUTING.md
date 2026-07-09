@@ -11,7 +11,7 @@ Thanks for contributing to `agent-computer-use-mcp`. This project is designed fo
 5. Wait for CI and reviewer approval.
 6. Merge only after required checks and reviews pass.
 
-Direct pushes to `main` are prohibited for non-admin users and should be reserved for emergency maintainer recovery only.
+Direct pushes to `main` are prohibited for non-admin users. Repository administrators may direct-push for bootstrap, governance repair, or emergency recovery.
 
 ## Branch Names
 
@@ -65,4 +65,3 @@ npm run phase:1.4
 The public API is the MCP tool surface and structured result shape. Any change to tool names, arguments, result fields, environment variables, or installation config must be called out as a contract change in the PR.
 
 Compatibility aliases such as `XIAOZHICLAW_*` may remain, but new documentation and examples must use `AGENT_COMPUTER_USE_*`.
-

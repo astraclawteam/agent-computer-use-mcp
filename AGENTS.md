@@ -31,12 +31,14 @@ If a host product provides a stricter instruction, follow the stricter rule.
 
 ## Branch And PR Rules
 
-- Do not push directly to `main`.
+- Non-admin contributors and AI workers must not push directly to `main`.
+- Repository administrators may push directly to `main` for repository bootstrap, governance repair, or emergency recovery.
 - Work on short-lived branches named `type/short-topic`, for example `feat/ocr-region-cache` or `fix/mcp-health-error`.
 - Every change must go through a pull request.
-- Every PR must have at least one human maintainer approval before merge.
+- Every non-admin PR must have at least one maintainer approval before merge.
 - CODEOWNERS review is required for protected areas.
 - All required checks must pass before merge.
+- Do not require approval from a different person than the latest pusher; this repository intentionally disables GitHub's "require approval of the most recent reviewable push" condition.
 - Use squash merge unless maintainers explicitly choose otherwise.
 
 ## Coding Constraints
@@ -99,4 +101,3 @@ Do not hide risk. If a path is Windows-only, GPU-dependent, offline-dependent, o
 - Do not silence failing tests without a clear explanation and replacement coverage.
 - Do not claim a test passes unless the command was run in the current working tree.
 - Do not commit secrets, tokens, screenshots containing sensitive data, or local machine paths beyond controlled test fixtures.
-

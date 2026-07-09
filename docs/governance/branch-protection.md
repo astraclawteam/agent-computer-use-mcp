@@ -12,7 +12,7 @@ Rules:
 - Require at least 1 approving review.
 - Require review from Code Owners.
 - Dismiss stale approvals when new commits are pushed.
-- Require approval of the most recent reviewable push.
+- Do not require approval of the most recent reviewable push. The "different person must approve the latest push" condition is intentionally disabled.
 - Require status checks to pass before merging.
 - Require branches to be up to date before merging.
 - Required status check: `test`.
@@ -20,13 +20,14 @@ Rules:
 - Require linear history.
 - Block force pushes.
 - Block deletions.
-- Do not apply the rule to administrators, so repository admins retain emergency recovery access.
+- Do not apply the rule to administrators, so repository admins can push directly to `main` when needed.
 
 Recommended push restrictions:
 
 - Restrict who can push to matching branches.
-- Allowed direct-push team: `@astraclawteam/agent-computer-use-admins`.
+- Allowed direct-push team: `@astraclawteam/astraclawteam`.
 - No individual users should be added unless they are break-glass administrators.
+- The `@astraclawteam/astraclawteam` team is the allowed direct-push team for repository administration.
 
 ## Apply With Script
 
@@ -42,9 +43,8 @@ Optional environment variables:
 ```sh
 GITHUB_REPOSITORY=astraclawteam/agent-computer-use-mcp
 BRANCH=main
-ADMIN_TEAM_SLUGS=agent-computer-use-admins
+ADMIN_TEAM_SLUGS=astraclawteam
 REQUIRED_STATUS_CHECKS=test
 ```
 
 The script uses GitHub branch protection APIs. If your organization uses GitHub Rulesets instead of classic branch protection, keep this document as the policy source and mirror the same requirements in the ruleset UI/API.
-

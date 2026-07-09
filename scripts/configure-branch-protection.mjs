@@ -2,7 +2,7 @@ import { spawnSync } from "node:child_process";
 
 const repository = process.env.GITHUB_REPOSITORY ?? "astraclawteam/agent-computer-use-mcp";
 const branch = process.env.BRANCH ?? "main";
-const adminTeamSlugs = splitCsv(process.env.ADMIN_TEAM_SLUGS ?? "agent-computer-use-admins");
+const adminTeamSlugs = splitCsv(process.env.ADMIN_TEAM_SLUGS ?? "astraclawteam");
 const requiredStatusChecks = splitCsv(process.env.REQUIRED_STATUS_CHECKS ?? "test");
 
 const [owner, repo] = repository.split("/");
@@ -21,7 +21,7 @@ const body = {
     dismiss_stale_reviews: true,
     require_code_owner_reviews: true,
     required_approving_review_count: 1,
-    require_last_push_approval: true,
+    require_last_push_approval: false,
   },
   restrictions: {
     users: [],
@@ -80,4 +80,3 @@ function ghApi(args, input) {
     ].filter(Boolean).join("\n"));
   }
 }
-
