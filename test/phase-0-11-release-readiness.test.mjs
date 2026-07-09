@@ -33,6 +33,7 @@ test("release readiness gate captures the alpha release command contract", async
   assert.ok(gate.evidence.some((item) => item.id === "release-metadata-changelog"));
   assert.ok(gate.evidence.some((item) => item.id === "release-artifact-verification"));
   assert.ok(gate.evidence.some((item) => item.id === "offline-install-cache-doctor"));
+  assert.ok(gate.evidence.some((item) => item.id === "offline-install-proof"));
   assert.equal(validation.status, "passed");
   assert.deepEqual(validation.violations, []);
 });

@@ -85,6 +85,7 @@ export class ComputerUseProviderRouter {
         "7.1": "offline-bundle-readiness",
         "7.2": "repair-progress-plan",
         "7.3": "offline-capability-proof",
+        "7.4": "offline-install-proof",
       },
       providers: {
         windowCapture: process.platform === "win32" ? "PrintWindow" : "unsupported",
