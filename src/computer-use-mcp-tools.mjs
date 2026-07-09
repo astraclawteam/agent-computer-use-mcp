@@ -91,7 +91,7 @@ export const COMPUTER_USE_MCP_TOOLS = [
       required: ["titlePart"],
       properties: {
         titlePart: { type: "string" },
-        tier: { type: "string", enum: ["observe", "full"] },
+        tier: { type: "string", enum: ["observe", "full", "admin"] },
         agentId: { type: "string" },
         reason: { type: "string" },
       },

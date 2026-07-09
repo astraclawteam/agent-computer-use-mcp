@@ -9,6 +9,7 @@ import { OcrSidecarSession, normalizeOcrSidecarResponse } from "./ocr-sidecar.mj
 import { runInstallCacheDoctor } from "./install-cache-doctor.mjs";
 import { buildDiagnosticsPolicy } from "./diagnostics-policy.mjs";
 import { captureWindowPngByTitle } from "./real-window-capture.mjs";
+import { createComputerUsePolicy } from "./computer-use-policy.mjs";
 
 export class ComputerUseProviderRouter {
   constructor(options = {}) {
@@ -27,11 +28,8 @@ export class ComputerUseProviderRouter {
     this.lastCapture = null;
     this.pendingRepairApproval = null;
     this.auditEvents = [];
-    this.actionPolicy = {
-      allowedKinds: ["set_value", "click"],
-      deliveryModes: ["background"],
-      observeTierBlocksAction: true,
-    };
+    this.policy = options.policy ?? createComputerUsePolicy(options.policyOptions);
+    this.actionPolicy = this.policy.describe();
   }
 
   async health(options = {}) {
@@ -50,6 +48,7 @@ export class ComputerUseProviderRouter {
         "1.6": "install-config-contract",
         "1.7": "standard-sdk-client-smoke",
         "1.8": "standard-sdk-server-transport",
+        "1.9": "permission-policy-engine",
         "2.0": "doctor-tool",
         "2.1": "repair-approval-gate",
         "2.2": "repair-approval-state",
@@ -213,11 +212,8 @@ export class ComputerUseProviderRouter {
       });
     }
     const tier = args.tier ?? "full";
-    if (!["observe", "full"].includes(tier)) {
-      fail("access.tier_unsupported", `Unsupported computer access tier: ${tier}`);
-    }
-
     const window = await this.driver.findWindow({ titlePart: args.titlePart });
+    this.enforcePolicyDecision(this.policy.evaluateAccessRequest({ tier, window }));
     this.activeController = {
       controllerId: randomUUID(),
       provider: "gateway-managed",
@@ -532,33 +528,17 @@ export class ComputerUseProviderRouter {
   }
 
   validateAction(action) {
-    if (!action?.kind) {
-      fail("action.kind_required", "computer.act requires action.kind.");
-    }
-    if (!this.actionPolicy.allowedKinds.includes(action.kind)) {
-      fail("action.kind_unsupported", `Unsupported action kind: ${action.kind}`, {
-        allowedKinds: this.actionPolicy.allowedKinds,
-      });
-    }
-    if (this.activeController?.tier === "observe" && this.actionPolicy.observeTierBlocksAction) {
-      fail("permission.denied", "The active Computer Use controller has observe-only access.", {
-        tier: this.activeController.tier,
-        requiredTier: "full",
-      });
-    }
-    const hasElementRef = action.elementToken !== undefined || action.elementIndex !== undefined;
-    if (!hasElementRef) {
-      fail("action.element_required", "Element action requires elementToken or elementIndex.");
-    }
-    if (action.kind === "set_value" && typeof action.value !== "string") {
-      fail("action.value_required", "set_value requires a string value.");
-    }
-    const deliveryMode = action.deliveryMode ?? "background";
-    if (!this.actionPolicy.deliveryModes.includes(deliveryMode)) {
-      fail("delivery_mode.unsupported", `Unsupported delivery mode: ${deliveryMode}`, {
-        allowedDeliveryModes: this.actionPolicy.deliveryModes,
-      });
-    }
+    const decision = this.policy.validateAction({
+      tier: this.activeController?.tier,
+      action,
+      observation: this.lastCapture,
+    });
+    this.enforcePolicyDecision(decision);
+  }
+
+  enforcePolicyDecision(decision) {
+    if (decision?.allowed) return;
+    fail(decision.code, policyMessage(decision), decision);
   }
 
   recordAudit(type, payload = {}) {
@@ -669,4 +649,29 @@ function mergeRepairPlans(installRepairPlan, recoverActions = []) {
     actions,
     requiresApproval: actions.length > 0,
   };
+}
+
+function policyMessage(decision) {
+  if (decision.code === "permission.denied" && decision.tier === "observe") {
+    return "The active Computer Use controller has observe-only access.";
+  }
+  if (decision.code === "access.tier_unsupported") {
+    return `Unsupported computer access tier: ${decision.tier}`;
+  }
+  if (decision.code === "action.kind_required") {
+    return "computer.act requires action.kind.";
+  }
+  if (decision.code === "action.kind_unsupported") {
+    return "Unsupported action kind.";
+  }
+  if (decision.code === "action.element_required") {
+    return "Element action requires elementToken or elementIndex.";
+  }
+  if (decision.code === "action.value_required") {
+    return "set_value requires a string value.";
+  }
+  if (decision.code === "delivery_mode.unsupported") {
+    return "Unsupported delivery mode.";
+  }
+  return decision.code;
 }
