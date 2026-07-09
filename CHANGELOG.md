@@ -19,3 +19,4 @@ All notable changes to `agent-computer-use-mcp` are tracked here.
 - Runtime cleanup proof for stale daemon locks and expired runtime temp files without desktop control.
 - Runtime cleanup doctor/repair proof for exposing cleanup actions through standard MCP tools.
 - Perception latency budget proof for warm OCR crop, ordinary region, and diagnostic full-window OCR targets.
+- Standard MCP multi-client stress proof for read-only concurrent calls without overlay capture or desktop control.

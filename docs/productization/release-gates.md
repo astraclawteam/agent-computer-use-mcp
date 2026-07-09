@@ -55,6 +55,7 @@ npm run phase:5.2
 npm run phase:5.3
 npm run phase:5.4
 npm run phase:5.5
+npm run phase:5.6
 npm run phase:6.0
 npm run phase:6.1
 npm run phase:7.0
@@ -109,6 +110,7 @@ Required evidence:
 - `npm run phase:5.3` verifies all public MCP tools declare versioned strict output schemas through `tools/list`.
 - `npm run phase:5.4` verifies MCP Inspector-style initialization, tool listing, and read-only tool calls.
 - `npm run phase:5.5` verifies pending approval schema compatibility, duplicate-pending rejection, and disconnect cleanup.
+- `npm run phase:5.6` verifies standard MCP SDK multi-client stress calls remain read-only, overlay-free, and desktop-control-free.
 - `npm run phase:6.0` verifies the app smoke matrix result schema and required category coverage.
 - `npm run phase:6.1` verifies the app smoke matrix has 20-50 commercial beta coverage rows and fail-closed audit notes.
 - `npm run phase:7.0` verifies first-run readiness keeps setup plan-only, offline-capable, and progress-aware.
@@ -154,6 +156,7 @@ Required evidence:
 - Strict output schema report from `npm run phase:5.3`.
 - MCP Inspector smoke report from `npm run phase:5.4`.
 - MCP approval compatibility report from `npm run phase:5.5`.
+- MCP multi-client stress report from `npm run phase:5.6`.
 - App smoke matrix contract report from `npm run phase:6.0`.
 - App smoke coverage report from `npm run phase:6.1`.
 - First-run readiness report from `npm run phase:7.0`.
@@ -189,7 +192,7 @@ Required evidence:
 - Policy-deny proof for password/payment/private surfaces from `npm run phase:1.11`.
 - Control approval state proof from `npm run phase:1.12`.
 - MCP approval compatibility proof from `npm run phase:5.5`.
-- Concurrency and disconnect test reports.
+- Concurrency, multi-client stress, and disconnect test reports from `npm run phase:5.0`, `npm run phase:5.6`, and `npm run phase:5.2`.
 - Human review of public MCP contract changes.
 
 ## Blockers

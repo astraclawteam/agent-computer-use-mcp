@@ -86,6 +86,7 @@ Example MCP client config:
 - `npm run phase:5.3`: verify every public MCP tool declares a versioned strict output schema.
 - `npm run phase:5.4`: verify MCP Inspector-style initialization, tool listing, and read-only tool calls.
 - `npm run phase:5.5`: verify pending approval schema compatibility, duplicate-pending rejection, and disconnect cleanup.
+- `npm run phase:5.6`: verify standard MCP SDK multi-client stress calls remain read-only and overlay-free.
 - `npm run phase:6.0`: verify the product app smoke matrix uses the release result schema and required category coverage.
 - `npm run phase:6.1`: verify the app smoke matrix has 20-50 commercial beta coverage rows and fail-closed audit notes.
 - `npm run phase:7.0`: verify first-run readiness keeps setup plan-only, offline-capable, and progress-aware.
