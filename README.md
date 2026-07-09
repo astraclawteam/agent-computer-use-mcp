@@ -66,6 +66,7 @@ Example MCP client config:
 - `npm run phase:3.2`: verify local template matching for static/repeated controls and pixel-limited observation output.
 - `npm run phase:3.3`: verify local SOM proposal generation for self-drawn/canvas surfaces without image upload.
 - `npm run phase:3.4`: verify per-region perception strategy selection from UIA/SOM to OCR, template/CV, SOM proposal, and explicit VLM fallback.
+- `npm run phase:4.0`: verify overlay placement planning for multi-display, high DPI, fullscreen/borderless, and unavailable target windows.
 - `npm run phase:5.0`: verify concurrent `request_access` calls cannot create multiple active controllers.
 - `npm run phase:5.1`: verify two standard MCP SDK clients can connect and call read-only tools concurrently.
 - `npm run phase:5.2`: verify disconnect cleanup revokes active control state and stops overlay.

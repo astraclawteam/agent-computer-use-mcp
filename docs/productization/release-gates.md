@@ -35,6 +35,7 @@ npm run phase:3.1
 npm run phase:3.2
 npm run phase:3.3
 npm run phase:3.4
+npm run phase:4.0
 npm run phase:5.0
 npm run phase:5.1
 npm run phase:5.2
@@ -67,6 +68,7 @@ Required evidence:
 - `npm run phase:3.2` verifies local template matching for static/repeated controls and pixel-limited observation output.
 - `npm run phase:3.3` verifies local SOM proposal generation for self-drawn/canvas surfaces without image upload.
 - `npm run phase:3.4` verifies per-region perception strategy selection keeps UIA/SOM first, OCR second, template/CV and SOM proposal third, and VLM explicit-only.
+- `npm run phase:4.0` verifies overlay placement planning for multi-display, high DPI, fullscreen/borderless, and unavailable target windows.
 - `npm run phase:5.0` verifies concurrent `request_access` calls cannot create multiple active controllers.
 - `npm run phase:5.1` verifies two standard MCP SDK clients can connect and call read-only tools concurrently.
 - `npm run phase:5.2` verifies disconnect cleanup revokes active control state and stops overlay.
@@ -95,6 +97,7 @@ Required evidence:
 - Template matching provider report from `npm run phase:3.2`.
 - SOM proposal provider report from `npm run phase:3.3`.
 - Per-region strategy selector report from `npm run phase:3.4`.
+- Overlay placement planner report from `npm run phase:4.0`.
 - Concurrent tool call report from `npm run phase:5.0`.
 - Multi-client connection report from `npm run phase:5.1`.
 - Disconnect cleanup report from `npm run phase:5.2`.
