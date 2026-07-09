@@ -44,6 +44,7 @@ npm run phase:3.1
 npm run phase:3.2
 npm run phase:3.3
 npm run phase:3.4
+npm run phase:3.5
 npm run phase:4.0
 npm run phase:4.1
 npm run phase:4.2
@@ -97,6 +98,7 @@ Required evidence:
 - `npm run phase:3.2` verifies local template matching for static/repeated controls and pixel-limited observation output.
 - `npm run phase:3.3` verifies local SOM proposal generation for self-drawn/canvas surfaces without image upload.
 - `npm run phase:3.4` verifies per-region perception strategy selection keeps UIA/SOM first, OCR second, template/CV and SOM proposal third, and VLM explicit-only.
+- `npm run phase:3.5` verifies perception latency budgets for warm OCR crops, region OCR, and diagnostic full-window OCR.
 - `npm run phase:4.0` verifies overlay placement planning for multi-display, high DPI, fullscreen/borderless, and unavailable target windows.
 - `npm run phase:4.1` verifies overlay theme adaptation and shared brand cursor style tokens.
 - `npm run phase:4.2` verifies overlay target tracking for moved, hidden, occluded, and cross-display windows.
@@ -141,6 +143,7 @@ Required evidence:
 - Template matching provider report from `npm run phase:3.2`.
 - SOM proposal provider report from `npm run phase:3.3`.
 - Per-region strategy selector report from `npm run phase:3.4`.
+- Perception latency report from `npm run phase:3.5`.
 - Overlay placement planner report from `npm run phase:4.0`.
 - Overlay theme and cursor token report from `npm run phase:4.1`.
 - Overlay target tracker report from `npm run phase:4.2`.
@@ -182,6 +185,7 @@ Required evidence:
 - Daemon session doctor/repair proof from `npm run phase:2.11`.
 - Runtime cleanup proof from `npm run phase:2.12`.
 - Runtime cleanup doctor/repair proof from `npm run phase:2.13`.
+- Perception latency budget proof from `npm run phase:3.5`.
 - Policy-deny proof for password/payment/private surfaces from `npm run phase:1.11`.
 - Control approval state proof from `npm run phase:1.12`.
 - MCP approval compatibility proof from `npm run phase:5.5`.

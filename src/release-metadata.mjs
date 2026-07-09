@@ -84,6 +84,11 @@ export function buildReleaseMetadata(options = {}) {
         command: "npm run phase:2.13",
         required: true,
       },
+      {
+        name: "perception-latency-budget",
+        command: "npm run phase:3.5",
+        required: true,
+      },
     ],
     includeUserOverlay: false,
     startsDesktopControl: false,

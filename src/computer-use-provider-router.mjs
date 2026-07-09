@@ -81,6 +81,7 @@ export class ComputerUseProviderRouter {
         "3.2": "template-matching-provider",
         "3.3": "som-proposal-provider",
         "3.4": "per-region-strategy-selector",
+        "3.5": "perception-latency-budget",
         "4.0": "overlay-placement-planner",
         "4.1": "overlay-theme-cursor-tokens",
         "4.2": "overlay-target-tracker",

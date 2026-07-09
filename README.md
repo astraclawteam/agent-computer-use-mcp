@@ -75,6 +75,7 @@ Example MCP client config:
 - `npm run phase:3.2`: verify local template matching for static/repeated controls and pixel-limited observation output.
 - `npm run phase:3.3`: verify local SOM proposal generation for self-drawn/canvas surfaces without image upload.
 - `npm run phase:3.4`: verify per-region perception strategy selection from UIA/SOM to OCR, template/CV, SOM proposal, and explicit VLM fallback.
+- `npm run phase:3.5`: verify perception latency budgets for warm OCR crops, region OCR, and diagnostic full-window OCR.
 - `npm run phase:4.0`: verify overlay placement planning for multi-display, high DPI, fullscreen/borderless, and unavailable target windows.
 - `npm run phase:4.1`: verify overlay theme adaptation and shared brand cursor style tokens.
 - `npm run phase:4.2`: verify overlay target tracking for moved, hidden, occluded, and cross-display windows.
