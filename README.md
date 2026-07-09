@@ -46,6 +46,7 @@ Example MCP client config:
 ## Useful Scripts
 
 - `npm test`: run the full local test suite.
+- `npm run phase:0.10`: verify release metadata, tag policy, changelog entry, and required release artifact commands.
 - `npm run phase:1.6`: print the local MCP install/config contract.
 - `npm run phase:1.7`: verify a standalone official MCP SDK client can connect.
 - `npm run phase:1.8`: verify the server path uses the official MCP SDK transport.
