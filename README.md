@@ -76,6 +76,7 @@ Example MCP client config:
 - `npm run phase:5.3`: verify every public MCP tool declares a versioned strict output schema.
 - `npm run phase:5.4`: verify MCP Inspector-style initialization, tool listing, and read-only tool calls.
 - `npm run phase:6.0`: verify the product app smoke matrix uses the release result schema and required category coverage.
+- `npm run phase:6.1`: verify the app smoke matrix has 20-50 commercial beta coverage rows and fail-closed audit notes.
 - `npm run phase:1.4`: run the real `cua-driver mcp` desktop action lifecycle smoke.
 - `npm run package:foundation`: print install layout, version policy, packaging policy, and offline asset manifest.
 - `npm run package:dry-run`: run `npm pack --dry-run --json` and fail if generated artifacts would enter the package.

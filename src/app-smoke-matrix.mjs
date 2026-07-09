@@ -57,12 +57,15 @@ export function summarizeAppSmokeMatrix(matrix) {
   const statusCounts = Object.fromEntries(APP_SMOKE_STATUSES.map((status) => [status, 0]));
   const coverage = {
     requiredCategories: Object.fromEntries(REQUIRED_APP_SMOKE_CATEGORIES.map((category) => [category, false])),
+    targetsByCategory: {},
   };
+  const auditIssues = [];
 
   for (const row of matrix.rows) {
     if (Object.hasOwn(statusCounts, row.status)) {
       statusCounts[row.status] += 1;
     }
+    coverage.targetsByCategory[row.category] = (coverage.targetsByCategory[row.category] ?? 0) + 1;
     if (Object.hasOwn(coverage.requiredCategories, row.category)) {
       coverage.requiredCategories[row.category] = true;
     }
@@ -70,6 +73,7 @@ export function summarizeAppSmokeMatrix(matrix) {
     if (errors.length > 0) {
       invalidRows.push({ appId: row.appId, errors });
     }
+    auditIssues.push(...auditAppSmokeRow(row));
   }
 
   return {
@@ -77,6 +81,7 @@ export function summarizeAppSmokeMatrix(matrix) {
     statusCounts,
     coverage,
     invalidRows,
+    auditIssues,
   };
 }
 
@@ -100,6 +105,34 @@ export function validateAppSmokeRow(row) {
     errors.push("insufficient rows must describe observation.insufficient or unsafe provider behavior");
   }
   return errors;
+}
+
+export function auditAppSmokeRow(row) {
+  const issues = [];
+  if ((row.status === "blocked" || row.status === "insufficient") && !hasFailClosedReason(row)) {
+    issues.push({
+      appId: row.appId,
+      issue: "missing fail-closed reason for blocked or insufficient smoke",
+    });
+  }
+  if (row.status === "pass" && row.capabilitySources.includes("manual-only")) {
+    issues.push({
+      appId: row.appId,
+      issue: "passing smoke cannot rely only on manual-only source",
+    });
+  }
+  if (row.artifacts.length > 0) {
+    issues.push({
+      appId: row.appId,
+      issue: "matrix contract rows must not persist artifacts",
+    });
+  }
+  return issues;
+}
+
+function hasFailClosedReason(row) {
+  return /blocked|policy|permission|missing|unsupported|required|needs|must|insufficient|unsafe|provider|harness/i
+    .test(`${row.status} ${row.notes}`);
 }
 
 function splitSources(source) {
