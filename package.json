@@ -86,6 +86,7 @@
     "phase:7.0": "node src/phase-7-0-first-run-readiness.mjs",
     "phase:7.1": "node src/phase-7-1-offline-bundle-readiness.mjs",
     "phase:7.2": "node src/phase-7-2-repair-progress-plan.mjs",
+    "phase:7.3": "node src/phase-7-3-offline-capability-proof.mjs",
     "package:dry-run": "node scripts/package-dry-run.mjs",
     "package:foundation": "node scripts/package-foundation-report.mjs",
     "assets:manifest": "node scripts/offline-asset-manifest.mjs",
