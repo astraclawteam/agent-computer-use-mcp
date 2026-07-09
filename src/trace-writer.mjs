@@ -1,6 +1,7 @@
 import { appendFile, mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { buildDiagnosticsPolicy, redactDiagnosticValue } from "./diagnostics-policy.mjs";
+import { assertOverlayExcludedFromArtifact } from "./overlay-exclusion-policy.mjs";
 
 const FORBIDDEN_PAYLOAD_KEYS = new Set([
   "screenshot",
@@ -22,6 +23,7 @@ export function createTraceWriter(options = {}) {
   return {
     async writeEvent(type, payload = {}) {
       assertTracePayloadAllowed(payload);
+      assertOverlayExcludedFromArtifact(payload);
       const ts = clock.iso();
       const path = join(traceRoot, `trace-${ts.slice(0, 10)}.jsonl`);
       const event = {
