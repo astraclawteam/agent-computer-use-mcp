@@ -38,6 +38,7 @@ npm run phase:3.4
 npm run phase:4.0
 npm run phase:4.1
 npm run phase:4.2
+npm run phase:4.3
 npm run phase:5.0
 npm run phase:5.1
 npm run phase:5.2
@@ -73,6 +74,7 @@ Required evidence:
 - `npm run phase:4.0` verifies overlay placement planning for multi-display, high DPI, fullscreen/borderless, and unavailable target windows.
 - `npm run phase:4.1` verifies overlay theme adaptation and shared brand cursor style tokens.
 - `npm run phase:4.2` verifies overlay target tracking for moved, hidden, occluded, and cross-display windows.
+- `npm run phase:4.3` verifies overlay exclusion from capture, OCR, trace, and artifact paths.
 - `npm run phase:5.0` verifies concurrent `request_access` calls cannot create multiple active controllers.
 - `npm run phase:5.1` verifies two standard MCP SDK clients can connect and call read-only tools concurrently.
 - `npm run phase:5.2` verifies disconnect cleanup revokes active control state and stops overlay.
@@ -104,6 +106,7 @@ Required evidence:
 - Overlay placement planner report from `npm run phase:4.0`.
 - Overlay theme and cursor token report from `npm run phase:4.1`.
 - Overlay target tracker report from `npm run phase:4.2`.
+- Overlay exclusion policy report from `npm run phase:4.3`.
 - Concurrent tool call report from `npm run phase:5.0`.
 - Multi-client connection report from `npm run phase:5.1`.
 - Disconnect cleanup report from `npm run phase:5.2`.

@@ -69,6 +69,7 @@ export class ComputerUseProviderRouter {
         "4.0": "overlay-placement-planner",
         "4.1": "overlay-theme-cursor-tokens",
         "4.2": "overlay-target-tracker",
+        "4.3": "overlay-exclusion-policy",
         "5.0": "concurrent-controller-guard",
         "5.1": "standard-mcp-multi-client",
         "5.2": "disconnect-cleanup",
