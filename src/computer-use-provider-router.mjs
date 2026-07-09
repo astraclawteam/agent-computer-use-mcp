@@ -53,6 +53,8 @@ export class ComputerUseProviderRouter {
         "2.1": "repair-approval-gate",
         "2.2": "repair-approval-state",
         "2.3": "diagnostics-policy",
+        "2.4": "redacted-trace-writer",
+        "2.5": "diagnostics-retention-cleanup",
       },
       providers: {
         windowCapture: process.platform === "win32" ? "PrintWindow" : "unsupported",
