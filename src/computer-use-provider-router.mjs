@@ -7,6 +7,7 @@ import { computeDirtyRegion } from "./image-diff.mjs";
 import { fail } from "./computer-use-errors.mjs";
 import { OcrSidecarSession, normalizeOcrSidecarResponse } from "./ocr-sidecar.mjs";
 import { runInstallCacheDoctor } from "./install-cache-doctor.mjs";
+import { buildDiagnosticsPolicy } from "./diagnostics-policy.mjs";
 import { captureWindowPngByTitle } from "./real-window-capture.mjs";
 
 export class ComputerUseProviderRouter {
@@ -51,6 +52,7 @@ export class ComputerUseProviderRouter {
         "2.0": "doctor-tool",
         "2.1": "repair-approval-gate",
         "2.2": "repair-approval-state",
+        "2.3": "diagnostics-policy",
       },
       providers: {
         windowCapture: process.platform === "win32" ? "PrintWindow" : "unsupported",
@@ -93,12 +95,14 @@ export class ComputerUseProviderRouter {
       requiresApproval: false,
       actions: [],
     };
+    const diagnostics = buildDiagnosticsPolicy();
 
     return {
       status,
       module: "agent-computer-use-mcp",
       runtime,
       installCache,
+      diagnostics,
       repairPlan,
       activeController: this.activeController ? {
         controllerId: this.activeController.controllerId,
