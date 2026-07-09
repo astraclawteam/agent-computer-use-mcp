@@ -55,6 +55,7 @@ export class ComputerUseProviderRouter {
         "1.8": "standard-sdk-server-transport",
         "1.9": "permission-policy-engine",
         "1.10": "controller-lease-timeout",
+        "1.11": "policy-deny-proof",
         "2.0": "doctor-tool",
         "2.1": "repair-approval-gate",
         "2.2": "repair-approval-state",

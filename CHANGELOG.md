@@ -11,3 +11,4 @@ All notable changes to `agent-computer-use-mcp` are tracked here.
 - Release readiness gate for alpha command manifests, required evidence, and release-blocking invariants.
 - Release artifact hash and Windows helper signing verification gate.
 - Offline install proof for prepared install roots, offline bundle readiness, and no-network capability enablement.
+- Commercial policy-deny proof for password, payment, credential, and private surfaces.
