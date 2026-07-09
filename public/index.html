@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Gateway Computer Use MVP</title>
+    <link rel="icon" href="data:," />
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <section class="panel">
+        <p class="eyebrow">Agent Computer Use MCP</p>
+        <h1>CUA 最小验证</h1>
+        <p class="summary">这个独立页面只验证 Gateway-managed 模式的四边品牌强调色提示。</p>
+        <div class="toolbar" aria-label="Computer Use mode">
+          <button data-mode="gateway-managed">Gateway managed</button>
+          <button data-mode="agent-native">Agent native</button>
+          <button data-mode="clear">Clear</button>
+        </div>
+        <p class="status">Current: <span data-status>idle</span></p>
+      </section>
+    </main>
+
+    <div class="computer-use-mode-frame" data-computer-use-frame aria-hidden="true" hidden>
+      <canvas
+        class="computer-use-mode-frame__river"
+        data-computer-use-river
+        data-computer-use-river-canvas
+      ></canvas>
+      <span class="computer-use-mode-frame__corner-marker" data-computer-use-edge="top"></span>
+      <span class="computer-use-mode-frame__corner-marker" data-computer-use-edge="right"></span>
+      <span class="computer-use-mode-frame__corner-marker" data-computer-use-edge="bottom"></span>
+      <span class="computer-use-mode-frame__corner-marker" data-computer-use-edge="left"></span>
+    </div>
+
+    <script type="module" src="./app.mjs"></script>
+  </body>
+</html>

@@ -1,0 +1,61 @@
+{
+  "name": "agent-computer-use-mcp",
+  "version": "0.0.1",
+  "description": "A local MCP server for Gateway-managed computer use with cua-driver, OCR, and user-only desktop overlays.",
+  "license": "MIT",
+  "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/astraclawteam/agent-computer-use-mcp.git"
+  },
+  "bugs": {
+    "url": "https://github.com/astraclawteam/agent-computer-use-mcp/issues"
+  },
+  "homepage": "https://github.com/astraclawteam/agent-computer-use-mcp#readme",
+  "keywords": [
+    "mcp",
+    "computer-use",
+    "cua",
+    "desktop-automation",
+    "agent"
+  ],
+  "bin": {
+    "agent-computer-use-mcp": "src/computer-use-mcp-server.mjs"
+  },
+  "files": [
+    "src",
+    "public",
+    "gateway-overlay",
+    "native-lab",
+    "ocr-sidecar",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "test": "node --test test/*.test.mjs",
+    "mcp": "node src/computer-use-mcp-server.mjs",
+    "smoke": "node src/smoke.mjs",
+    "phase:0.6": "node src/phase-0-6.mjs",
+    "phase:0.6:real": "node src/real-cua-lab-sequence.mjs",
+    "phase:0.6:native": "node src/real-cua-notepad-file-sequence.mjs",
+    "phase:0.6:winforms": "node src/real-cua-winforms-file-sequence.mjs",
+    "phase:0.6:gateway-run": "node src/gateway-run-winforms.mjs",
+    "phase:0.7": "node src/phase-0-7.mjs",
+    "phase:0.7:bench": "node src/phase-0-7-benchmark.mjs",
+    "phase:0.8": "node src/phase-0-8-real-window-diff-ocr.mjs",
+    "phase:1.4": "node src/phase-1-4-real-mcp-action.mjs",
+    "phase:1.6": "node src/phase-1-6-installation.mjs",
+    "phase:1.7": "node src/phase-1-7-standard-mcp-client.mjs",
+    "phase:1.8": "node src/phase-1-8-standard-mcp-server.mjs",
+    "governance:protect-main": "node scripts/configure-branch-protection.mjs",
+    "serve": "node src/server.mjs"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "onnxruntime-node": "^1.27.0",
+    "ppu-paddle-ocr": "^6.0.0"
+  }
+}

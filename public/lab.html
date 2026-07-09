@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Computer Use Lab</title>
+    <link rel="icon" href="data:," />
+    <link rel="stylesheet" href="./lab.css" />
+  </head>
+  <body data-computer-use-lab>
+    <main class="lab-shell">
+      <section class="lab-panel" aria-labelledby="lab-title">
+        <p class="eyebrow">Gateway-managed CUA target</p>
+        <h1 id="lab-title">Computer Use Lab</h1>
+
+        <form class="lab-form" data-lab-form>
+          <label class="field">
+            <span>Name</span>
+            <input aria-label="Name" data-lab-control="name" autocomplete="off" />
+          </label>
+          <button type="submit" data-lab-control="save">Save</button>
+        </form>
+
+        <dl class="lab-status-grid">
+          <div>
+            <dt>Status</dt>
+            <dd data-lab-status>Idle</dd>
+          </div>
+          <div>
+            <dt>Counter</dt>
+            <dd data-lab-counter>0</dd>
+          </div>
+        </dl>
+
+        <section class="lab-list-wrap" aria-label="Events">
+          <ol data-lab-list data-lab-action-log>
+            <li>Lab ready</li>
+            <li>Waiting for Gateway action</li>
+            <li>Stable accessible controls online</li>
+            <li>Element tokens should target controls, not coordinates</li>
+          </ol>
+        </section>
+      </section>
+    </main>
+
+    <script type="module" src="./lab.mjs"></script>
+  </body>
+</html>
