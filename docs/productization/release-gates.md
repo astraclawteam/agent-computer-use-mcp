@@ -25,6 +25,7 @@ npm run phase:2.3
 npm run phase:2.4
 npm run phase:2.5
 npm run phase:2.6
+npm run phase:2.7
 npm run phase:1.4
 npm run package:foundation
 npm run package:dry-run
@@ -42,6 +43,7 @@ Required evidence:
 - `npm run phase:2.4` verifies redacted JSONL trace output and blocks screenshot/overlay payloads.
 - `npm run phase:2.5` verifies retention cleanup only deletes expired trace/log/artifact files.
 - `npm run phase:2.6` verifies daemon lifecycle locking, duplicate startup handling, stale lock recovery, and shutdown cleanup.
+- `npm run phase:2.7` verifies child process crash detection produces structured degraded state and approval-gated restart actions.
 - No generated build output or model packs in Git.
 - `computer.health({fast:true})` is ready or structured degraded.
 - User overlay is excluded from observations.
