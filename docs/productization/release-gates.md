@@ -19,6 +19,7 @@ npm run phase:1.6
 npm run phase:1.7
 npm run phase:1.8
 npm run phase:1.9
+npm run phase:1.10
 npm run phase:2.0
 npm run phase:2.1
 npm run phase:2.2
@@ -42,6 +43,7 @@ Required evidence:
 - `npm run assets:manifest` records offline/cacheable asset packs.
 - `npm run doctor:install-cache` records readiness and repair actions without starting desktop control.
 - `npm run phase:1.9` verifies permission tiers, unsafe-window deny policy, and secure-field fail-closed behavior.
+- `npm run phase:1.10` verifies controller lease timeout cleanup stops overlay and blocks stale actions.
 - `npm run phase:2.3` records trace/log/artifact roots and verifies diagnostics redaction.
 - `npm run phase:2.4` verifies redacted JSONL trace output and blocks screenshot/overlay payloads.
 - `npm run phase:2.5` verifies retention cleanup only deletes expired trace/log/artifact files.
