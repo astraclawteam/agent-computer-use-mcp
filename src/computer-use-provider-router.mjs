@@ -24,6 +24,7 @@ export class ComputerUseProviderRouter {
       now: () => Date.now(),
       iso: (timeMs = Date.now()) => new Date(timeMs).toISOString(),
     };
+    this.controllerRequestInProgress = false;
     this.activeController = null;
     this.lastCapture = null;
     this.pendingRepairApproval = null;
@@ -60,6 +61,7 @@ export class ComputerUseProviderRouter {
         "2.7": "process-supervisor-recovery",
         "2.8": "supervisor-doctor-repair",
         "2.9": "repair-deny-state",
+        "5.0": "concurrent-controller-guard",
       },
       providers: {
         windowCapture: process.platform === "win32" ? "PrintWindow" : "unsupported",
@@ -252,51 +254,61 @@ export class ComputerUseProviderRouter {
       fail("provider.unavailable", "cua-driver is not available", { provider: "cua-driver" });
     }
     await this.expireActiveController({ throwOnExpire: false });
+    if (this.controllerRequestInProgress) {
+      fail("controller.request_in_progress", "A Gateway-managed Computer Use controller request is already in progress.", {
+        includeUserOverlay: false,
+      });
+    }
     if (this.activeController) {
       fail("controller.already_active", "A Gateway-managed Computer Use controller is already active.", {
         controllerId: this.activeController.controllerId,
       });
     }
-    const tier = args.tier ?? "full";
-    const window = await this.driver.findWindow({ titlePart: args.titlePart });
-    this.enforcePolicyDecision(this.policy.evaluateAccessRequest({ tier, window }));
-    const leaseTtlMs = Math.max(1, args.leaseTtlMs ?? 300000);
-    const startedAtMs = this.clock.now();
-    const expiresAtMs = startedAtMs + leaseTtlMs;
-    this.activeController = {
-      controllerId: randomUUID(),
-      provider: "gateway-managed",
-      tier,
-      agentId: args.agentId ?? "unknown",
-      status: "active",
-      window,
-      startedAt: this.clock.iso(startedAtMs),
-      expiresAt: this.clock.iso(expiresAtMs),
-      expiresAtMs,
-      leaseTtlMs,
-      includeUserOverlay: false,
-    };
-    if (this.overlayRuntime?.start) {
-      this.overlayHandle = await this.overlayRuntime.start({ targetRect: window.bounds ? {
-        windowId: window.windowId,
+    this.controllerRequestInProgress = true;
+    try {
+      const tier = args.tier ?? "full";
+      const window = await this.driver.findWindow({ titlePart: args.titlePart });
+      this.enforcePolicyDecision(this.policy.evaluateAccessRequest({ tier, window }));
+      const leaseTtlMs = Math.max(1, args.leaseTtlMs ?? 300000);
+      const startedAtMs = this.clock.now();
+      const expiresAtMs = startedAtMs + leaseTtlMs;
+      this.activeController = {
+        controllerId: randomUUID(),
+        provider: "gateway-managed",
+        tier,
+        agentId: args.agentId ?? "unknown",
+        status: "active",
+        window,
+        startedAt: this.clock.iso(startedAtMs),
+        expiresAt: this.clock.iso(expiresAtMs),
+        expiresAtMs,
+        leaseTtlMs,
+        includeUserOverlay: false,
+      };
+      if (this.overlayRuntime?.start) {
+        this.overlayHandle = await this.overlayRuntime.start({ targetRect: window.bounds ? {
+          windowId: window.windowId,
+          title: window.title,
+          x: window.bounds.x,
+          y: window.bounds.y,
+          width: window.bounds.width,
+          height: window.bounds.height,
+        } : undefined });
+      }
+      this.recordAudit("computer.access.granted", {
+        controllerId: this.activeController.controllerId,
         title: window.title,
-        x: window.bounds.x,
-        y: window.bounds.y,
-        width: window.bounds.width,
-        height: window.bounds.height,
-      } : undefined });
+        tier: this.activeController.tier,
+      });
+      return {
+        status: "granted",
+        controller: this.activeController,
+        overlay: this.overlayHandle,
+        includeUserOverlay: false,
+      };
+    } finally {
+      this.controllerRequestInProgress = false;
     }
-    this.recordAudit("computer.access.granted", {
-      controllerId: this.activeController.controllerId,
-      title: window.title,
-      tier: this.activeController.tier,
-    });
-    return {
-      status: "granted",
-      controller: this.activeController,
-      overlay: this.overlayHandle,
-      includeUserOverlay: false,
-    };
   }
 
   async capture(args = {}) {

@@ -30,6 +30,7 @@ npm run phase:2.6
 npm run phase:2.7
 npm run phase:2.8
 npm run phase:2.9
+npm run phase:5.0
 npm run phase:1.4
 npm run package:foundation
 npm run package:dry-run
@@ -52,6 +53,7 @@ Required evidence:
 - `npm run phase:2.7` verifies child process crash detection produces structured degraded state and approval-gated restart actions.
 - `npm run phase:2.8` verifies child process recovery actions surface through `computer.doctor` and approval-gated `computer.repair`.
 - `npm run phase:2.9` verifies repair approval denial clears pending state and never executes repair actions.
+- `npm run phase:5.0` verifies concurrent `request_access` calls cannot create multiple active controllers.
 - No generated build output or model packs in Git.
 - `computer.health({fast:true})` is ready or structured degraded.
 - User overlay is excluded from observations.
@@ -70,6 +72,7 @@ Required evidence:
 
 - Crash recovery tests for overlay, OCR sidecar, and `cua-driver mcp`.
 - `computer.doctor` and `computer.repair` smoke outputs.
+- Concurrent tool call report from `npm run phase:5.0`.
 - OCR latency report with warm p95 values.
 - App matrix report in `docs/productization/app-smoke-matrix.md`.
 
