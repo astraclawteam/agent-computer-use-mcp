@@ -79,6 +79,7 @@ Example MCP client config:
 - `npm run phase:6.1`: verify the app smoke matrix has 20-50 commercial beta coverage rows and fail-closed audit notes.
 - `npm run phase:7.0`: verify first-run readiness keeps setup plan-only, offline-capable, and progress-aware.
 - `npm run phase:7.1`: verify offline bundle readiness fail-closes before first enable when required cache metadata is missing.
+- `npm run phase:7.2`: verify repair progress plans make long setup operations approval-gated, cancellable, and no-download by default.
 - `npm run phase:1.4`: run the real `cua-driver mcp` desktop action lifecycle smoke.
 - `npm run package:foundation`: print install layout, version policy, packaging policy, and offline asset manifest.
 - `npm run package:dry-run`: run `npm pack --dry-run --json` and fail if generated artifacts would enter the package.

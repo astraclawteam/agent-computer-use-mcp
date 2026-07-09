@@ -122,10 +122,11 @@ export const COMPUTER_USE_MCP_TOOLS = [
       dryRun: { type: "boolean" },
       approval: ANY_OBJECT,
       repairPlan: ANY_OBJECT,
+      progressPlan: ANY_OBJECT,
       executesImmediately: { type: "boolean" },
       execution: ANY_OBJECT,
       startsDesktopControl: { const: false },
-    }, ["status", "mode", "module", "approved", "denied", "dryRun", "approval", "repairPlan", "executesImmediately", "execution", "startsDesktopControl"]),
+    }, ["status", "mode", "module", "approved", "denied", "dryRun", "approval", "repairPlan", "progressPlan", "executesImmediately", "execution", "startsDesktopControl"]),
   },
   {
     name: "computer.installation",

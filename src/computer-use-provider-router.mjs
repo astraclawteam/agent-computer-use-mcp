@@ -10,6 +10,7 @@ import { runInstallCacheDoctor } from "./install-cache-doctor.mjs";
 import { buildDiagnosticsPolicy } from "./diagnostics-policy.mjs";
 import { captureWindowPngByTitle } from "./real-window-capture.mjs";
 import { createComputerUsePolicy } from "./computer-use-policy.mjs";
+import { createRepairProgressPlan } from "./repair-progress-plan.mjs";
 
 export class ComputerUseProviderRouter {
   constructor(options = {}) {
@@ -79,6 +80,7 @@ export class ComputerUseProviderRouter {
         "6.1": "app-smoke-coverage-gate",
         "7.0": "first-run-readiness",
         "7.1": "offline-bundle-readiness",
+        "7.2": "repair-progress-plan",
       },
       providers: {
         windowCapture: process.platform === "win32" ? "PrintWindow" : "unsupported",
@@ -173,6 +175,13 @@ export class ComputerUseProviderRouter {
       approvalTtlMs: options.approvalTtlMs,
       repairPlan,
     });
+    const progressPlan = createRepairProgressPlan({
+      repairPlan,
+      approval,
+      approved,
+      dryRun,
+      operationId: options.operationId ?? `repair-${this.clock.now()}`,
+    });
     if (approval.status === "invalid") {
       return {
         status: "approval_invalid",
@@ -183,6 +192,7 @@ export class ComputerUseProviderRouter {
         dryRun,
         approval,
         repairPlan,
+        progressPlan,
         executesImmediately: false,
         execution: {
           status: "not_started",
@@ -202,6 +212,7 @@ export class ComputerUseProviderRouter {
         dryRun,
         approval,
         repairPlan,
+        progressPlan,
         executesImmediately: false,
         execution: {
           status: "not_started",
@@ -221,6 +232,7 @@ export class ComputerUseProviderRouter {
         dryRun,
         approval,
         repairPlan,
+        progressPlan,
         executesImmediately: false,
         execution: {
           status: "not_started",
@@ -251,6 +263,7 @@ export class ComputerUseProviderRouter {
       dryRun,
       approval,
       repairPlan,
+      progressPlan,
       executesImmediately: shouldExecuteProcessRestart,
       execution: {
         status: shouldExecuteProcessRestart ? "completed" : "not_started",
