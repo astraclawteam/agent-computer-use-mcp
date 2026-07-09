@@ -60,6 +60,11 @@ export function buildReleaseMetadata(options = {}) {
         required: true,
       },
       {
+        name: "repair-entrypoint-catalog",
+        command: "npm run phase:7.6",
+        required: true,
+      },
+      {
         name: "policy-deny-proof",
         command: "npm run phase:1.11",
         required: true,

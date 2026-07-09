@@ -2,6 +2,7 @@ import { access } from "node:fs/promises";
 import { buildOfflineAssetManifest, getInstallLayout } from "./package-foundation.mjs";
 import { checkCuaDriverHealth } from "./driver-health.mjs";
 import { checkOcrModelPackHealth } from "./ocr-model-pack.mjs";
+import { buildRepairEntrypointCatalog } from "./repair-entrypoint-catalog.mjs";
 
 export async function runInstallCacheDoctor(options = {}) {
   const platform = options.platform ?? process.platform;
@@ -74,6 +75,7 @@ export async function runInstallCacheDoctor(options = {}) {
   ];
 
   const repairPlan = buildRepairPlan({ assets, webView2, permissions });
+  const repairCatalog = buildRepairEntrypointCatalog({ repairPlan, platform });
   const status = deriveDoctorStatus({ assets, permissions });
 
   return {
@@ -84,6 +86,7 @@ export async function runInstallCacheDoctor(options = {}) {
     assets,
     permissions,
     repairPlan,
+    repairCatalog,
     includeUserOverlay: false,
     startsDesktopControl: false,
   };
