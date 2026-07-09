@@ -11,6 +11,7 @@ This roadmap turns the current MVP into a commercial local MCP module. It is wri
 - Gateway-managed overlay, target-window frame, and branded cursor are validated.
 - OCR sidecar has an MVP path, but model pack management and production scheduling are not complete.
 - Phase 7.0-7.7 are plan/proof gates. Phase 7.8 is the first real filesystem execution gate: a local release bundle is installed, upgraded, rejected on corruption, and rolled back through the native transaction engine.
+- Phase 0.14 builds a release-only npm staging package, verifies runtime integrity, runs the official MCP SDK smoke, and packs a tarball with zero first-party source and zero Source Maps.
 
 ## Execution Layers
 
@@ -47,6 +48,7 @@ Acceptance:
 - `npm run phase:1.6` emits install paths using `AGENT_COMPUTER_USE_*`.
 - `npm run phase:7.8` performs install, upgrade, corruption rejection, and rollback against real temporary filesystem roots.
 - The publish-ready npm tarball contains only runtime `dist`, metadata, licenses, and approved runtime assets; source and `*.map` entries fail the release gate.
+- `npm run phase:0.14` records root publish blocking, integrity verification, MCP smoke, protected runtime count, tarball SHA-256, and source/Source Map counts.
 - A clean Windows VM can install, run `computer.health({fast:true})`, and produce a clear degraded state when optional assets are missing.
 
 Non-goals:

@@ -3,8 +3,29 @@ import { test } from "node:test";
 
 import {
   normalizeOcrSidecarResponse,
+  resolveOcrSidecarPath,
   selectOcrRuntime,
 } from "../src/ocr-sidecar.mjs";
+
+test("OCR sidecar path prefers explicit and protected release paths", () => {
+  assert.equal(resolveOcrSidecarPath({
+    env: { AGENT_COMPUTER_USE_OCR_SIDECAR_PATH: "D:\\runtime\\ocr-sidecar.mjs" },
+    moduleDirectory: "C:\\package\\dist",
+    pathExists: () => false,
+  }), "D:\\runtime\\ocr-sidecar.mjs");
+
+  assert.equal(resolveOcrSidecarPath({
+    env: {},
+    moduleDirectory: "C:\\package\\dist",
+    pathExists: (path) => path === "C:\\package\\dist\\ocr-sidecar.mjs",
+  }), "C:\\package\\dist\\ocr-sidecar.mjs");
+
+  assert.equal(resolveOcrSidecarPath({
+    env: {},
+    moduleDirectory: "C:\\package\\src",
+    pathExists: () => false,
+  }), "C:\\package\\ocr-sidecar\\xiaozhiclaw_ocr_sidecar_native.mjs");
+});
 
 test("OCR runtime selection prefers GPU providers before CPU fallback", () => {
   assert.deepEqual(

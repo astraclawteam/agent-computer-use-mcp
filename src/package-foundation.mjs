@@ -1,12 +1,17 @@
 import { readFileSync } from "node:fs";
+import { validateProtectedNpmEntries } from "./npm-release-policy.mjs";
 
 export const FORBIDDEN_PACKAGE_PATHS = [
+  "src/",
+  "test/",
+  "scripts/",
+  "public/",
+  "gateway-overlay/",
+  "native-lab/",
+  "ocr-sidecar/",
+  "windows-installer/",
+  "docs/",
   "node_modules/",
-  "gateway-overlay/bin/",
-  "gateway-overlay/obj/",
-  "native-lab/bin/",
-  "native-lab/obj/",
-  "ocr-sidecar/__pycache__/",
   "artifacts/",
   "models/",
 ];
@@ -157,39 +162,28 @@ export function buildOfflineAssetManifest(options = {}) {
 
 export function getPackageFilesPolicy() {
   return {
-    includeRoots: [
-      "src/",
-      "scripts/",
-      "public/",
-      "gateway-overlay/",
-      "native-lab/",
-      "ocr-sidecar/",
-      "windows-installer/",
-      "docs/productization/",
+    kind: "protected-release-staging",
+    includeRoots: ["dist/"],
+    includeFiles: [
+      "package.json",
+      "release-integrity.json",
       "README.md",
       "CHANGELOG.md",
       "LICENSE",
-      "package.json",
     ],
     forbiddenPathPrefixes: FORBIDDEN_PACKAGE_PATHS,
+    protection: {
+      bundlingRequired: true,
+      minificationRequired: true,
+      obfuscationRequired: true,
+      sourceMap: false,
+      sourceWorkspacePublishBlocked: true,
+    },
   };
 }
 
 export function validatePackEntries(entries) {
-  const violations = [];
-  for (const entry of entries) {
-    const normalized = normalizePackEntry(entry);
-    const matchedPrefix = FORBIDDEN_PACKAGE_PATHS.find((prefix) => normalized.startsWith(prefix));
-    if (matchedPrefix) {
-      violations.push({ entry, normalized, matchedPrefix });
-    }
-  }
-
-  return {
-    status: violations.length === 0 ? "passed" : "failed",
-    entryCount: entries.length,
-    violations,
-  };
+  return validateProtectedNpmEntries(entries);
 }
 
 export function buildPackageFoundationReport(options = {}) {
@@ -216,10 +210,6 @@ export function buildPackageFoundationReport(options = {}) {
     }),
     packageFilesPolicy: getPackageFilesPolicy(),
   };
-}
-
-function normalizePackEntry(entry) {
-  return entry.replace(/\\/g, "/").replace(/^package\//, "");
 }
 
 function readPackageJson() {

@@ -2,6 +2,7 @@
   "name": "agent-computer-use-mcp",
   "version": "0.0.1",
   "description": "A local MCP server for Gateway-managed computer use with cua-driver, OCR, and user-only desktop overlays.",
+  "private": true,
   "license": "MIT",
   "type": "module",
   "repository": {
@@ -45,6 +46,10 @@
   },
   "scripts": {
     "test": "node --test",
+    "prepublishOnly": "node scripts/block-source-publish.mjs",
+    "release:npm:build": "node scripts/build-protected-npm-package.mjs",
+    "release:npm:smoke": "node scripts/protected-npm-smoke.mjs",
+    "release:npm:pack": "node scripts/pack-protected-npm-package.mjs",
     "mcp": "node src/computer-use-mcp-server.mjs",
     "smoke": "node src/smoke.mjs",
     "phase:0.6": "node src/phase-0-6.mjs",
@@ -59,6 +64,7 @@
     "phase:0.11": "node src/phase-0-11-release-readiness.mjs",
     "phase:0.12": "node src/phase-0-12-release-artifacts.mjs",
     "phase:0.13": "node src/phase-0-13-signed-helper-inventory.mjs",
+    "phase:0.14": "node src/phase-0-14-protected-npm-release.mjs",
     "phase:1.4": "node src/phase-1-4-real-mcp-action.mjs",
     "phase:1.6": "node src/phase-1-6-installation.mjs",
     "phase:1.7": "node src/phase-1-7-standard-mcp-client.mjs",
@@ -125,5 +131,9 @@
     "@modelcontextprotocol/sdk": "^1.29.0",
     "onnxruntime-node": "^1.27.0",
     "ppu-paddle-ocr": "^6.0.0"
+  },
+  "devDependencies": {
+    "esbuild": "0.28.1",
+    "javascript-obfuscator": "5.4.6"
   }
 }

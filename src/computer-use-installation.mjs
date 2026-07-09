@@ -1,8 +1,11 @@
 import { resolveCuaDriverCandidate } from "./driver-health.mjs";
+import { existsSync } from "node:fs";
+import { join } from "node:path";
 
 export const COMPUTER_USE_MODULE_NAME = "agent-computer-use-mcp";
 export const COMPUTER_USE_MCP_SERVER_ID = "agent-computer-use";
 export const COMPUTER_USE_MCP_SERVER_ENTRY = "src/computer-use-mcp-server.mjs";
+export const COMPUTER_USE_MCP_PROTECTED_ENTRY = "dist/launcher.mjs";
 
 const OPTIONAL_ENV_OVERRIDES = [
   "AGENT_COMPUTER_USE_CUA_DRIVER",
@@ -10,6 +13,8 @@ const OPTIONAL_ENV_OVERRIDES = [
   "XIAOZHICLAW_CUA_DRIVER",
   "XIAOZHICLAW_CUA_DRIVER_PATH",
   "CUA_DRIVER",
+  "AGENT_COMPUTER_USE_OCR_SIDECAR_PATH",
+  "XIAOZHICLAW_OCR_SIDECAR_PATH",
   "AGENT_COMPUTER_USE_ARTIFACT_ROOT",
   "AGENT_COMPUTER_USE_OCR_MODEL_ROOT",
   "XIAOZHICLAW_COMPUTER_USE_ARTIFACT_ROOT",
@@ -26,6 +31,10 @@ export function getComputerUseInstallationManifest(options = {}) {
     ?? env.XIAOZHICLAW_OCR_MODEL_ROOT
     ?? defaultLocalDataPath(env, "models");
   const driverPath = resolveCuaDriverCandidate(env) ?? defaultCuaDriverPath(env);
+  const entryPath = resolveComputerUseMcpEntry({
+    packageRoot,
+    pathExists: options.pathExists,
+  });
 
   return {
     phase: "1.6",
@@ -34,7 +43,7 @@ export function getComputerUseInstallationManifest(options = {}) {
     transport: "stdio",
     entry: {
       command: process.execPath,
-      args: [COMPUTER_USE_MCP_SERVER_ENTRY],
+      args: [entryPath],
       cwd: packageRoot,
     },
     paths: {
@@ -56,6 +65,14 @@ export function getComputerUseInstallationManifest(options = {}) {
       splitRepoRequired: false,
     },
   };
+}
+
+export function resolveComputerUseMcpEntry(options = {}) {
+  const packageRoot = options.packageRoot ?? process.cwd();
+  const pathExists = options.pathExists ?? existsSync;
+  return pathExists(join(packageRoot, COMPUTER_USE_MCP_PROTECTED_ENTRY))
+    ? COMPUTER_USE_MCP_PROTECTED_ENTRY
+    : COMPUTER_USE_MCP_SERVER_ENTRY;
 }
 
 export function buildClientMcpConfig({ client, manifest }) {

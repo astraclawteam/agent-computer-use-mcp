@@ -25,6 +25,7 @@ test("release readiness gate captures the alpha release command contract", async
     "npm run phase:0.11",
     "npm run phase:0.12",
     "npm run phase:0.13",
+    "npm run phase:0.14",
     "npm run phase:7.8",
     "npm run package:foundation",
     "npm run package:dry-run",
@@ -35,6 +36,7 @@ test("release readiness gate captures the alpha release command contract", async
   assert.ok(gate.evidence.some((item) => item.id === "release-metadata-changelog"));
   assert.ok(gate.evidence.some((item) => item.id === "release-artifact-verification"));
   assert.ok(gate.evidence.some((item) => item.id === "signed-helper-inventory"));
+  assert.ok(gate.evidence.some((item) => item.id === "protected-npm-release"));
   assert.ok(gate.evidence.some((item) => item.id === "offline-install-cache-doctor"));
   assert.ok(gate.evidence.some((item) => item.id === "offline-install-proof"));
   assert.ok(gate.evidence.some((item) => item.id === "first-enable-safety"));
@@ -105,6 +107,7 @@ function requiredCommandSubset(gate) {
     "npm run phase:0.11",
     "npm run phase:0.12",
     "npm run phase:0.13",
+    "npm run phase:0.14",
     "npm run phase:7.8",
     "npm run package:foundation",
     "npm run package:dry-run",

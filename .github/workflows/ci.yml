@@ -34,6 +34,9 @@ jobs:
       - name: Run tests
         run: npm test
 
+      - name: Verify protected npm release
+        run: npm run phase:0.14
+
       - name: Verify standard MCP install contract
         run: npm run phase:1.6
 

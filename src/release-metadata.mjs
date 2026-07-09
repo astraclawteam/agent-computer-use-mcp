@@ -21,7 +21,7 @@ export function buildReleaseMetadata(options = {}) {
     artifacts: [
       {
         name: "npm-pack-tarball",
-        command: "npm pack --dry-run --json",
+        command: "npm run release:npm:pack",
         required: true,
       },
       {
@@ -47,6 +47,11 @@ export function buildReleaseMetadata(options = {}) {
       {
         name: "signed-helper-inventory",
         command: "npm run phase:0.13",
+        required: true,
+      },
+      {
+        name: "protected-npm-release",
+        command: "npm run phase:0.14",
         required: true,
       },
       {

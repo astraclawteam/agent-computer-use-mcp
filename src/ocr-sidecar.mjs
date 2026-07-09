@@ -1,9 +1,10 @@
 import { spawn } from "node:child_process";
+import { existsSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const DEFAULT_SIDECAR_PATH = resolve(__dirname, "../ocr-sidecar/xiaozhiclaw_ocr_sidecar_native.mjs");
+const DEFAULT_SIDECAR_PATH = resolveOcrSidecarPath();
 
 const RUNTIME_PRIORITY = [
   {
@@ -37,6 +38,19 @@ const RUNTIME_PRIORITY = [
     rapidOcrParams: {},
   },
 ];
+
+export function resolveOcrSidecarPath(options = {}) {
+  const env = options.env ?? process.env;
+  const moduleDirectory = options.moduleDirectory ?? __dirname;
+  const pathExists = options.pathExists ?? existsSync;
+  const override = env.AGENT_COMPUTER_USE_OCR_SIDECAR_PATH
+    ?? env.XIAOZHICLAW_OCR_SIDECAR_PATH;
+  if (override) return override;
+
+  const protectedPath = resolve(moduleDirectory, "ocr-sidecar.mjs");
+  if (pathExists(protectedPath)) return protectedPath;
+  return resolve(moduleDirectory, "../ocr-sidecar/xiaozhiclaw_ocr_sidecar_native.mjs");
+}
 
 export function selectOcrRuntime(availableProviders = []) {
   const providers = new Set(availableProviders);

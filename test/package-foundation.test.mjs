@@ -81,21 +81,32 @@ test("offline asset manifest declares productized asset packs", () => {
 test("package files policy rejects generated artifacts and local caches", () => {
   const policy = getPackageFilesPolicy();
   assert.deepEqual(policy.forbiddenPathPrefixes, FORBIDDEN_PACKAGE_PATHS);
-  assert.equal(policy.includeRoots.includes("scripts/"), true);
-  assert.equal(policy.includeRoots.includes("docs/productization/"), true);
-  assert.equal(policy.includeRoots.includes("windows-installer/"), true);
+  assert.deepEqual(policy.includeRoots, ["dist/"]);
+  assert.deepEqual(policy.includeFiles, [
+    "package.json",
+    "release-integrity.json",
+    "README.md",
+    "CHANGELOG.md",
+    "LICENSE",
+  ]);
+  assert.equal(policy.protection.sourceMap, false);
+  assert.equal(policy.protection.obfuscationRequired, true);
 
   const result = validatePackEntries([
     "package/package.json",
+    "package/LICENSE",
+    "package/README.md",
+    "package/CHANGELOG.md",
+    "package/release-integrity.json",
+    "package/dist/launcher.mjs",
+    "package/dist/computer-use-mcp-server.mjs",
+    "package/dist/ocr-sidecar.mjs",
     "package/src/computer-use-mcp-server.mjs",
-    "package/gateway-overlay/bin/Debug/net10.0-windows/GatewayComputerUseOverlay.exe",
-    "package/node_modules/@modelcontextprotocol/sdk/package.json",
   ]);
 
   assert.equal(result.status, "failed");
-  assert.deepEqual(result.violations.map((item) => item.matchedPrefix), [
-    "gateway-overlay/bin/",
-    "node_modules/",
+  assert.deepEqual(result.violations.map((item) => item.code), [
+    "source-entry-forbidden",
   ]);
 });
 
@@ -116,21 +127,17 @@ test("package dry-run script emits a JSON report", async () => {
   assert.equal(report.packageFilesPolicy.forbiddenPathPrefixes.includes("node_modules/"), true);
 });
 
-test("npm package includes executable productization review documents", async () => {
-  const result = process.platform === "win32"
-    ? await runCommand("cmd.exe", ["/d", "/s", "/c", "npm pack --dry-run --json"])
-    : await runCommand("npm", ["pack", "--dry-run", "--json"]);
+test("npm package dry run inspects protected staging without source", async () => {
+  const result = await runNode(["scripts/package-dry-run.mjs"]);
   assert.equal(result.exitCode, 0, result.stderr);
-  const packReport = JSON.parse(result.stdout)[0];
-  const files = packReport.files.map((file) => file.path);
+  const report = JSON.parse(result.stdout);
 
-  assert.ok(files.includes("docs/productization/app-smoke-matrix.md"));
-  assert.ok(files.includes("docs/productization/public-mcp-contract-review.md"));
-  assert.ok(files.includes("docs/productization/release-gates.md"));
-  assert.ok(files.includes("windows-installer/AgentComputerUse.Installer.csproj"));
-  assert.ok(files.includes("windows-installer/Program.cs"));
-  assert.equal(files.some((file) => file.startsWith("windows-installer/bin/")), false);
-  assert.equal(files.some((file) => file.startsWith("windows-installer/obj/")), false);
+  assert.equal(report.status, "passed");
+  assert.equal(report.sourceEntryCount, 0);
+  assert.equal(report.sourceMapCount, 0);
+  assert.equal(report.inventory.status, "passed");
+  assert.equal(report.protection.sourceMap, false);
+  assert.equal(report.protection.selfDefending, true);
 });
 
 test("offline asset manifest script emits the asset manifest only", async () => {
@@ -146,28 +153,6 @@ test("offline asset manifest script emits the asset manifest only", async () => 
 function runNode(args) {
   return new Promise((resolve, reject) => {
     const child = spawn(process.execPath, args, {
-      cwd: process.cwd(),
-      stdio: ["ignore", "pipe", "pipe"],
-      windowsHide: true,
-    });
-    let stdout = "";
-    let stderr = "";
-    child.stdout.on("data", (chunk) => {
-      stdout += chunk.toString("utf8");
-    });
-    child.stderr.on("data", (chunk) => {
-      stderr += chunk.toString("utf8");
-    });
-    child.on("error", reject);
-    child.on("close", (exitCode) => {
-      resolve({ exitCode, stdout, stderr });
-    });
-  });
-}
-
-function runCommand(command, args) {
-  return new Promise((resolve, reject) => {
-    const child = spawn(command, args, {
       cwd: process.cwd(),
       stdio: ["ignore", "pipe", "pipe"],
       windowsHide: true,

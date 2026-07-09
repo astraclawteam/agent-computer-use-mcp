@@ -8,8 +8,20 @@ import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js"
 import {
   buildClientMcpConfig,
   getComputerUseInstallationManifest,
+  resolveComputerUseMcpEntry,
 } from "../src/computer-use-installation.mjs";
 import { COMPUTER_USE_MCP_TOOLS } from "../src/computer-use-mcp-tools.mjs";
+
+test("Phase 1.6 prefers the protected release launcher when present", () => {
+  assert.equal(resolveComputerUseMcpEntry({
+    packageRoot: "C:\\package",
+    pathExists: (path) => path === "C:\\package\\dist\\launcher.mjs",
+  }), "dist/launcher.mjs");
+  assert.equal(resolveComputerUseMcpEntry({
+    packageRoot: "C:\\source",
+    pathExists: () => false,
+  }), "src/computer-use-mcp-server.mjs");
+});
 
 test("Phase 1.6 exposes a stable local module installation manifest", () => {
   const manifest = getComputerUseInstallationManifest({
@@ -40,6 +52,8 @@ test("Phase 1.6 exposes a stable local module installation manifest", () => {
     "XIAOZHICLAW_CUA_DRIVER",
     "XIAOZHICLAW_CUA_DRIVER_PATH",
     "CUA_DRIVER",
+    "AGENT_COMPUTER_USE_OCR_SIDECAR_PATH",
+    "XIAOZHICLAW_OCR_SIDECAR_PATH",
     "AGENT_COMPUTER_USE_ARTIFACT_ROOT",
     "AGENT_COMPUTER_USE_OCR_MODEL_ROOT",
     "XIAOZHICLAW_COMPUTER_USE_ARTIFACT_ROOT",
