@@ -62,6 +62,7 @@ export class ComputerUseProviderRouter {
         "2.8": "supervisor-doctor-repair",
         "2.9": "repair-deny-state",
         "5.0": "concurrent-controller-guard",
+        "5.1": "standard-mcp-multi-client",
       },
       providers: {
         windowCapture: process.platform === "win32" ? "PrintWindow" : "unsupported",
