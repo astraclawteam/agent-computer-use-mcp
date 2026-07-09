@@ -50,6 +50,9 @@ Example MCP client config:
 - `npm run phase:1.7`: verify a standalone official MCP SDK client can connect.
 - `npm run phase:1.8`: verify the server path uses the official MCP SDK transport.
 - `npm run phase:1.4`: run the real `cua-driver mcp` desktop action lifecycle smoke.
+- `npm run package:foundation`: print install layout, version policy, packaging policy, and offline asset manifest.
+- `npm run package:dry-run`: run `npm pack --dry-run --json` and fail if generated artifacts would enter the package.
+- `npm run assets:manifest`: print the offline asset manifest.
 
 ## Environment
 
@@ -80,4 +83,3 @@ Commercial-readiness planning lives in:
 - `docs/productization/app-smoke-matrix.md`
 
 New productization work should use the GitHub issue templates for productization phases and app smokes.
-

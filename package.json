@@ -25,9 +25,13 @@
   "files": [
     "src",
     "public",
-    "gateway-overlay",
-    "native-lab",
-    "ocr-sidecar",
+    "gateway-overlay/*.csproj",
+    "gateway-overlay/*.cs",
+    "gateway-overlay/*.html",
+    "native-lab/*.csproj",
+    "native-lab/*.cs",
+    "ocr-sidecar/*.py",
+    "ocr-sidecar/*.mjs",
     "README.md",
     "LICENSE"
   ],
@@ -50,6 +54,9 @@
     "phase:1.6": "node src/phase-1-6-installation.mjs",
     "phase:1.7": "node src/phase-1-7-standard-mcp-client.mjs",
     "phase:1.8": "node src/phase-1-8-standard-mcp-server.mjs",
+    "package:dry-run": "node scripts/package-dry-run.mjs",
+    "package:foundation": "node scripts/package-foundation-report.mjs",
+    "assets:manifest": "node scripts/offline-asset-manifest.mjs",
     "governance:protect-main": "node scripts/configure-branch-protection.mjs",
     "serve": "node src/server.mjs"
   },
