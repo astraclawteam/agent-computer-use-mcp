@@ -55,6 +55,7 @@
     "phase:1.6": "node src/phase-1-6-installation.mjs",
     "phase:1.7": "node src/phase-1-7-standard-mcp-client.mjs",
     "phase:1.8": "node src/phase-1-8-standard-mcp-server.mjs",
+    "phase:1.9": "node src/phase-1-9-policy-engine.mjs",
     "phase:2.0": "node src/phase-2-0-doctor.mjs",
     "phase:2.1": "node src/phase-2-1-repair.mjs",
     "phase:2.2": "node src/phase-2-2-repair-approval.mjs",
