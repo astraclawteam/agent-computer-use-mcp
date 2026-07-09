@@ -55,6 +55,7 @@
     "phase:1.6": "node src/phase-1-6-installation.mjs",
     "phase:1.7": "node src/phase-1-7-standard-mcp-client.mjs",
     "phase:1.8": "node src/phase-1-8-standard-mcp-server.mjs",
+    "phase:2.0": "node src/phase-2-0-doctor.mjs",
     "package:dry-run": "node scripts/package-dry-run.mjs",
     "package:foundation": "node scripts/package-foundation-report.mjs",
     "assets:manifest": "node scripts/offline-asset-manifest.mjs",

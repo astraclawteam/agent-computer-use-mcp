@@ -6,6 +6,7 @@ import { DEFAULT_OCR_PREWARM_BUCKETS, expandRegionToBucket } from "./crop-bucket
 import { computeDirtyRegion } from "./image-diff.mjs";
 import { fail } from "./computer-use-errors.mjs";
 import { OcrSidecarSession, normalizeOcrSidecarResponse } from "./ocr-sidecar.mjs";
+import { runInstallCacheDoctor } from "./install-cache-doctor.mjs";
 import { captureWindowPngByTitle } from "./real-window-capture.mjs";
 
 export class ComputerUseProviderRouter {
@@ -42,6 +43,7 @@ export class ComputerUseProviderRouter {
         "1.6": "install-config-contract",
         "1.7": "standard-sdk-client-smoke",
         "1.8": "standard-sdk-server-transport",
+        "2.0": "doctor-tool",
       },
       providers: {
         windowCapture: process.platform === "win32" ? "PrintWindow" : "unsupported",
@@ -68,6 +70,38 @@ export class ComputerUseProviderRouter {
     }
 
     return result;
+  }
+
+  async doctor(options = {}) {
+    const runtime = await this.health({
+      fast: options.fast ?? true,
+      prewarm: false,
+    });
+    const installCache = options.includeInstallCache === false
+      ? null
+      : await runInstallCacheDoctor();
+    const status = deriveDoctorStatus([runtime.status, installCache?.status]);
+    const repairPlan = installCache?.repairPlan ?? {
+      mode: "plan-only",
+      requiresApproval: false,
+      actions: [],
+    };
+
+    return {
+      status,
+      module: "agent-computer-use-mcp",
+      runtime,
+      installCache,
+      repairPlan,
+      activeController: this.activeController ? {
+        controllerId: this.activeController.controllerId,
+        status: this.activeController.status,
+        tier: this.activeController.tier,
+        window: this.activeController.window,
+      } : null,
+      includeUserOverlay: false,
+      startsDesktopControl: false,
+    };
   }
 
   async requestAccess(args) {
@@ -446,4 +480,10 @@ export class ComputerUseProviderRouter {
       handle.stop();
     }
   }
+}
+
+function deriveDoctorStatus(statuses) {
+  if (statuses.includes("unavailable")) return "unavailable";
+  if (statuses.includes("degraded")) return "degraded";
+  return "healthy";
 }
