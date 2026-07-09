@@ -56,6 +56,7 @@
     "phase:0.10": "node src/phase-0-10-release-metadata.mjs",
     "phase:0.11": "node src/phase-0-11-release-readiness.mjs",
     "phase:0.12": "node src/phase-0-12-release-artifacts.mjs",
+    "phase:0.13": "node src/phase-0-13-signed-helper-inventory.mjs",
     "phase:1.4": "node src/phase-1-4-real-mcp-action.mjs",
     "phase:1.6": "node src/phase-1-6-installation.mjs",
     "phase:1.7": "node src/phase-1-7-standard-mcp-client.mjs",
