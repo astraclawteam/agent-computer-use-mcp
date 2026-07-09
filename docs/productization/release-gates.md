@@ -18,6 +18,7 @@ npm test
 npm run phase:0.10
 npm run phase:0.11
 npm run phase:0.12
+npm run phase:0.13
 npm run phase:1.6
 npm run phase:1.7
 npm run phase:1.8
@@ -78,6 +79,7 @@ Required evidence:
 - `npm run phase:0.10` verifies release metadata, tag policy, changelog entry, and required release artifact commands.
 - `npm run phase:0.11` verifies the alpha release readiness command manifest, required evidence, and release blockers.
 - `npm run phase:0.12` verifies release artifact hashes and Windows helper signing evidence.
+- `npm run phase:0.13` verifies Windows helper signing inventory coverage for required helper artifacts and reserved future sidecars.
 - `npm run assets:manifest` records offline/cacheable asset packs.
 - `npm run doctor:install-cache` records readiness and repair actions without starting desktop control.
 - `npm run phase:1.9` verifies permission tiers, unsafe-window deny policy, and secure-field fail-closed behavior.
@@ -186,6 +188,7 @@ Required evidence:
 - Release metadata/changelog report from `npm run phase:0.10`.
 - Release readiness manifest report from `npm run phase:0.11`.
 - Signing verification output from `npm run phase:0.12`.
+- Signed Windows helper inventory proof from `npm run phase:0.13`.
 - Offline install proof from `npm run phase:7.4`.
 - Daemon session proof from `npm run phase:2.10`.
 - Daemon session doctor/repair proof from `npm run phase:2.11`.

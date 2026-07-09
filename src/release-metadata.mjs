@@ -45,6 +45,11 @@ export function buildReleaseMetadata(options = {}) {
         required: true,
       },
       {
+        name: "signed-helper-inventory",
+        command: "npm run phase:0.13",
+        required: true,
+      },
+      {
         name: "offline-install-proof",
         command: "npm run phase:7.4",
         required: true,

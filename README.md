@@ -49,6 +49,7 @@ Example MCP client config:
 - `npm run phase:0.10`: verify release metadata, tag policy, changelog entry, and required release artifact commands.
 - `npm run phase:0.11`: verify the alpha release readiness command manifest, required evidence, and release blockers.
 - `npm run phase:0.12`: verify release artifact hashes and Windows helper signing evidence.
+- `npm run phase:0.13`: verify Windows helper signing inventory coverage for required and reserved helpers.
 - `npm run phase:1.6`: print the local MCP install/config contract.
 - `npm run phase:1.7`: verify a standalone official MCP SDK client can connect.
 - `npm run phase:1.8`: verify the server path uses the official MCP SDK transport.
