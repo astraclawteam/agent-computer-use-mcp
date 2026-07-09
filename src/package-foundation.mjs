@@ -165,6 +165,7 @@ export function getPackageFilesPolicy() {
       "native-lab/",
       "ocr-sidecar/",
       "README.md",
+      "CHANGELOG.md",
       "LICENSE",
       "package.json",
     ],

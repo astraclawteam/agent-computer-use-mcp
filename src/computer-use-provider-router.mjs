@@ -41,6 +41,7 @@ export class ComputerUseProviderRouter {
       version: "0.0.1",
       phases: {
         "0.9": "contract-freeze",
+        "0.10": "release-metadata-changelog",
         "1.0": "stdio-mcp-server",
         "1.1": "provider-router",
         "1.2": "packaging-health-contract",
