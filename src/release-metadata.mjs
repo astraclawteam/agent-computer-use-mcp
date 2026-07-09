@@ -39,6 +39,11 @@ export function buildReleaseMetadata(options = {}) {
         command: "npm run release:readiness",
         required: true,
       },
+      {
+        name: "release-artifact-verification",
+        command: "npm run release:artifacts",
+        required: true,
+      },
     ],
     includeUserOverlay: false,
     startsDesktopControl: false,
