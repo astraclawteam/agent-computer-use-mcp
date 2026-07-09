@@ -10,6 +10,14 @@ This roadmap turns the current MVP into a commercial local MCP module. It is wri
 - `cua-driver mcp` is the current desktop action backend.
 - Gateway-managed overlay, target-window frame, and branded cursor are validated.
 - OCR sidecar has an MVP path, but model pack management and production scheduling are not complete.
+- Phase 7.0-7.7 are plan/proof gates. Phase 7.8 is the first real filesystem execution gate: a local release bundle is installed, upgraded, rejected on corruption, and rolled back through the native transaction engine.
+
+## Execution Layers
+
+- **Proof layer:** validates contracts, safety invariants, manifests, and repair plans without changing the machine.
+- **Transaction layer:** `windows-installer` is the only writer of immutable release directories and `state/install-state.json`.
+- **Acquisition layer:** the next productization PR will download or materialize signed assets into the local bundle/cache before invoking the transaction layer.
+- **Host layer:** the MCP daemon and Gateway consume the active release; they do not rewrite installation state themselves.
 
 ## Phase P0: Package Foundation
 
@@ -26,6 +34,9 @@ Deliverables:
 - Installer/cache strategy for `cua-driver`, overlay shell, OCR runtime, and OCR model packs.
 - Release artifact policy for online and offline installs.
 - Code signing policy for Windows helper binaries.
+- Native per-user installer transaction for local release bundles.
+- Side-by-side immutable releases with atomic activation and verified rollback.
+- Protected npm distribution built from release staging: bundle, minify, and obfuscate first-party JavaScript; publish no `src/`, tests, C# source, or Source Map files.
 
 Acceptance:
 
@@ -34,6 +45,8 @@ Acceptance:
 - `npm run assets:manifest` emits a standalone offline asset manifest.
 - `npm run doctor:install-cache` emits a plan-only readiness report for driver, overlay, OCR runtime/model, WebView2, and permissions without starting desktop control.
 - `npm run phase:1.6` emits install paths using `AGENT_COMPUTER_USE_*`.
+- `npm run phase:7.8` performs install, upgrade, corruption rejection, and rollback against real temporary filesystem roots.
+- The publish-ready npm tarball contains only runtime `dist`, metadata, licenses, and approved runtime assets; source and `*.map` entries fail the release gate.
 - A clean Windows VM can install, run `computer.health({fast:true})`, and produce a clear degraded state when optional assets are missing.
 
 Non-goals:
@@ -178,6 +191,7 @@ Deliverables:
 - Offline bundle policy.
 - Clear repair entry points for missing `cua-driver`, OCR model pack, WebView2, permissions, and OS features.
 - Progress reporting for long operations.
+- Headless Windows installer entrypoint for host-driven install, upgrade, status, and rollback.
 
 Acceptance:
 
@@ -185,6 +199,7 @@ Acceptance:
 - Missing optional components show exact repair actions.
 - The install/cache doctor remains plan-only until the host receives explicit user approval.
 - Offline bundle can run `health`, overlay, semantic capture, and configured model-pack OCR without network.
+- Failed bundle verification leaves the active release unchanged and removes transaction staging files.
 
 ## Release Gates
 

@@ -55,6 +55,7 @@ export const ALPHA_RELEASE_COMMANDS = [
   "npm run phase:7.5",
   "npm run phase:7.6",
   "npm run phase:7.7",
+  "npm run phase:7.8",
   "npm run phase:1.4",
   "npm run package:foundation",
   "npm run package:dry-run",
@@ -130,6 +131,7 @@ export const REQUIRED_RELEASE_EVIDENCE = [
   ["first-enable-safety", "npm run phase:7.5"],
   ["repair-entrypoint-catalog", "npm run phase:7.6"],
   ["clean-install-degraded-proof", "npm run phase:7.7"],
+  ["windows-installer-transaction", "npm run phase:7.8"],
 ];
 
 export function buildReleaseReadinessGate(options = {}) {
