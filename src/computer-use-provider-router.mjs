@@ -77,6 +77,7 @@ export class ComputerUseProviderRouter {
         "5.4": "mcp-inspector-smoke",
         "6.0": "app-smoke-matrix-contract",
         "6.1": "app-smoke-coverage-gate",
+        "7.0": "first-run-readiness",
       },
       providers: {
         windowCapture: process.platform === "win32" ? "PrintWindow" : "unsupported",
