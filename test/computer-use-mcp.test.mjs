@@ -15,6 +15,7 @@ test("agent-computer-use-mcp freezes the local MCP tool contract", () => {
   assert.deepEqual(toolNames, [
     "computer.health",
     "computer.doctor",
+    "computer.repair",
     "computer.installation",
     "computer.request_access",
     "computer.capture",
@@ -37,6 +38,12 @@ test("agent-computer-use-mcp freezes the local MCP tool contract", () => {
   assert.equal(doctor.annotations.readOnlyHint, true);
   assert.equal(doctor.inputSchema.properties.fast.type, "boolean");
   assert.equal(doctor.inputSchema.properties.includeInstallCache.type, "boolean");
+
+  const repair = COMPUTER_USE_MCP_TOOLS.find((tool) => tool.name === "computer.repair");
+  assert.equal(repair.annotations.phase, "2.1");
+  assert.equal(repair.annotations.destructiveHint, true);
+  assert.equal(repair.inputSchema.properties.dryRun.type, "boolean");
+  assert.equal(repair.inputSchema.properties.approved.type, "boolean");
 
   const capture = COMPUTER_USE_MCP_TOOLS.find((tool) => tool.name === "computer.capture_window");
   assert.equal(capture.annotations.phase, "1.0");
@@ -68,6 +75,7 @@ test("agent-computer-use-mcp answers initialize, tools/list, and health over std
     assert.deepEqual(listed.tools.map((tool) => tool.name), [
       "computer.health",
       "computer.doctor",
+      "computer.repair",
       "computer.installation",
       "computer.request_access",
       "computer.capture",
@@ -105,6 +113,18 @@ test("agent-computer-use-mcp answers initialize, tools/list, and health over std
     assert.equal(Array.isArray(doctor.structuredContent.repairPlan.actions), true);
     assert.equal(doctor.structuredContent.installCache.includeUserOverlay, false);
     assert.equal(doctor.structuredContent.installCache.startsDesktopControl, false);
+
+    const repair = await client.callTool({
+      name: "computer.repair",
+      arguments: { dryRun: false, approved: false },
+    });
+    assert.equal(repair.isError, false);
+    assert.equal(repair.structuredContent.status, "approval_required");
+    assert.equal(repair.structuredContent.mode, "plan-only");
+    assert.equal(repair.structuredContent.executesImmediately, false);
+    assert.equal(repair.structuredContent.includeUserOverlay, false);
+    assert.equal(repair.structuredContent.startsDesktopControl, false);
+    assert.equal(Array.isArray(repair.structuredContent.repairPlan.actions), true);
 
     const missingController = await client.callTool({
       name: "computer.capture",

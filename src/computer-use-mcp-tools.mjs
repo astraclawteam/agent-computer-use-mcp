@@ -40,6 +40,31 @@ export const COMPUTER_USE_MCP_TOOLS = [
     },
   },
   {
+    name: "computer.repair",
+    title: "Computer Use Repair",
+    description: "Return an approval-gated repair plan for local Computer Use dependencies.",
+    annotations: { phase: "2.1", destructiveHint: true },
+    inputSchema: {
+      type: "object",
+      properties: {
+        dryRun: {
+          type: "boolean",
+          description: "When true, only return the repair plan and never execute actions.",
+        },
+        approved: {
+          type: "boolean",
+          description: "Must be true before any future repair execution path can run.",
+        },
+        actionIds: {
+          type: "array",
+          items: { type: "string" },
+          description: "Optional subset of repair action ids to include in the plan.",
+        },
+      },
+      additionalProperties: false,
+    },
+  },
+  {
     name: "computer.installation",
     title: "Computer Use Installation",
     description: "Return local MCP module installation manifest and client configuration templates.",

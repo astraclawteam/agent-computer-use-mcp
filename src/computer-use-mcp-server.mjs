@@ -61,6 +61,8 @@ async function callTool(name, args) {
       structuredContent = await router.health(args);
     } else if (name === "computer.doctor") {
       structuredContent = await router.doctor(args);
+    } else if (name === "computer.repair") {
+      structuredContent = await router.repair(args);
     } else if (name === "computer.installation") {
       structuredContent = getComputerUseInstallation({
         client: args.client ?? "codex",
