@@ -54,6 +54,11 @@ export function buildReleaseMetadata(options = {}) {
         command: "npm run phase:1.11",
         required: true,
       },
+      {
+        name: "control-approval-state",
+        command: "npm run phase:1.12",
+        required: true,
+      },
     ],
     includeUserOverlay: false,
     startsDesktopControl: false,

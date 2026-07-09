@@ -70,6 +70,8 @@ async function callTool(name, args) {
       });
     } else if (name === "computer.request_access") {
       structuredContent = await router.requestAccess(args);
+    } else if (name === "computer.approve") {
+      structuredContent = await router.approveAccess(args);
     } else if (name === "computer.capture") {
       structuredContent = await router.capture(args);
     } else if (name === "computer.act") {
