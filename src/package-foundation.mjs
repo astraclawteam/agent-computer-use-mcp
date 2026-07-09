@@ -164,6 +164,7 @@ export function getPackageFilesPolicy() {
       "gateway-overlay/",
       "native-lab/",
       "ocr-sidecar/",
+      "docs/productization/",
       "README.md",
       "CHANGELOG.md",
       "LICENSE",

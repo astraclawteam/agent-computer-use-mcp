@@ -82,6 +82,7 @@ test("package files policy rejects generated artifacts and local caches", () => 
   const policy = getPackageFilesPolicy();
   assert.deepEqual(policy.forbiddenPathPrefixes, FORBIDDEN_PACKAGE_PATHS);
   assert.equal(policy.includeRoots.includes("scripts/"), true);
+  assert.equal(policy.includeRoots.includes("docs/productization/"), true);
 
   const result = validatePackEntries([
     "package/package.json",
@@ -114,6 +115,19 @@ test("package dry-run script emits a JSON report", async () => {
   assert.equal(report.packageFilesPolicy.forbiddenPathPrefixes.includes("node_modules/"), true);
 });
 
+test("npm package includes executable productization review documents", async () => {
+  const result = process.platform === "win32"
+    ? await runCommand("cmd.exe", ["/d", "/s", "/c", "npm pack --dry-run --json"])
+    : await runCommand("npm", ["pack", "--dry-run", "--json"]);
+  assert.equal(result.exitCode, 0, result.stderr);
+  const packReport = JSON.parse(result.stdout)[0];
+  const files = packReport.files.map((file) => file.path);
+
+  assert.ok(files.includes("docs/productization/app-smoke-matrix.md"));
+  assert.ok(files.includes("docs/productization/public-mcp-contract-review.md"));
+  assert.ok(files.includes("docs/productization/release-gates.md"));
+});
+
 test("offline asset manifest script emits the asset manifest only", async () => {
   const result = await runNode(["scripts/offline-asset-manifest.mjs"]);
   assert.equal(result.exitCode, 0, result.stderr);
@@ -127,6 +141,28 @@ test("offline asset manifest script emits the asset manifest only", async () => 
 function runNode(args) {
   return new Promise((resolve, reject) => {
     const child = spawn(process.execPath, args, {
+      cwd: process.cwd(),
+      stdio: ["ignore", "pipe", "pipe"],
+      windowsHide: true,
+    });
+    let stdout = "";
+    let stderr = "";
+    child.stdout.on("data", (chunk) => {
+      stdout += chunk.toString("utf8");
+    });
+    child.stderr.on("data", (chunk) => {
+      stderr += chunk.toString("utf8");
+    });
+    child.on("error", reject);
+    child.on("close", (exitCode) => {
+      resolve({ exitCode, stdout, stderr });
+    });
+  });
+}
+
+function runCommand(command, args) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(command, args, {
       cwd: process.cwd(),
       stdio: ["ignore", "pipe", "pipe"],
       windowsHide: true,
