@@ -163,7 +163,7 @@ test("Windows offline bundle fails closed when a required runtime or asset is ab
   }
 });
 
-test("candidate preparation turns locked driver OCR and WebView2 bytes into installable asset views", async () => {
+test("candidate preparation turns locked driver and OCR bytes into installable asset views", async () => {
   const root = await fixtureRoot();
   const detBytes = Buffer.from("det", "utf8");
   const recBytes = Buffer.from("rec", "utf8");
@@ -182,7 +182,6 @@ test("candidate preparation turns locked driver OCR and WebView2 bytes into inst
     ["ocr-model-pp-ocrv6-small-det", detBytes],
     ["ocr-model-pp-ocrv6-small-rec", recBytes],
     ["ocr-model-pp-ocrv6-small-rec-metadata", Buffer.from(metadata)],
-    ["webview2-evergreen-standalone-windows-x64", Buffer.from("webview2")],
   ]) {
     const path = await fixtureFile(join(root, "acquired"), id, bytes);
     acquiredAssets.push({ id, path, sizeBytes: bytes.length, sha256: sha256(bytes), version: "1.0.0" });
@@ -190,7 +189,7 @@ test("candidate preparation turns locked driver OCR and WebView2 bytes into inst
   const lock = {
     assets: acquiredAssets.map((asset) => ({
       id: asset.id,
-      version: asset.id === "webview2-evergreen-standalone-windows-x64" ? "1.3.241.15" : asset.version,
+      version: asset.version,
       source: { sizeBytes: asset.sizeBytes, sha256: asset.sha256, fileName: asset.id, url: `https://example.test/${asset.id}` },
       license: { spdx: "MIT", sourceUrl: "https://example.test/license" },
     })),
@@ -209,7 +208,6 @@ test("candidate preparation turns locked driver OCR and WebView2 bytes into inst
   assert.deepEqual(prepared.assets.map((asset) => asset.id), [
     "cua-driver-windows-x64",
     "ocr-model-pp-ocrv6-small",
-    "webview2-evergreen-standalone-windows-x64",
   ]);
   assert.deepEqual(prepared.target, WINDOWS_X64_RELEASE_TARGET);
   assert.equal(prepared.modelPack.dictionaryEntries, 3);
@@ -217,9 +215,7 @@ test("candidate preparation turns locked driver OCR and WebView2 bytes into inst
   assert.equal(manifest.developmentOnly, true);
   assert.deepEqual(manifest.target, WINDOWS_X64_RELEASE_TARGET);
   assert.deepEqual(manifest.assets.map((asset) => asset.id), prepared.assets.map((asset) => asset.id));
-  const webView = manifest.assets.find((asset) => asset.id === "webview2-evergreen-standalone-windows-x64");
-  assert.equal(webView.authenticode.mode, "microsoft");
-  assert.equal(webView.version, "1.3.241+15");
+  assert.equal(manifest.assets.some((asset) => asset.id.includes("webview2")), false);
 });
 
 async function offlineFixture(root) {
@@ -236,7 +232,7 @@ async function offlineFixture(root) {
     keyringPath: await fixtureFile(trustRoot, "keyring.json", "candidate-keyring"),
   };
   const assets = [];
-  for (const id of ["cua-driver-windows-x64", "ocr-model-pp-ocrv6-small", "webview2-evergreen-standalone-windows-x64"]) {
+  for (const id of ["cua-driver-windows-x64", "ocr-model-pp-ocrv6-small"]) {
     const bytes = Buffer.from(`blob-${id}`, "utf8");
     const path = await fixtureFile(join(root, "asset-source"), `${id}.zip`, bytes);
     assets.push({ id, path, sizeBytes: bytes.length, sha256: sha256(bytes) });

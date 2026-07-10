@@ -24,11 +24,9 @@ test("WinForms real sequence declares cua-driver session and enables cursor rend
   assert.match(script, /windowId:\s*window\.window_id/);
 });
 
-test("Desktop gateway overlay is topmost, click-through, and constrained to 8-16px", async () => {
+test("Desktop gateway overlay is native, topmost, click-through, and constrained to 8-16px", async () => {
   const program = await readFile(new URL("../gateway-overlay/Program.cs", import.meta.url), "utf8");
   const project = await readFile(new URL("../gateway-overlay/GatewayComputerUseOverlay.csproj", import.meta.url), "utf8");
-  const overlayHtml = await readFile(new URL("../gateway-overlay/overlay.html", import.meta.url), "utf8");
-
   assert.match(program, /TopMost = true/);
   assert.match(program, /WS_EX_TRANSPARENT/);
   assert.match(program, /WS_EX_NOACTIVATE/);
@@ -36,13 +34,16 @@ test("Desktop gateway overlay is topmost, click-through, and constrained to 8-16
   assert.match(program, /RestWaveThickness = 12/);
   assert.match(program, /MaxWaveThickness = 16/);
   assert.match(program, /Gateway-managed Computer Use/);
-  assert.match(project, /Microsoft\.Web\.WebView2/);
-  assert.match(overlayHtml, /import \{ createWaveOverlay \} from "\.\.\/public\/wave-overlay\.mjs"/);
+  assert.doesNotMatch(project, /Microsoft\.Web\.WebView2/);
+  assert.doesNotMatch(program, /WebView2/);
+  assert.match(program, /OnPaint/);
+  assert.match(program, /GraphicsPath/);
+  assert.match(program, /Invalidate\(\)/);
+  assert.match(program, /WaveThickness/);
   assert.match(program, /AGENT_COMPUTER_USE_OVERLAY_TARGET_RECT_FILE/);
-  assert.match(program, /ExecuteScriptAsync/);
+  assert.match(program, /SyncTargetRect/);
   assert.match(program, /RaiseTargetWindowNoActivate/);
   assert.match(program, /SWP_NOACTIVATE/);
   assert.match(program, /HWND_NOTOPMOST/);
-  assert.match(overlayHtml, /id="target-frame"/);
-  assert.match(overlayHtml, /__setComputerUseTargetRect/);
+  assert.match(program, /DrawTargetFrame/);
 });

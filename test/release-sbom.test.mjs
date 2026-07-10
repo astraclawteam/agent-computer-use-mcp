@@ -72,7 +72,6 @@ test("release SBOM combines locked native assets with production npm components"
     "onnxruntime-node",
     "ocr-model-pp-ocrv6-small-det",
     "ocr-model-pp-ocrv6-small-rec",
-    "webview2-evergreen-standalone-windows-x64",
   ]) {
     assert.equal(componentIds.has(id), true, id);
   }
@@ -141,7 +140,6 @@ function releaseLock() {
       locked("ocr-model-pp-ocrv6-small-det"),
       locked("ocr-model-pp-ocrv6-small-rec"),
       locked("ocr-model-pp-ocrv6-small-rec-metadata"),
-      locked("webview2-evergreen-standalone-windows-x64"),
     ],
   };
 }

@@ -35,11 +35,6 @@ const EXPECTED_ASSETS = new Map([
     sizeBytes: 150_579,
     sha256: "ab078671bb49f06228eadccd34f1bb501e157f7a047095ffb943ba81512c77d1",
   }],
-  ["webview2-evergreen-standalone-windows-x64", {
-    version: "1.3.241.15",
-    sizeBytes: 203_654_864,
-    sha256: "3a08103bed8a3d9aefdfc9ac10a672ea69605163f2dcb08d76cfd3e0444511c9",
-  }],
 ]);
 
 test("Windows release asset lock pins exact real upstream bytes", async () => {
@@ -50,6 +45,7 @@ test("Windows release asset lock pins exact real upstream bytes", async () => {
   assert.equal(lock.platform, "windows-x64");
   assert.equal(lock.assets.length, EXPECTED_ASSETS.size);
   assert.deepEqual(new Set(lock.assets.map((asset) => asset.id)), new Set(EXPECTED_ASSETS.keys()));
+  assert.equal(lock.assets.some((asset) => asset.id.includes("webview2")), false);
 
   for (const asset of lock.assets) {
     const expected = EXPECTED_ASSETS.get(asset.id);

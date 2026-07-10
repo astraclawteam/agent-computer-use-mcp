@@ -38,8 +38,8 @@ test("Windows release assembly executes verified stages and atomically promotes 
   assert.deepEqual(report.target, WINDOWS_X64_RELEASE_TARGET);
   assert.equal(report.installable, true);
   assert.equal(report.distributionStatus, "blocked_unsigned");
-  assert.equal(report.assetCount, 6);
-  assert.equal(report.blobCount, 6);
+  assert.equal(report.assetCount, 5);
+  assert.equal(report.blobCount, 2);
   assert.deepEqual(report.runtimeSelection.retainedNativeFiles, [
     "DirectML.dll",
     "dxcompiler.dll",
@@ -57,8 +57,9 @@ test("Windows release assembly executes verified stages and atomically promotes 
   assert.deepEqual(manifest.evidence.target, WINDOWS_X64_RELEASE_TARGET);
   assert.equal(manifest.evidence.offlineBundleSizeBytes, 11);
   assert.equal(manifest.evidence.offlineBundleMaxBytes, WINDOWS_X64_OFFLINE_MAX_BYTES);
-  assert.equal(manifest.evidence.assetCount, 6);
-  assert.equal(manifest.evidence.blobCount, 6);
+  assert.equal(manifest.evidence.lockedAssetCount, 5);
+  assert.equal(manifest.evidence.assetCount, 2);
+  assert.equal(manifest.evidence.blobCount, 2);
   assert.equal(manifest.evidence.runtimeSelection.packageVersion, "1.27.0");
   assert.equal((await stat(report.checksumsPath)).isFile(), true);
   assert.equal((await readFile(report.checksumsPath, "utf8")).includes("\r"), false);
@@ -372,7 +373,6 @@ async function createFixture() {
     "ocr-model-pp-ocrv6-small-det",
     "ocr-model-pp-ocrv6-small-rec",
     "ocr-model-pp-ocrv6-small-rec-metadata",
-    "webview2-evergreen-standalone-windows-x64",
   ];
   const assets = [];
   for (const id of ids) {
@@ -499,8 +499,8 @@ function fixtureDependencies({ calls, acquired, options }) {
         fileName,
         sizeBytes: options.reportedOfflineSizeBytes ?? sizeBytes,
         firstEnableDownloadCount: 0,
-        assetCount: 6,
-        blobCount: 6,
+        assetCount: 2,
+        blobCount: 2,
       };
     },
     async packProtectedNpmPackage({ releaseRoot }) {

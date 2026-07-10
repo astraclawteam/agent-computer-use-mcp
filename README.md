@@ -51,7 +51,7 @@ Example MCP client config:
 - `npm run phase:0.12`: verify release artifact hashes and Windows helper signing evidence.
 - `npm run phase:0.13`: verify Windows helper signing inventory coverage for required and reserved helpers.
 - `npm run phase:0.14`: build, integrity-check, MCP-smoke, and pack the protected npm release.
-- `npm run release:windows:assets`: acquire and hash-verify the six locked Windows x64 release inputs.
+- `npm run release:windows:assets`: acquire and hash-verify the five locked Windows x64 release inputs.
 - `npm run release:windows:assemble`: build the real `blocked_unsigned` candidate under `artifacts/windows-release/<version>/`.
 - `npm run release:windows:size-report`: re-stat the assembled offline ZIP and verify its 310 MiB limit, Windows x64 target, ONNX native inventory, and single-blob asset evidence.
 - `npm run phase:0.15`: reverify the outer and inner release inventories, install and activate from bundled bytes with installer network access disabled, resolve the active cua-driver, and standard-MCP-smoke the real candidate.

@@ -13,7 +13,6 @@ const REQUIRED_COMPONENTS = [
   "onnxruntime-node",
   "ocr-model-pp-ocrv6-small-det",
   "ocr-model-pp-ocrv6-small-rec",
-  "webview2-evergreen-standalone-windows-x64",
 ];
 
 export async function buildReleaseSbom({

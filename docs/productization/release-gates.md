@@ -89,7 +89,7 @@ Required evidence:
 - `npm run phase:0.12` verifies release artifact hashes and Windows helper signing evidence.
 - `npm run phase:0.13` verifies Windows helper signing inventory coverage for required helper artifacts and reserved future sidecars.
 - `npm run phase:0.14` builds, integrity-checks, MCP-smokes, and packs the protected npm release with no source or Source Maps.
-- `npm run phase:0.15` verifies six locked upstream assets, assembles the real Windows candidate under a fixed artifact contract, verifies the offline ZIP's exact internal inventory and hashes, installs and activates it with installer network access disabled, proves `computer.doctor` resolves the activated candidate cua-driver rather than host overrides, starts the protected MCP with portable Node.js, and verifies release checksums and CycloneDX SBOM evidence.
+- `npm run phase:0.15` verifies five locked upstream assets, assembles the real Windows candidate under a fixed artifact contract, verifies the offline ZIP's exact internal inventory and hashes, installs and activates it with installer network access disabled, proves `computer.doctor` resolves the activated candidate cua-driver rather than host overrides, verifies the native overlay, starts the protected MCP with portable Node.js, and verifies release checksums and CycloneDX SBOM evidence.
 - `npm run release:windows:size-report` independently verifies the final Windows x64 ZIP is at most 310 MiB and that release evidence contains only the pinned ONNX Windows x64 runtime inventory with valid retained/removed byte and single-blob asset counts.
 - `npm run assets:manifest` records offline/cacheable asset packs.
 - `npm run doctor:install-cache` records readiness and repair actions without starting desktop control.

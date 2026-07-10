@@ -76,8 +76,9 @@ function releaseEvidence() {
     },
     offlineBundleSizeBytes: 300_000_000,
     offlineBundleMaxBytes: 325_058_560,
-    assetCount: 6,
-    blobCount: 6,
+    lockedAssetCount: 5,
+    assetCount: 2,
+    blobCount: 2,
   };
 }
 

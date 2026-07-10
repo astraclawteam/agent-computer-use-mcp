@@ -26,8 +26,9 @@ test("Windows release size report verifies the real ZIP and selected runtime inv
   assert.equal(report.offlineBundleMaxBytes, WINDOWS_X64_OFFLINE_MAX_BYTES);
   assert.deepEqual(report.runtimeSelection.retainedNativeFiles, WINDOWS_X64_ONNX_REQUIRED_FILES);
   assert.equal(report.runtimeSelection.packageVersion, "1.27.0");
-  assert.equal(report.assetCount, 6);
-  assert.equal(report.blobCount, 6);
+  assert.equal(report.lockedAssetCount, 5);
+  assert.equal(report.assetCount, 2);
+  assert.equal(report.blobCount, 2);
 });
 
 test("Windows release size report rejects missing runtime selection evidence", async () => {
@@ -101,8 +102,9 @@ async function createFixture({ sizeBytes = 1024, mutate } = {}) {
       },
       offlineBundleSizeBytes: sizeBytes,
       offlineBundleMaxBytes: WINDOWS_X64_OFFLINE_MAX_BYTES,
-      assetCount: 6,
-      blobCount: 6,
+      lockedAssetCount: 5,
+      assetCount: 2,
+      blobCount: 2,
     },
     artifacts: [{ id: "windows-offline-bundle", fileName, sizeBytes }],
   };

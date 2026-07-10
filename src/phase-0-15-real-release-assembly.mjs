@@ -30,7 +30,6 @@ const REQUIRED_SBOM_COMPONENTS = new Set([
   "onnxruntime-node",
   "ocr-model-pp-ocrv6-small-det",
   "ocr-model-pp-ocrv6-small-rec",
-  "webview2-evergreen-standalone-windows-x64",
 ]);
 const MCP_SMOKE_TIMEOUT_MS = 15_000;
 const DRIVER_OVERRIDE_ENV_KEYS = Object.freeze([
@@ -122,9 +121,9 @@ export async function runRealReleaseAssemblyPhase(options = {}) {
       expectedDriverPath: driver?.entryPoint,
     });
     const model = activated.report.assets.find((asset) => asset.id === "ocr-model-pp-ocrv6-small");
-    const webView = activated.report.assets.find((asset) => asset.id === "webview2-evergreen-standalone-windows-x64");
     const ocrModelPackPresent = await assetFilesPresent(model, PP_OCRV6_SMALL_MODEL_PACK.files);
-    const webView2InstallerPresent = await assetFilesPresent(webView, ["MicrosoftEdgeWebView2RuntimeInstallerX64.exe"]);
+    const nativeOverlayPresent = (await stat(join(activePayloadRoot, ...runtime.overlay.split("/"))).catch(() => null))?.isFile() === true;
+    const overlayRequiresWebView2 = false;
     const sbomVerified = await verifySbom(requiredArtifact(assembly, "release-sbom").path);
 
     const checksumsVerified = outputVerification.status === "passed";
@@ -137,7 +136,7 @@ export async function runRealReleaseAssemblyPhase(options = {}) {
       && activated.report.status === "activated"
       && mcpSmoke.status === "passed"
       && ocrModelPackPresent
-      && webView2InstallerPresent
+      && nativeOverlayPresent
       && checksumsVerified
       && sbomVerified;
     return {
@@ -157,7 +156,8 @@ export async function runRealReleaseAssemblyPhase(options = {}) {
       activatedDriverPathMatches: mcpSmoke.activatedDriverPathMatches,
       mcpDeadlineMs: MCP_SMOKE_TIMEOUT_MS,
       ocrModelPackPresent,
-      webView2InstallerPresent,
+      nativeOverlayPresent,
+      overlayRequiresWebView2,
       checksumsVerified,
       sbomVerified,
       firstEnableDownloadCount: assembly.firstEnableDownloadCount,

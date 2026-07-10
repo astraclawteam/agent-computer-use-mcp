@@ -48,8 +48,10 @@ export async function buildWindowsReleaseSizeReport({ manifestPath, artifactRoot
     throw releaseError("release.runtime_evidence_invalid", "ONNX Runtime evidence does not match the Windows x64 release contract");
   }
 
-  if (!positiveSafeInteger(evidence?.assetCount)
+  if (!positiveSafeInteger(evidence?.lockedAssetCount)
+    || !positiveSafeInteger(evidence?.assetCount)
     || !positiveSafeInteger(evidence?.blobCount)
+    || evidence.assetCount > evidence.lockedAssetCount
     || evidence.blobCount > evidence.assetCount) {
     throw releaseError("release.asset_evidence_invalid", "Release asset and blob counts are invalid");
   }
@@ -62,6 +64,7 @@ export async function buildWindowsReleaseSizeReport({ manifestPath, artifactRoot
     offlineBundleMaxBytes: offlineSize.maxBytes,
     offlineBundleMaxMiB: toMiB(offlineSize.maxBytes),
     runtimeSelection,
+    lockedAssetCount: evidence.lockedAssetCount,
     assetCount: evidence.assetCount,
     blobCount: evidence.blobCount,
   };

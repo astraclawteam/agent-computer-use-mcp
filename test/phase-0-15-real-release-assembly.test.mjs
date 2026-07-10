@@ -56,7 +56,6 @@ test("Phase 0.15 assembles installs and smokes a real offline Windows release ca
     "ocr-model-pp-ocrv6-small-det",
     "ocr-model-pp-ocrv6-small-rec",
     "ocr-model-pp-ocrv6-small-rec-metadata",
-    "webview2-evergreen-standalone-windows-x64",
   ]) {
     assert.equal(releaseDocs.includes(assetId), true, assetId);
   }
@@ -81,7 +80,8 @@ test("Phase 0.15 assembles installs and smokes a real offline Windows release ca
   assert.equal(report.activatedDriverPathMatches, true);
   assert.equal(report.mcpDeadlineMs, 15_000);
   assert.equal(report.ocrModelPackPresent, true);
-  assert.equal(report.webView2InstallerPresent, true);
+  assert.equal(report.nativeOverlayPresent, true);
+  assert.equal(report.overlayRequiresWebView2, false);
   assert.equal(report.checksumsVerified, true);
   assert.equal(report.sbomVerified, true);
   assert.equal(report.firstEnableDownloadCount, 0);

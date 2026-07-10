@@ -55,18 +55,6 @@ export async function prepareWindowsOfflineAssets(options = {}) {
     generatedAt,
   });
 
-  const webView = requireAcquired(acquired, "webview2-evergreen-standalone-windows-x64");
-  const webViewRoot = join(outputRoot, "webview2-source");
-  const webViewName = "MicrosoftEdgeWebView2RuntimeInstallerX64.exe";
-  await mkdir(webViewRoot, { recursive: true });
-  await copyFile(webView.path, join(webViewRoot, webViewName));
-  const webViewArchive = await archiveDirectory({
-    id: webView.id,
-    sourceRoot: webViewRoot,
-    outputPath: join(outputRoot, "blobs/webview2-evergreen-standalone-windows-x64.zip"),
-    generatedAt,
-  });
-
   const driver = requireAcquired(acquired, "cua-driver-windows-x64");
   const keyId = "candidate-release-assets";
   const driverDefinition = options.driverDefinition
@@ -86,23 +74,7 @@ export async function prepareWindowsOfflineAssets(options = {}) {
     })),
     entryPoint: "ppocrv6_dict.txt",
   });
-  const webViewDefinition = archiveAssetDefinition({
-    id: webViewArchive.id,
-    kind: "system-runtime",
-    version: normalizeAssetVersion(lockAssets.get(webView.id)?.version ?? webView.version),
-    packageVersion,
-    archive: webViewArchive,
-    files: [{
-      path: webViewName,
-      installPath: webViewName,
-      sizeBytes: webView.sizeBytes,
-      sha256: webView.sha256,
-      executable: true,
-    }],
-    entryPoint: webViewName,
-    authenticode: { mode: "microsoft", publisher: "Microsoft Corporation", timestampRequired: true },
-  });
-  const definitions = [driverDefinition, modelDefinition, webViewDefinition];
+  const definitions = [driverDefinition, modelDefinition];
   const manifest = {
     schemaVersion: 2,
     packageName: "agent-computer-use-mcp",
@@ -119,7 +91,6 @@ export async function prepareWindowsOfflineAssets(options = {}) {
   const assets = [
     { id: driverDefinition.id, path: driver.path, sizeBytes: driver.sizeBytes, sha256: driver.sha256 },
     { id: modelDefinition.id, path: modelArchive.path, sizeBytes: modelArchive.sizeBytes, sha256: modelArchive.sha256 },
-    { id: webViewDefinition.id, path: webViewArchive.path, sizeBytes: webViewArchive.sizeBytes, sha256: webViewArchive.sha256 },
   ];
   return {
     status: "ready",
@@ -327,13 +298,6 @@ function requireAcquired(acquired, id) {
   const asset = acquired.get(id);
   if (!asset) throw releaseError("release.offline_bundle_incomplete", `Acquired asset is missing: ${id}`);
   return asset;
-}
-
-function normalizeAssetVersion(value) {
-  if (/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/u.test(value)) return value;
-  const fourPart = /^(\d+\.\d+\.\d+)\.(\d+)$/u.exec(value);
-  if (fourPart) return `${fourPart[1]}+${fourPart[2]}`;
-  throw releaseError("release.asset_version_invalid", `Asset version cannot be represented as SemVer: ${value}`);
 }
 
 async function validateInputs(options) {

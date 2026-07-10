@@ -1,6 +1,6 @@
 # Platform Release Bundles And Windows x64 Runtime Slimming
 
-Status: direction approved; written spec awaiting final review
+Status: approved and implemented
 
 Date: 2026-07-10
 
@@ -8,11 +8,11 @@ Date: 2026-07-10
 
 PR4 produced a real Windows x64 offline candidate containing a protected MCP
 runtime, portable Node.js, NativeAOT installer, overlay, cua-driver, PP-OCRv6
-models, WebView2, checksums, and a CycloneDX SBOM. The candidate is fully
+models, checksums, and a CycloneDX SBOM. The candidate is fully
 offline but its ZIP is 433.82 MiB.
 
-The offline asset layout does not currently duplicate cua-driver, OCR models,
-or WebView2 between `assets/blobs` and `release/payload`. Each installable asset
+The offline asset layout does not currently duplicate cua-driver or OCR models
+between `assets/blobs` and `release/payload`. Each installable asset
 already has one content-addressed blob. Most avoidable payload size comes from
 `onnxruntime-node`: the installed package is 258.28 MiB and includes native
 binaries for Darwin ARM64, Linux ARM64, Linux x64, Windows ARM64, and Windows
@@ -37,6 +37,18 @@ runtimes and would make platform signing and smoke evidence ambiguous.
    The installer materializes cache and activated views from that blob after
    extraction; activated asset views are not embedded in the release payload.
 8. The Windows x64 offline candidate has a hard maximum size of 310 MiB.
+9. The Windows overlay renders the closed 8-16px brand river and target frame
+   natively. It does not depend on WebView2 or release-time HTML assets.
+
+## Validation Amendment
+
+After ONNX Runtime target pruning, the first real build produced a
+383,363,617-byte ZIP (365.6 MiB) and correctly failed the 310 MiB gate. The
+same run showed that the self-contained WebView2 overlay payload lacked its
+HTML assets, while the WebView2 offline installer contributed about 194 MiB.
+The durable fix is the native overlay decision above, not a larger size limit
+or a first-enable download. The formal Windows release therefore has five
+locked upstream inputs and two installable content-addressed asset blobs.
 
 ## Goals
 

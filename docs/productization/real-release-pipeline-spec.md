@@ -130,7 +130,6 @@ It carries every component required to enable Computer Use without network acces
 - portable Node.js runtime;
 - ONNX Runtime native package selected for Windows x64;
 - PP-OCRv6 small detection, recognition, and dictionary files;
-- Microsoft-signed WebView2 Evergreen Standalone Installer when WebView2 is absent;
 - third-party notices and component licenses.
 
 The Windows x64 bundle must not exceed 310 MiB. Release assembly prunes `onnxruntime-node@1.27.0` to the exact Windows x64 DirectML/CPU native inventory, stores each installable asset once as a content-addressed blob, and records target, retained/removed runtime bytes, asset/blob counts, and actual ZIP size in the release manifest. `npm run release:windows:size-report` re-stats the final artifact and fail-closes on any mismatch. Components must never be removed merely to defer them to first-enable downloads.
@@ -158,7 +157,7 @@ The production ECDSA signing key is distinct from Authenticode credentials. Rele
 ### Third-party assets
 
 - `cua-driver`: signed manifest plus exact official release archive and extracted-file hashes; Authenticode mode remains `vendor-unsigned`.
-- Node.js and WebView2: exact pinned downloads, SHA-256, expected Microsoft publisher where applicable, and license evidence.
+- Node.js: exact pinned download, SHA-256, and license evidence.
 - ONNX Runtime and OCR models: exact package/release identity, SHA-256, file inventory, and license evidence.
 
 ## GitHub Actions Workflow
@@ -177,7 +176,7 @@ The formal workflow is `.github/workflows/release.yml` and has the following ord
 - Use a Windows GitHub-hosted runner.
 - Install with `npm ci` and no release cache reuse.
 - Run the full deterministic test suite and protected npm smoke.
-- Publish the NativeAOT installer and self-contained overlay.
+- Publish the NativeAOT installer and self-contained native overlay.
 - Acquire only release-pinned upstream assets.
 - Build the portable Windows release and offline asset bundle staging trees.
 - Mark all unsigned output as `candidate-only`; it cannot be uploaded to a release.
@@ -245,7 +244,7 @@ The `release` environment must be protected by human approval. It owns signing p
 
 ## SBOM And License Evidence
 
-The release uses npm's built-in SBOM command to generate CycloneDX JSON from the locked production dependency graph. Release assembly augments component evidence for portable Node.js, the overlay, installer, `cua-driver`, ONNX Runtime, OCR models, and WebView2.
+The release uses npm's built-in SBOM command to generate CycloneDX JSON from the locked production dependency graph. Release assembly augments component evidence for portable Node.js, the native overlay, installer, `cua-driver`, ONNX Runtime, and OCR models.
 
 SBOM and third-party notices are validated for required component IDs. Missing license or provenance data blocks release. The SBOM contains paths and package identities, never secrets, local user paths, screenshots, OCR text, or overlay pixels.
 

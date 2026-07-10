@@ -413,8 +413,9 @@ npm run phase:0.15
 
 If network is unavailable, use only an existing content-addressed cache whose
 bytes pass release-lock size and SHA-256 verification. Never add a fixture
-fallback. Expected: ZIP at most 310 MiB, zero foreign runtimes, six verified
-assets, zero first-enable downloads, offline install and MCP smoke pass.
+fallback. Expected: ZIP at most 310 MiB, zero foreign runtimes, five verified
+upstream inputs, two installable blobs, zero first-enable downloads, offline
+install and MCP smoke pass.
 
 - [ ] **Step 6: Run complete verification**
 
@@ -431,3 +432,17 @@ git status --short --branch
 Expected: every gate passes and production audit reports zero vulnerabilities.
 Generated candidates remain ignored and are never committed.
 
+### Validation Amendment: Native Overlay
+
+The first real post-pruning candidate measured 383,363,617 bytes and failed the
+hard gate. Component measurement proved that further ONNX or npm pruning could
+not safely recover the remaining 55.6 MiB while retaining DirectML and the full
+offline contract. WebView2 was used only by the overlay, its offline installer
+was about 194 MiB, and the staged overlay was missing its HTML assets.
+
+The implementation therefore replaces the WebView2 surface with a native
+WinForms/GDI+ drawing loop that preserves the closed 8-16px brand river,
+target frame, no-activate behavior, multi-display virtual screen, and target
+window tracking. Remove WebView2 from the formal release lock, SBOM, offline
+asset manifest, and Phase 0.15 requirements. Keep the generic host WebView2
+doctor/repair capability optional and outside this release candidate.

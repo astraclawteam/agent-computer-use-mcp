@@ -6,7 +6,7 @@
 
 **Architecture:** A checked-in immutable asset lock is the build input. Release assembly acquires exact bytes into an ignored content-addressed cache, builds the protected MCP and native helpers, creates the release payload and offline asset tree, and emits one candidate artifact set. The current NativeAOT installer remains the sole installation-state writer; candidate asset manifests use explicit development trust and are always marked distribution-blocked so PR5 can replace only the signing/final publication layer.
 
-**Tech Stack:** Node.js 24 release tooling, npm 11, `yaml@2.9.0` as a build-only parser, .NET 10 NativeAOT, WinForms/WebView2 overlay, PowerShell/.NET deterministic ZIP helpers, official `@modelcontextprotocol/sdk` smoke clients.
+**Tech Stack:** Node.js 24 release tooling, npm 11, `yaml@2.9.0` as a build-only parser, .NET 10 NativeAOT, native WinForms/GDI+ overlay, PowerShell/.NET deterministic ZIP helpers, official `@modelcontextprotocol/sdk` smoke clients.
 
 ## Global Constraints
 
@@ -83,7 +83,6 @@ const expected = new Map([
   ["ocr-model-pp-ocrv6-small-det", ["28fe5895c24fd108c19eb3e8479f4ab385fbfc62", 9880512, "d73e0058b7a8086bbd57f3d10b8bcd4ff95363f67e06e2762b5e814fe9c9410e"]],
   ["ocr-model-pp-ocrv6-small-rec", ["b8f84f0b80c529de40b4fbb3544b84fa7233a513", 21159378, "5435fd747c9e0efe15a96d0b378d5bd157e9492ed8fd80edf08f30d02fa24634"]],
   ["ocr-model-pp-ocrv6-small-rec-metadata", ["b8f84f0b80c529de40b4fbb3544b84fa7233a513", 150579, "ab078671bb49f06228eadccd34f1bb501e157f7a047095ffb943ba81512c77d1"]],
-  ["webview2-evergreen-standalone-windows-x64", ["1.3.241.15", 203654864, "3a08103bed8a3d9aefdfc9ac10a672ea69605163f2dcb08d76cfd3e0444511c9"]],
 ]);
 ```
 
@@ -254,7 +253,7 @@ write runtime-entrypoints.json
 materializeReleaseBundle into output/release
 ```
 
-Update the overlay project/publish command so the GitHub payload does not require a machine-wide .NET runtime. Do not use single-file settings if they break WebView2 native loading; include and inventory every required output instead.
+Update the overlay project/publish command so the GitHub payload does not require a machine-wide .NET runtime. The overlay draws natively and has no WebView2 or external HTML runtime dependency.
 
 - [x] **Step 4: Run focused tests and real builds**
 
@@ -317,7 +316,7 @@ assert.equal(report.firstEnableDownloadCount, 0);
 assert.equal(report.includeUserOverlay, false);
 ```
 
-Assert missing Node, driver, overlay, OCR det/rec/dictionary, ONNX Runtime, installer, or WebView2 blocks assembly instead of degrading.
+Assert missing Node, driver, overlay, OCR det/rec/dictionary, ONNX Runtime, or installer blocks assembly instead of degrading.
 
 - [x] **Step 3: Run both tests and verify RED**
 
@@ -338,7 +337,6 @@ Create deterministic per-asset ZIP blobs and a development-only ECDSA manifest t
 ```text
 cua-driver-windows-x64
 ocr-model-pp-ocrv6-small
-webview2-evergreen-standalone-windows-x64
 ```
 
 The self-contained overlay, Node, and production `onnxruntime-node` stay in the immutable release payload and are represented in the release manifest/SBOM rather than duplicated as activated asset views.
@@ -381,7 +379,6 @@ gateway-overlay-windows-x64
 onnxruntime-node
 ocr-model-pp-ocrv6-small-det
 ocr-model-pp-ocrv6-small-rec
-webview2-evergreen-standalone-windows-x64
 ```
 
 - [x] **Step 2: Write failing manifest/checksum tests**
@@ -493,7 +490,7 @@ The phase gate then creates temporary program/data roots and, with network disab
 4. connects with the official MCP SDK;
 5. initializes, lists tools, calls `computer.health({fast:true})`, clears host driver overrides, and uses `computer.doctor({fast:true})` to prove the resolved cua-driver path exactly matches the activated candidate entry point;
 6. verifies the offline ZIP's exact internal file inventory and every SHA-256 from `metadata/checksums.txt`.
-7. confirms active driver, overlay, model pack, WebView2 installer, hashes, and runtime entrypoints resolve inside temporary installed roots;
+7. confirms active driver, native overlay, model pack, hashes, and runtime entrypoints resolve inside temporary installed roots;
 8. closes the client and removes all temporary roots.
 
 - [x] **Step 5: Run focused tests and the real candidate gate**
@@ -506,7 +503,7 @@ npm run release:windows:assemble
 npm run phase:0.15
 ```
 
-Expected: all commands exit `0`; the real candidate is built from six locked upstream assets; the NativeAOT install and asset-preparation path is invoked with network disabled. PR5 adds clean-runner operating-system network isolation as independent release evidence.
+Expected: all commands exit `0`; the real candidate is built from five locked upstream assets; the NativeAOT install and asset-preparation path is invoked with network disabled. PR5 adds clean-runner operating-system network isolation as independent release evidence.
 
 - [x] **Step 6: Commit**
 
@@ -555,7 +552,7 @@ Add a Windows CI step:
   run: npm run phase:0.15
 ```
 
-Document artifact locations under `artifacts/windows-release/<version>/`, the six locked external assets, expected candidate size, offline/no-Node behavior, and the `blocked_unsigned` boundary before PR5.
+Document artifact locations under `artifacts/windows-release/<version>/`, the five locked external assets, expected candidate size, offline/no-Node behavior, and the `blocked_unsigned` boundary before PR5.
 
 - [x] **Step 4: Run full verification**
 

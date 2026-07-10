@@ -1,5 +1,6 @@
-using Microsoft.Web.WebView2.Core;
-using Microsoft.Web.WebView2.WinForms;
+using System.Diagnostics;
+using System.Drawing;
+using System.Drawing.Drawing2D;
 using System.Runtime.InteropServices;
 using System.Text.Json;
 using System.Windows.Forms;
@@ -24,11 +25,17 @@ internal sealed class OverlayForm : Form
     private const int MinWaveThickness = 8;
     private const int RestWaveThickness = 12;
     private const int MaxWaveThickness = 16;
+    private const int PointStep = 18;
 
-    private readonly WebView2 _webView;
+    private static readonly Color TransparencyColor = Color.FromArgb(1, 2, 3);
+    private static readonly Color BrandColor = Color.FromArgb(217, 119, 87);
+
+    private readonly System.Windows.Forms.Timer _animationTimer;
     private readonly System.Windows.Forms.Timer _targetRectTimer;
+    private readonly Stopwatch _animationClock = Stopwatch.StartNew();
     private readonly string? _targetRectFile;
     private string? _lastTargetRectPayload;
+    private RectangleF? _targetRect;
 
     public OverlayForm()
     {
@@ -36,29 +43,16 @@ internal sealed class OverlayForm : Form
         FormBorderStyle = FormBorderStyle.None;
         ShowInTaskbar = false;
         TopMost = true;
-        Bounds = Screen.PrimaryScreen?.WorkingArea ?? SystemInformation.VirtualScreen;
+        Bounds = SystemInformation.VirtualScreen;
         StartPosition = FormStartPosition.Manual;
-        BackColor = System.Drawing.Color.FromArgb(1, 2, 3);
-        TransparencyKey = BackColor;
-
-        _webView = new WebView2
-        {
-            Dock = DockStyle.Fill,
-            DefaultBackgroundColor = System.Drawing.Color.Transparent,
-            AllowExternalDrop = false,
-            CreationProperties = new CoreWebView2CreationProperties
-            {
-                UserDataFolder = Path.Combine(
-                    Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-                    "Agent Computer Use",
-                    "GatewayComputerUseOverlayWebView2"),
-            },
-        };
-
-        Controls.Add(_webView);
+        BackColor = TransparencyColor;
+        TransparencyKey = TransparencyColor;
+        DoubleBuffered = true;
 
         _targetRectFile = Environment.GetEnvironmentVariable("AGENT_COMPUTER_USE_OVERLAY_TARGET_RECT_FILE")
             ?? Environment.GetEnvironmentVariable("XIAOZHICLAW_CUA_OVERLAY_TARGET_RECT_FILE");
+        _animationTimer = new System.Windows.Forms.Timer { Interval = 33 };
+        _animationTimer.Tick += (_, _) => Invalidate();
         _targetRectTimer = new System.Windows.Forms.Timer { Interval = 120 };
         _targetRectTimer.Tick += (_, _) => SyncTargetRect();
     }
@@ -75,27 +69,109 @@ internal sealed class OverlayForm : Form
 
     protected override bool ShowWithoutActivation => true;
 
-    protected override async void OnShown(EventArgs e)
+    protected override void OnShown(EventArgs e)
     {
         base.OnShown(e);
         NativeMethods.SetWindowPos(Handle, NativeMethods.HWND_TOPMOST, Left, Top, Width, Height, NativeMethods.SWP_NOACTIVATE);
-        await InitializeOverlayAsync();
+        SyncTargetRect();
+        _animationTimer.Start();
+        _targetRectTimer.Start();
     }
 
-    private async Task InitializeOverlayAsync()
+    protected override void OnPaintBackground(PaintEventArgs e)
     {
-        await _webView.EnsureCoreWebView2Async();
-        _webView.CoreWebView2.Settings.AreDefaultContextMenusEnabled = false;
-        _webView.CoreWebView2.Settings.AreDevToolsEnabled = false;
-        _webView.CoreWebView2.Settings.IsStatusBarEnabled = false;
-        var overlayHtmlPath = ResolveOverlayHtmlPath();
-        var projectRoot = ResolveProjectRoot(overlayHtmlPath);
-        _webView.CoreWebView2.SetVirtualHostNameToFolderMapping(
-            "agent-computer-use-overlay.local",
-            projectRoot,
-            CoreWebView2HostResourceAccessKind.Allow);
-        _webView.CoreWebView2.Navigate("https://agent-computer-use-overlay.local/gateway-overlay/overlay.html");
-        _targetRectTimer.Start();
+        e.Graphics.Clear(TransparencyColor);
+    }
+
+    protected override void OnPaint(PaintEventArgs e)
+    {
+        base.OnPaint(e);
+        var graphics = e.Graphics;
+        graphics.SmoothingMode = SmoothingMode.AntiAlias;
+        graphics.PixelOffsetMode = PixelOffsetMode.HighQuality;
+
+        using var river = CreateClosedRiverPath(ClientSize.Width, ClientSize.Height, _animationClock.Elapsed.TotalMilliseconds);
+        using var riverBrush = new LinearGradientBrush(
+            ClientRectangle,
+            Color.FromArgb(190, 255, 255, 255),
+            Color.FromArgb(225, BrandColor),
+            24f);
+        graphics.FillPath(riverBrush, river);
+        DrawCurrents(graphics, _animationClock.Elapsed.TotalMilliseconds);
+        DrawTargetFrame(graphics);
+    }
+
+    private static GraphicsPath CreateClosedRiverPath(int width, int height, double time)
+    {
+        var path = new GraphicsPath(FillMode.Alternate);
+        path.AddRectangle(new Rectangle(0, 0, Math.Max(1, width), Math.Max(1, height)));
+        var inner = BuildInnerBoundary(width, height, time);
+        if (inner.Length >= 4)
+        {
+            path.AddPolygon(inner);
+        }
+        return path;
+    }
+
+    private static PointF[] BuildInnerBoundary(int width, int height, double time)
+    {
+        var points = new List<PointF>();
+        var horizontalCount = Math.Max(8, (int)Math.Ceiling((double)Math.Max(1, width) / PointStep));
+        var verticalCount = Math.Max(8, (int)Math.Ceiling((double)Math.Max(1, height) / PointStep));
+
+        for (var index = 0; index <= horizontalCount; index++)
+        {
+            var x = width * index / (float)horizontalCount;
+            points.Add(new PointF(x, WaveThickness(index, time, 0.1)));
+        }
+        for (var index = 0; index <= verticalCount; index++)
+        {
+            var y = height * index / (float)verticalCount;
+            points.Add(new PointF(width - WaveThickness(index, time, 1.4), y));
+        }
+        for (var index = horizontalCount; index >= 0; index--)
+        {
+            var x = width * index / (float)horizontalCount;
+            points.Add(new PointF(x, height - WaveThickness(index, time, 2.7)));
+        }
+        for (var index = verticalCount; index >= 0; index--)
+        {
+            var y = height * index / (float)verticalCount;
+            points.Add(new PointF(WaveThickness(index, time, 4.1), y));
+        }
+        return points.ToArray();
+    }
+
+    private static float WaveThickness(int index, double time, double phase)
+    {
+        var wave = Math.Sin(index * 0.72 + time * 0.0018 + phase) * 0.55
+            + Math.Sin(index * 1.37 - time * 0.0011 + phase * 0.7) * 0.32
+            + Math.Sin(index * 2.41 + time * 0.0007 + phase * 1.9) * 0.13;
+        var normalized = (wave + 1) / 2;
+        return (float)(MinWaveThickness + normalized * (MaxWaveThickness - MinWaveThickness));
+    }
+
+    private void DrawCurrents(Graphics graphics, double time)
+    {
+        using var primary = new Pen(Color.FromArgb(145, 255, 255, 255), 1.4f) { DashPattern = [12, 15, 4, 13] };
+        using var secondary = new Pen(Color.FromArgb(100, 184, 89, 59), 1.1f) { DashPattern = [8, 17, 3, 11] };
+        primary.DashOffset = (float)(-time * 0.018 % 44);
+        secondary.DashOffset = (float)(time * 0.013 % 39);
+        var inset = RestWaveThickness;
+        graphics.DrawRectangle(primary, inset, inset, Math.Max(1, Width - inset * 2), Math.Max(1, Height - inset * 2));
+        graphics.DrawRectangle(secondary, inset + 2, inset + 2, Math.Max(1, Width - (inset + 2) * 2), Math.Max(1, Height - (inset + 2) * 2));
+    }
+
+    private void DrawTargetFrame(Graphics graphics)
+    {
+        if (_targetRect is not { } target || target.Width < 24 || target.Height < 24) return;
+
+        using var glow = new Pen(Color.FromArgb(74, BrandColor), 8f);
+        using var outer = new Pen(Color.FromArgb(210, BrandColor), 2f);
+        using var inner = new Pen(Color.FromArgb(140, 255, 255, 255), 1f);
+        graphics.DrawRectangle(glow, target.X, target.Y, target.Width, target.Height);
+        graphics.DrawRectangle(outer, target.X, target.Y, target.Width, target.Height);
+        graphics.DrawRectangle(inner, target.X + 3, target.Y + 3, Math.Max(1, target.Width - 6), Math.Max(1, target.Height - 6));
     }
 
     private void SyncTargetRect()
@@ -114,27 +190,23 @@ internal sealed class OverlayForm : Form
 
         if (payload == _lastTargetRectPayload) return;
         _lastTargetRectPayload = payload;
-
-        var relativePayload = ToOverlayRelativeRect(payload);
-        if (relativePayload is null) return;
-
-        _ = _webView.CoreWebView2?.ExecuteScriptAsync(
-            $"window.__setComputerUseTargetRect?.({relativePayload});");
+        _targetRect = ToOverlayRelativeRect(payload);
+        Invalidate();
     }
 
-    private string? ToOverlayRelativeRect(string payload)
+    private RectangleF? ToOverlayRelativeRect(string payload)
     {
         try
         {
             using var document = JsonDocument.Parse(payload);
             var root = document.RootElement;
-            if (root.ValueKind == JsonValueKind.Null) return "null";
+            if (root.ValueKind == JsonValueKind.Null) return null;
 
             var x = root.GetProperty("x").GetDouble() - Left;
             var y = root.GetProperty("y").GetDouble() - Top;
             var width = root.GetProperty("width").GetDouble();
             var height = root.GetProperty("height").GetDouble();
-            if (width <= 0 || height <= 0) return "null";
+            if (width <= 0 || height <= 0) return null;
 
             if (root.TryGetProperty("windowId", out var windowId) && windowId.TryGetInt64(out var hwndValue))
             {
@@ -143,18 +215,9 @@ internal sealed class OverlayForm : Form
 
             var left = Math.Max(0, Math.Min(Width, x));
             var top = Math.Max(0, Math.Min(Height, y));
-            var right = Math.Max(left, Math.Min(Width, x + width));
-            var bottom = Math.Max(top, Math.Min(Height, y + height));
-            var clamped = new
-            {
-                x = left,
-                y = top,
-                width = right - left,
-                height = bottom - top,
-                title = root.TryGetProperty("title", out var title) ? title.GetString() : null,
-            };
-
-            return JsonSerializer.Serialize(clamped);
+            var right = Math.Max(left, Math.Min(Width - 1, x + width));
+            var bottom = Math.Max(top, Math.Min(Height - 1, y + height));
+            return new RectangleF((float)left, (float)top, (float)(right - left), (float)(bottom - top));
         }
         catch
         {
@@ -183,31 +246,6 @@ internal sealed class OverlayForm : Form
             0,
             0,
             NativeMethods.SWP_NOMOVE | NativeMethods.SWP_NOSIZE | NativeMethods.SWP_NOACTIVATE | NativeMethods.SWP_SHOWWINDOW);
-    }
-
-    private static string ResolveOverlayHtmlPath()
-    {
-        var candidates = new[]
-        {
-            Path.Combine(AppContext.BaseDirectory, "overlay.html"),
-            Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "overlay.html"),
-            Path.Combine(Environment.CurrentDirectory, "gateway-overlay", "overlay.html"),
-        };
-
-        foreach (var candidate in candidates)
-        {
-            var fullPath = Path.GetFullPath(candidate);
-            if (File.Exists(fullPath)) return fullPath;
-        }
-
-        throw new FileNotFoundException("Gateway overlay HTML asset was not found.", "overlay.html");
-    }
-
-    private static string ResolveProjectRoot(string overlayHtmlPath)
-    {
-        var overlayDirectory = Path.GetDirectoryName(overlayHtmlPath)
-            ?? throw new DirectoryNotFoundException("Gateway overlay directory was not found.");
-        return Path.GetFullPath(Path.Combine(overlayDirectory, ".."));
     }
 
     private static class NativeMethods

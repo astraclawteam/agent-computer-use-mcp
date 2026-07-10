@@ -138,6 +138,7 @@ export async function assembleWindowsReleaseCandidate(options = {}) {
         runtimeSelection: payloadReport.runtimeSelection,
         offlineBundleSizeBytes: offlineSize.sizeBytes,
         offlineBundleMaxBytes: offlineSize.maxBytes,
+        lockedAssetCount: lock.assets.length,
         assetCount: offlineReport.assetCount,
         blobCount: offlineReport.blobCount,
       },
