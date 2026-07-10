@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { CuaDriverMcpDriver } from "../src/cua-driver-mcp-driver.mjs";
+import { CuaDriverMcpClient, CuaDriverMcpDriver } from "../src/cua-driver-mcp-driver.mjs";
 
 test("CuaDriverMcpDriver maps request/capture/action to cua-driver MCP tools", async () => {
   const calls = [];
@@ -48,6 +48,14 @@ test("CuaDriverMcpDriver maps request/capture/action to cua-driver MCP tools", a
     pid: 1234,
     bounds: { x: 10, y: 20, width: 320, height: 240 },
   });
+  assert.deepEqual(calls, [
+    { method: "start" },
+    { method: "callTool", name: "start_session", args: { session: "test-session" } },
+    { method: "callTool", name: "list_windows", args: { on_screen_only: false } },
+  ]);
+
+  await driver.startCursor();
+  await driver.startCursor();
 
   const observation = await driver.capture({ window, mode: "semantic" });
   assert.equal(observation.source, "cua-driver");
@@ -59,12 +67,15 @@ test("CuaDriverMcpDriver maps request/capture/action to cua-driver MCP tools", a
 
   await driver.setValue({ window, elementIndex: 0, elementToken: "name", value: "agent-computer-use" });
   await driver.click({ window, elementIndex: 1, elementToken: "save", deliveryMode: "background" });
+  await driver.stopCursor();
+  await driver.stopCursor();
+  await driver.close();
   await driver.close();
 
   assert.deepEqual(calls, [
     { method: "start" },
     { method: "callTool", name: "start_session", args: { session: "test-session" } },
-    { method: "callTool", name: "set_agent_cursor_enabled", args: { enabled: true, cursor_id: "default" } },
+    { method: "callTool", name: "list_windows", args: { on_screen_only: false } },
     {
       method: "callTool",
       name: "set_agent_cursor_style",
@@ -74,7 +85,7 @@ test("CuaDriverMcpDriver maps request/capture/action to cua-driver MCP tools", a
         bloom_color: "#D97757",
       },
     },
-    { method: "callTool", name: "list_windows", args: { on_screen_only: false } },
+    { method: "callTool", name: "set_agent_cursor_enabled", args: { enabled: true, cursor_id: "default" } },
     {
       method: "callTool",
       name: "get_window_state",
@@ -111,7 +122,164 @@ test("CuaDriverMcpDriver maps request/capture/action to cua-driver MCP tools", a
         session: "test-session",
       },
     },
+    { method: "callTool", name: "set_agent_cursor_enabled", args: { enabled: false, cursor_id: "default" } },
     { method: "callTool", name: "end_session", args: { session: "test-session" } },
     { method: "close" },
   ]);
+});
+
+test("CuaDriverMcpDriver leaves the cursor disabled when styling fails and still closes its session", async () => {
+  const calls = [];
+  const styleError = new Error("cursor style failed");
+  const driver = new CuaDriverMcpDriver({
+    session: "style-failure-session",
+    client: {
+      async start() {
+        calls.push("client.start");
+      },
+      async callTool(name) {
+        calls.push(name);
+        if (name === "set_agent_cursor_style") throw styleError;
+        return { status: "ok" };
+      },
+      async close() {
+        calls.push("client.close");
+      },
+    },
+  });
+
+  await assert.rejects(
+    () => driver.startCursor(),
+    (error) => error === styleError,
+  );
+  await driver.close();
+
+  assert.deepEqual(calls, [
+    "client.start",
+    "start_session",
+    "set_agent_cursor_style",
+    "end_session",
+    "client.close",
+  ]);
+});
+
+test("CuaDriverMcpDriver close attempts every cleanup stage and preserves the first error", async () => {
+  const calls = [];
+  const disableError = new Error("cursor disable failed");
+  const endSessionError = new Error("session end failed");
+  const clientCloseError = new Error("client close failed");
+  let disableAttempts = 0;
+  let endSessionAttempts = 0;
+  let closeAttempts = 0;
+  const driver = new CuaDriverMcpDriver({
+    session: "cleanup-failure-session",
+    client: {
+      async start() {
+        calls.push("client.start");
+      },
+      async callTool(name, args) {
+        calls.push({ name, args });
+        if (name === "set_agent_cursor_enabled" && args.enabled === false) {
+          disableAttempts += 1;
+          if (disableAttempts === 1) throw disableError;
+        }
+        if (name === "end_session") {
+          endSessionAttempts += 1;
+          if (endSessionAttempts === 1) throw endSessionError;
+        }
+        return { status: "ok" };
+      },
+      async close() {
+        calls.push("client.close");
+        closeAttempts += 1;
+        if (closeAttempts === 1) throw clientCloseError;
+      },
+    },
+  });
+
+  await driver.startCursor();
+  await assert.rejects(
+    () => driver.close(),
+    (error) => error === disableError,
+  );
+  await driver.close();
+
+  assert.deepEqual(calls, [
+    "client.start",
+    { name: "start_session", args: { session: "cleanup-failure-session" } },
+    {
+      name: "set_agent_cursor_style",
+      args: {
+        cursor_id: "default",
+        gradient_colors: ["#D97757", "#F7D2C3"],
+        bloom_color: "#D97757",
+      },
+    },
+    { name: "set_agent_cursor_enabled", args: { enabled: true, cursor_id: "default" } },
+    { name: "set_agent_cursor_enabled", args: { enabled: false, cursor_id: "default" } },
+    { name: "end_session", args: { session: "cleanup-failure-session" } },
+    "client.close",
+    { name: "set_agent_cursor_enabled", args: { enabled: false, cursor_id: "default" } },
+    { name: "end_session", args: { session: "cleanup-failure-session" } },
+    "client.close",
+  ]);
+});
+
+test("CuaDriverMcpDriver retries cursor disable during close after a release failure", async () => {
+  const calls = [];
+  let disableAttempts = 0;
+  const driver = new CuaDriverMcpDriver({
+    session: "retry-disable-session",
+    client: {
+      async start() {
+        calls.push("client.start");
+      },
+      async callTool(name, args) {
+        calls.push({ name, args });
+        if (name === "set_agent_cursor_enabled" && args.enabled === false) {
+          disableAttempts += 1;
+          if (disableAttempts === 1) throw new Error("transient disable failure");
+        }
+        return { status: "ok" };
+      },
+      async close() {
+        calls.push("client.close");
+      },
+    },
+  });
+
+  await driver.startCursor();
+  await assert.rejects(() => driver.stopCursor(), /transient disable failure/);
+  await driver.close();
+
+  assert.equal(disableAttempts, 2);
+  assert.deepEqual(calls.slice(-3), [
+    {
+      name: "set_agent_cursor_enabled",
+      args: { enabled: false, cursor_id: "default" },
+    },
+    { name: "end_session", args: { session: "retry-disable-session" } },
+    "client.close",
+  ]);
+});
+
+test("CuaDriverMcpClient retries SDK close after a transient close failure", async () => {
+  let closeAttempts = 0;
+  const sdkClient = {
+    async connect() {},
+    async close() {
+      closeAttempts += 1;
+      if (closeAttempts === 1) throw new Error("transient client close failure");
+    },
+  };
+  const client = new CuaDriverMcpClient({ client: sdkClient, driverPath: "cua-driver" });
+  client.transport = { close() {} };
+  client.started = true;
+
+  await assert.rejects(() => client.close(), /transient client close failure/);
+  await client.close();
+
+  assert.equal(closeAttempts, 2);
+  assert.equal(client.started, false);
+  assert.equal(client.transport, null);
 });

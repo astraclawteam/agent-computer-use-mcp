@@ -64,7 +64,7 @@ test("cursor lifecycle plan uses shared style tokens and disables cursor on stop
   assert.equal(stop.cursorVisible, false);
 });
 
-test("cua-driver bridge uses the shared default cursor style tokens", async () => {
+test("explicit cua-driver cursor startup uses the shared default cursor style tokens", async () => {
   const { DEFAULT_AGENT_CURSOR_STYLE } = await import("../src/overlay-theme-cursor-tokens.mjs");
   const { CuaDriverMcpDriver } = await import("../src/cua-driver-mcp-driver.mjs");
   const calls = [];
@@ -86,6 +86,8 @@ test("cua-driver bridge uses the shared default cursor style tokens", async () =
   });
 
   await driver.findWindow({ titlePart: "App" });
+  assert.equal(calls.some((call) => call.name === "set_agent_cursor_style"), false);
+  await driver.startCursor();
   const styleCall = calls.find((call) => call.name === "set_agent_cursor_style");
   assert.deepEqual(styleCall.args, DEFAULT_AGENT_CURSOR_STYLE);
 });

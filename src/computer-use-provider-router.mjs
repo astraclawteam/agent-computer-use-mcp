@@ -663,7 +663,7 @@ export class ComputerUseProviderRouter {
     const previousApproval = this.getPendingAccessApproval();
     this.pendingAccessApproval = null;
     this.activeController = null;
-    await this.stopOverlay();
+    await this.stopControlVisuals();
     this.recordAudit("computer.cancelled", {
       controllerId: previous?.controllerId,
       approvalToken: previousApproval?.token,
@@ -679,13 +679,23 @@ export class ComputerUseProviderRouter {
     this.activeController = null;
     this.lastCapture = null;
     this.pendingRepairApproval = null;
-    await this.assetOperationManager?.cancelAll?.(args.reason ?? "router-revoked");
-    await this.stopOverlay();
+    let firstError;
+    try {
+      await this.assetOperationManager?.cancelAll?.(args.reason ?? "router-revoked");
+    } catch (error) {
+      firstError = error;
+    }
+    try {
+      await this.stopControlVisuals();
+    } catch (error) {
+      firstError ??= error;
+    }
     this.recordAudit("computer.revoked", {
       controllerId: previous?.controllerId,
       approvalToken: previousApproval?.token,
       reason: args.reason ?? "revoked",
     });
+    if (firstError) throw firstError;
     return { status: "revoked", previousController: previous, previousApproval, includeUserOverlay: false };
   }
 
@@ -803,8 +813,17 @@ export class ComputerUseProviderRouter {
     this.pendingRepairApproval = null;
     this.pendingAccessApproval = null;
     this.controllerRequestInProgress = false;
-    await this.assetOperationManager?.close?.(args.reason ?? "router-close");
-    await this.stopOverlay();
+    let firstError;
+    try {
+      await this.assetOperationManager?.close?.(args.reason ?? "router-close");
+    } catch (error) {
+      firstError = error;
+    }
+    try {
+      await this.stopControlVisuals();
+    } catch (error) {
+      firstError ??= error;
+    }
     if (previous) {
       this.recordAudit("computer.controller.closed", {
         controllerId: previous.controllerId,
@@ -818,12 +837,22 @@ export class ComputerUseProviderRouter {
       });
     }
     if (this.driver?.close) {
-      await this.driver.close();
+      try {
+        await this.driver.close();
+      } catch (error) {
+        firstError ??= error;
+      }
     }
     if (this.ocrStarted) {
-      await this.ocr.close();
+      this.ocrStarted = false;
+      try {
+        await this.ocr.close();
+      } catch (error) {
+        firstError ??= error;
+      }
     }
     this.ocrStarted = false;
+    if (firstError) throw firstError;
   }
 
   async ensureOcr() {
@@ -877,7 +906,7 @@ export class ComputerUseProviderRouter {
     const previous = this.activeController;
     this.activeController = null;
     this.lastCapture = null;
-    await this.stopOverlay();
+    await this.stopControlVisuals();
     this.recordAudit("computer.controller.expired", {
       controllerId: previous.controllerId,
       tier: previous.tier,
@@ -942,15 +971,26 @@ export class ComputerUseProviderRouter {
       leaseTtlMs,
       includeUserOverlay: false,
     };
-    if (this.overlayRuntime?.start) {
-      this.overlayHandle = await this.overlayRuntime.start({ targetRect: window.bounds ? {
-        windowId: window.windowId,
-        title: window.title,
-        x: window.bounds.x,
-        y: window.bounds.y,
-        width: window.bounds.width,
-        height: window.bounds.height,
-      } : undefined });
+    try {
+      await this.driver?.startCursor?.();
+      if (this.overlayRuntime?.start) {
+        this.overlayHandle = await this.overlayRuntime.start({ targetRect: window.bounds ? {
+          windowId: window.windowId,
+          title: window.title,
+          x: window.bounds.x,
+          y: window.bounds.y,
+          width: window.bounds.width,
+          height: window.bounds.height,
+        } : undefined });
+      }
+    } catch (error) {
+      this.activeController = null;
+      try {
+        await this.stopControlVisuals();
+      } catch {
+        // Preserve the grant failure; cleanup has already attempted every visual stage.
+      }
+      throw error;
     }
     this.recordAudit("computer.access.granted", {
       controllerId: this.activeController.controllerId,
@@ -1114,8 +1154,23 @@ export class ComputerUseProviderRouter {
     if (this.overlayRuntime?.stop) {
       await this.overlayRuntime.stop(handle);
     } else if (handle.stop) {
-      handle.stop();
+      await handle.stop();
     }
+  }
+
+  async stopControlVisuals() {
+    let firstError;
+    try {
+      await this.stopOverlay();
+    } catch (error) {
+      firstError = error;
+    }
+    try {
+      await this.driver?.stopCursor?.();
+    } catch (error) {
+      firstError ??= error;
+    }
+    if (firstError) throw firstError;
   }
 }
 

@@ -23,6 +23,12 @@ test("router close revokes active control state after abnormal disconnect", asyn
           elements: [{ token: "save", role: "button", name: "Save" }],
         };
       },
+      async startCursor() {
+        calls.push("cursor.start");
+      },
+      async stopCursor() {
+        calls.push("cursor.stop");
+      },
       async close() {
         calls.push("driver.close");
       },
@@ -65,8 +71,155 @@ test("router close revokes active control state after abnormal disconnect", asyn
   assert.equal(state.activeController, null);
   assert.equal(state.lastCapture, null);
   assert.equal(state.pendingRepairApproval, null);
-  assert.deepEqual(calls, ["findWindow", "overlay.start", "capture", "overlay.stop", "driver.close"]);
+  assert.deepEqual(calls, [
+    "findWindow",
+    "cursor.start",
+    "overlay.start",
+    "capture",
+    "overlay.stop",
+    "cursor.stop",
+    "driver.close",
+  ]);
   assert.ok(state.auditEvents.some((event) => event.type === "computer.controller.closed"));
+});
+
+test("router close attempts cursor and driver cleanup when overlay shutdown fails", async () => {
+  const { ComputerUseProviderRouter } = await import("../src/computer-use-provider-router.mjs");
+  const calls = [];
+  const overlayError = new Error("overlay shutdown failed");
+  const router = new ComputerUseProviderRouter({
+    driver: {
+      async findWindow() {
+        return {
+          windowId: "lab",
+          title: "Computer Use Lab",
+          bounds: { x: 10, y: 20, width: 300, height: 180 },
+        };
+      },
+      async startCursor() {
+        calls.push("cursor.start");
+      },
+      async stopCursor() {
+        calls.push("cursor.stop");
+      },
+      async close() {
+        calls.push("driver.close");
+      },
+    },
+    overlayRuntime: {
+      async start() {
+        calls.push("overlay.start");
+        return { visible: true, processId: 42 };
+      },
+      async stop() {
+        calls.push("overlay.stop");
+        throw overlayError;
+      },
+    },
+  });
+
+  await router.requestAccess({ titlePart: "Computer Use Lab", tier: "full" });
+  await assert.rejects(
+    () => router.close({ reason: "client-disconnect" }),
+    (error) => error === overlayError,
+  );
+
+  assert.deepEqual(calls, [
+    "cursor.start",
+    "overlay.start",
+    "overlay.stop",
+    "cursor.stop",
+    "driver.close",
+  ]);
+});
+
+test("server shutdown coalesces stdin and process triggers without skipping cleanup", async () => {
+  const serverSource = readFileSync("src/computer-use-mcp-server.mjs", "utf8");
+  assert.doesNotMatch(serverSource, /process\.exit\(/u);
+  const serverUrl = new URL("../src/computer-use-mcp-server.mjs", import.meta.url).href;
+  const script = `
+    import assert from "node:assert/strict";
+    import { EventEmitter } from "node:events";
+    import {
+      createServerShutdown,
+      registerServerShutdownHandlers,
+    } from ${JSON.stringify(serverUrl)};
+
+    const calls = [];
+    let releaseRouter;
+    const routerGate = new Promise((resolve) => {
+      releaseRouter = resolve;
+    });
+    const shutdown = createServerShutdown({
+      router: {
+        async close() {
+          calls.push("router.close");
+          await routerGate;
+        },
+      },
+      server: {
+        async close() {
+          calls.push("server.close");
+        },
+      },
+      setExitCode(code) {
+        calls.push(\`exit.\${code}\`);
+      },
+    });
+    const stdin = new EventEmitter();
+    const processTarget = new EventEmitter();
+    processTarget.stderr = { write() {} };
+    registerServerShutdownHandlers({ shutdown, stdin, processTarget });
+
+    assert.equal(stdin.listenerCount("end"), 1);
+    assert.equal(stdin.listenerCount("close"), 1);
+    assert.equal(processTarget.listenerCount("SIGINT"), 1);
+    assert.equal(processTarget.listenerCount("SIGTERM"), 1);
+    assert.equal(processTarget.listenerCount("uncaughtException"), 1);
+
+    stdin.emit("end");
+    stdin.emit("close");
+    processTarget.emit("SIGTERM");
+    releaseRouter();
+    await shutdown(0);
+    assert.deepEqual(calls, ["router.close", "server.close", "exit.0"]);
+
+    const failureCalls = [];
+    const failedShutdown = createServerShutdown({
+      router: {
+        async close() {
+          failureCalls.push("router.close");
+          throw new Error("router cleanup failed");
+        },
+      },
+      server: {
+        async close() {
+          failureCalls.push("server.close");
+          throw new Error("server cleanup failed");
+        },
+      },
+      setExitCode(code) {
+        failureCalls.push(\`exit.\${code}\`);
+      },
+    });
+    await failedShutdown(1);
+    assert.deepEqual(failureCalls, ["router.close", "server.close", "exit.1"]);
+
+    const lateExitCodes = [];
+    const completedShutdown = createServerShutdown({
+      router: { async close() {} },
+      server: { async close() {} },
+      setExitCode(code) {
+        lateExitCodes.push(code);
+      },
+    });
+    await completedShutdown(0);
+    await completedShutdown(1);
+    assert.deepEqual(lateExitCodes, [0, 1]);
+  `;
+
+  const result = await runNode(["--input-type=module", "--eval", script]);
+  assert.equal(result.exitCode, 0, result.stderr);
 });
 
 test("Phase 5.2 has an executable disconnect cleanup smoke script", async () => {

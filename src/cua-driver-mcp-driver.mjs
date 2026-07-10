@@ -13,16 +13,42 @@ export class CuaDriverMcpDriver {
     this.client = options.client ?? new CuaDriverMcpClient({
       driverPath: options.driverPath,
     });
-    this.started = false;
+    this.clientStarted = false;
+    this.clientStartAttempted = false;
+    this.sessionStarted = false;
+    this.sessionStartAttempted = false;
+    this.cursorEnabled = false;
+    this.cursorEnableAttempted = false;
+    this.closePromise = null;
   }
 
   async ensureStarted() {
-    if (this.started) return;
-    await this.client.start();
-    await this.client.callTool("start_session", { session: this.session });
-    await this.client.callTool("set_agent_cursor_enabled", { enabled: true, cursor_id: "default" });
+    if (!this.clientStarted) {
+      this.clientStartAttempted = true;
+      await this.client.start();
+      this.clientStarted = true;
+    }
+    if (!this.sessionStarted) {
+      this.sessionStartAttempted = true;
+      await this.client.callTool("start_session", { session: this.session });
+      this.sessionStarted = true;
+    }
+  }
+
+  async startCursor() {
+    await this.ensureStarted();
+    if (this.cursorEnabled) return;
     await this.client.callTool("set_agent_cursor_style", DEFAULT_AGENT_CURSOR_STYLE);
-    this.started = true;
+    this.cursorEnableAttempted = true;
+    await this.client.callTool("set_agent_cursor_enabled", { enabled: true, cursor_id: "default" });
+    this.cursorEnabled = true;
+  }
+
+  async stopCursor() {
+    if (!this.cursorEnabled && !this.cursorEnableAttempted) return;
+    await this.client.callTool("set_agent_cursor_enabled", { enabled: false, cursor_id: "default" });
+    this.cursorEnabled = false;
+    this.cursorEnableAttempted = false;
   }
 
   async findWindow({ titlePart }) {
@@ -92,11 +118,48 @@ export class CuaDriverMcpDriver {
   }
 
   async close() {
-    if (this.started) {
-      await this.client.callTool("end_session", { session: this.session }).catch(() => {});
+    if (this.closePromise) return this.closePromise;
+    this.closePromise = this.closeResources();
+    try {
+      return await this.closePromise;
+    } finally {
+      this.closePromise = null;
     }
-    this.started = false;
-    await this.client.close?.();
+  }
+
+  async closeResources() {
+    let firstError;
+    try {
+      await this.stopCursor();
+    } catch (error) {
+      firstError = error;
+    }
+
+    if (this.sessionStarted || this.sessionStartAttempted) {
+      try {
+        await this.client.callTool("end_session", { session: this.session });
+        this.sessionStarted = false;
+        this.sessionStartAttempted = false;
+      } catch (error) {
+        firstError ??= error;
+      }
+    }
+
+    if (this.clientStarted || this.clientStartAttempted) {
+      try {
+        await this.client.close?.();
+        this.clientStarted = false;
+        this.clientStartAttempted = false;
+        this.sessionStarted = false;
+        this.sessionStartAttempted = false;
+        this.cursorEnabled = false;
+        this.cursorEnableAttempted = false;
+      } catch (error) {
+        firstError ??= error;
+      }
+    }
+
+    if (firstError) throw firstError;
   }
 }
 
@@ -138,8 +201,8 @@ export class CuaDriverMcpClient {
 
   async close() {
     if (!this.started) return;
-    this.started = false;
     await this.client.close();
+    this.started = false;
     this.transport = null;
   }
 
