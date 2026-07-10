@@ -8,7 +8,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { createAssetInstallerExecutor } from "./asset-installer-host.mjs";
-import { resolveActiveAssetEntryPoint } from "./active-asset-state.mjs";
+import { inspectActiveAssetEntryPoint } from "./active-asset-state.mjs";
 import { AssetOperationManager } from "./asset-operation-manager.mjs";
 import { createPhaseDriverFixture, createPhaseSignedFixture } from "./asset-phase-fixture.mjs";
 import { COMPUTER_USE_MCP_TOOLS } from "./computer-use-mcp-tools.mjs";
@@ -39,9 +39,10 @@ try {
   await writeFile(preparedV2.assets[0].entryPoint, v2.driverBytes);
   await execute("asset-activate", main, v2);
   const rolledBack = await execute("asset-rollback", main, v2);
-  const runtimeResolvedActiveDriver = Boolean(resolveActiveAssetEntryPoint("cua-driver-windows-x64", {
+  const activeDriverResolution = inspectActiveAssetEntryPoint("cua-driver-windows-x64", {
     programRoot: main.programRoot,
-  }));
+  });
+  const runtimeResolvedActiveDriver = activeDriverResolution.status === "ready";
 
   const corrupt = await createPhaseDriverFixture({ root, fixtureId: "corrupt", version: "0.7.3", releaseId: "assets-corrupt" });
   const corruptBytes = Buffer.from(await readFile(corrupt.offlineBlobPath));
@@ -120,12 +121,13 @@ try {
     rollbackVerified: rolledBack.currentReleaseId === "assets-v1" && rolledBack.previousReleaseId === "assets-v2",
     mcpRepairVerified,
     runtimeResolvedActiveDriver,
+    activeDriverResolutionReason: activeDriverResolution.reason ?? "ready",
     firstEnableDownloadCount,
     startsDesktopControl: false,
     includeUserOverlay: false,
   };
   report.status = Object.entries(report)
-    .filter(([key]) => !["status", "phase", "benchmark", "installerKind", "firstEnableDownloadCount", "startsDesktopControl", "includeUserOverlay"].includes(key))
+    .filter(([key]) => !["status", "phase", "benchmark", "installerKind", "activeDriverResolutionReason", "firstEnableDownloadCount", "startsDesktopControl", "includeUserOverlay"].includes(key))
     .every(([, value]) => value === true)
     && firstEnableDownloadCount === 0 ? "passed" : "failed";
   process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);

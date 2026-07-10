@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { after, test } from "node:test";
 
-import { resolveActiveAssetEntryPoint } from "../src/active-asset-state.mjs";
+import { inspectActiveAssetEntryPoint, resolveActiveAssetEntryPoint } from "../src/active-asset-state.mjs";
 
 const roots = [];
 
@@ -21,14 +21,20 @@ test("active asset resolver returns a hash-verified entry point inside the produ
   });
 
   assert.equal(resolved, fixture.entryPoint);
+  assert.equal(inspectActiveAssetEntryPoint("cua-driver-windows-x64", {
+    programRoot: fixture.programRoot,
+  }).status, "ready");
 });
 
 test("active asset resolver fails closed for tampering and path escape", async () => {
   const fixture = await createActiveAssetFixture();
-  await writeFile(fixture.entryPoint, "tampered", "utf8");
+  await writeFile(fixture.entryPoint, "tamper", "utf8");
   assert.equal(resolveActiveAssetEntryPoint("cua-driver-windows-x64", {
     programRoot: fixture.programRoot,
   }), null);
+  assert.equal(inspectActiveAssetEntryPoint("cua-driver-windows-x64", {
+    programRoot: fixture.programRoot,
+  }).reason, "asset.hash_mismatch");
 
   const escaped = join(fixture.root, "escaped.exe");
   await writeFile(escaped, "driver", "utf8");
@@ -71,6 +77,7 @@ test("active asset resolver rejects a linked asset root", async () => {
   }), "utf8");
 
   assert.equal(resolveActiveAssetEntryPoint("cua-driver-windows-x64", { programRoot }), null);
+  assert.equal(inspectActiveAssetEntryPoint("cua-driver-windows-x64", { programRoot }).reason, "asset.linked_path");
 });
 
 async function createActiveAssetFixture() {

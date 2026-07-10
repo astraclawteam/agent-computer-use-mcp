@@ -5,40 +5,61 @@ import { isAbsolute, join, relative, resolve } from "node:path";
 import { getInstallLayout } from "./package-foundation.mjs";
 
 export function resolveActiveAssetEntryPoint(assetId, options = {}) {
+  return inspectActiveAssetEntryPoint(assetId, options).entryPoint ?? null;
+}
+
+export function inspectActiveAssetEntryPoint(assetId, options = {}) {
+  let state;
+  let programRoot;
   try {
-    const programRoot = resolve(options.programRoot ?? getInstallLayout({
+    programRoot = resolve(options.programRoot ?? getInstallLayout({
       platform: options.platform ?? process.platform,
       env: options.env ?? process.env,
     }).cacheRoot);
     const statePath = options.statePath ?? join(programRoot, "state", "asset-state.json");
-    const state = JSON.parse(readFileSync(statePath, "utf8"));
+    state = JSON.parse(readFileSync(statePath, "utf8"));
+  } catch {
+    return unavailable("asset.state_unavailable");
+  }
+  try {
     if (state.schemaVersion !== 1 || typeof state.currentReleaseId !== "string" || !Array.isArray(state.assets)) {
-      return null;
+      return unavailable("asset.state_invalid");
     }
     const asset = state.assets.find((candidate) => candidate?.id === assetId);
-    if (!asset || !Array.isArray(asset.files) || asset.files.length === 0) return null;
+    if (!asset || !Array.isArray(asset.files) || asset.files.length === 0) {
+      return unavailable("asset.not_active");
+    }
 
     const assetsRoot = join(programRoot, "assets");
     const assetRoot = resolve(asset.root);
     const entryPoint = resolve(asset.entryPoint);
-    if (!pathIsInside(assetsRoot, assetRoot) || !pathIsInside(assetRoot, entryPoint) || !existsSync(entryPoint)
-      || pathContainsLink(assetsRoot, assetRoot) || pathContainsLink(assetRoot, entryPoint)) {
-      return null;
+    if (!pathIsInside(assetsRoot, assetRoot) || !pathIsInside(assetRoot, entryPoint)) {
+      return unavailable("asset.path_outside_root");
+    }
+    if (!existsSync(entryPoint)) return unavailable("asset.entry_point_missing");
+    if (pathContainsLink(assetsRoot, assetRoot) || pathContainsLink(assetRoot, entryPoint)) {
+      return unavailable("asset.linked_path");
     }
     for (const file of asset.files) {
       if (!file || typeof file.path !== "string" || !Number.isSafeInteger(file.sizeBytes)
-        || !/^[a-f0-9]{64}$/.test(file.sha256 ?? "")) return null;
+        || !/^[a-f0-9]{64}$/.test(file.sha256 ?? "")) return unavailable("asset.file_metadata_invalid");
       const filePath = resolve(assetRoot, ...file.path.split("/"));
-      if (!pathIsInside(assetRoot, filePath) || pathContainsLink(assetRoot, filePath)) return null;
+      if (!pathIsInside(assetRoot, filePath)) return unavailable("asset.path_outside_root");
+      if (pathContainsLink(assetRoot, filePath)) return unavailable("asset.linked_path");
       const info = statSync(filePath);
-      if (!info.isFile() || info.size !== file.sizeBytes) return null;
+      if (!info.isFile()) return unavailable("asset.file_unavailable");
+      if (info.size !== file.sizeBytes) return unavailable("asset.size_mismatch");
       const actualSha256 = createHash("sha256").update(readFileSync(filePath)).digest("hex");
-      if (actualSha256 !== file.sha256) return null;
+      if (actualSha256 !== file.sha256) return unavailable("asset.hash_mismatch");
     }
-    return entryPoint;
+    return { status: "ready", entryPoint };
   } catch {
-    return null;
+    return unavailable("asset.file_unavailable");
   }
+}
+
+function unavailable(reason) {
+  return { status: "unavailable", reason, entryPoint: null };
 }
 
 function pathIsInside(root, candidate) {

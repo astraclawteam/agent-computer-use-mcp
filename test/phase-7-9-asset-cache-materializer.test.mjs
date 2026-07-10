@@ -29,6 +29,7 @@ test("Phase 7.9 proves trusted asset acquisition cache activation rollback and M
   assert.equal(report.rollbackVerified, true);
   assert.equal(report.mcpRepairVerified, true);
   assert.equal(report.runtimeResolvedActiveDriver, true);
+  assert.equal(report.activeDriverResolutionReason, "ready");
   assert.equal(report.firstEnableDownloadCount, 0);
   assert.equal(report.startsDesktopControl, false);
   assert.equal(report.includeUserOverlay, false);
