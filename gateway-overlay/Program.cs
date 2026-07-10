@@ -1,6 +1,5 @@
 using System.Diagnostics;
 using System.Drawing;
-using System.Drawing.Drawing2D;
 using System.Drawing.Imaging;
 using System.Globalization;
 using System.Runtime.InteropServices;
@@ -92,17 +91,12 @@ internal sealed class OverlayForm : Form
     private const int WS_EX_TRANSPARENT = 0x00000020;
     private const int WS_EX_TOOLWINDOW = 0x00000080;
     private const int WS_EX_NOACTIVATE = 0x08000000;
-    private const int MinWaveThickness = 8;
-    private const int RestWaveThickness = 12;
-    private const int MaxWaveThickness = 16;
-    private const int PointStep = 18;
-
-    private static readonly Color TransparencyColor = Color.FromArgb(1, 2, 3);
-    private static readonly Color BrandColor = Color.FromArgb(217, 119, 87);
+    private const int WS_EX_LAYERED = 0x00080000;
 
     private readonly System.Windows.Forms.Timer _animationTimer;
     private readonly System.Windows.Forms.Timer _targetRectTimer;
     private readonly Stopwatch _animationClock = Stopwatch.StartNew();
+    private readonly LayeredWindowPresenter _presenter = new();
     private readonly string? _targetRectFile;
     private string? _lastTargetRectPayload;
     private RectangleF? _targetRect;
@@ -115,14 +109,11 @@ internal sealed class OverlayForm : Form
         TopMost = true;
         Bounds = SystemInformation.VirtualScreen;
         StartPosition = FormStartPosition.Manual;
-        BackColor = TransparencyColor;
-        TransparencyKey = TransparencyColor;
-        DoubleBuffered = true;
 
         _targetRectFile = Environment.GetEnvironmentVariable("AGENT_COMPUTER_USE_OVERLAY_TARGET_RECT_FILE")
             ?? Environment.GetEnvironmentVariable("XIAOZHICLAW_CUA_OVERLAY_TARGET_RECT_FILE");
         _animationTimer = new System.Windows.Forms.Timer { Interval = 33 };
-        _animationTimer.Tick += (_, _) => Invalidate();
+        _animationTimer.Tick += (_, _) => PresentFrame();
         _targetRectTimer = new System.Windows.Forms.Timer { Interval = 120 };
         _targetRectTimer.Tick += (_, _) => SyncTargetRect();
     }
@@ -132,7 +123,7 @@ internal sealed class OverlayForm : Form
         get
         {
             var cp = base.CreateParams;
-            cp.ExStyle |= WS_EX_TRANSPARENT | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE;
+            cp.ExStyle |= WS_EX_TRANSPARENT | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE | WS_EX_LAYERED;
             return cp;
         }
     }
@@ -144,104 +135,18 @@ internal sealed class OverlayForm : Form
         base.OnShown(e);
         NativeMethods.SetWindowPos(Handle, NativeMethods.HWND_TOPMOST, Left, Top, Width, Height, NativeMethods.SWP_NOACTIVATE);
         SyncTargetRect();
+        PresentFrame();
         _animationTimer.Start();
         _targetRectTimer.Start();
     }
 
-    protected override void OnPaintBackground(PaintEventArgs e)
+    private void PresentFrame()
     {
-        e.Graphics.Clear(TransparencyColor);
-    }
+        if (!IsHandleCreated || IsDisposed) return;
 
-    protected override void OnPaint(PaintEventArgs e)
-    {
-        base.OnPaint(e);
-        var graphics = e.Graphics;
-        graphics.SmoothingMode = SmoothingMode.AntiAlias;
-        graphics.PixelOffsetMode = PixelOffsetMode.HighQuality;
-
-        using var river = CreateClosedRiverPath(ClientSize.Width, ClientSize.Height, _animationClock.Elapsed.TotalMilliseconds);
-        using var riverBrush = new LinearGradientBrush(
-            ClientRectangle,
-            Color.FromArgb(190, 255, 255, 255),
-            Color.FromArgb(225, BrandColor),
-            24f);
-        graphics.FillPath(riverBrush, river);
-        DrawCurrents(graphics, _animationClock.Elapsed.TotalMilliseconds);
-        DrawTargetFrame(graphics);
-    }
-
-    private static GraphicsPath CreateClosedRiverPath(int width, int height, double time)
-    {
-        var path = new GraphicsPath(FillMode.Alternate);
-        path.AddRectangle(new Rectangle(0, 0, Math.Max(1, width), Math.Max(1, height)));
-        var inner = BuildInnerBoundary(width, height, time);
-        if (inner.Length >= 4)
-        {
-            path.AddPolygon(inner);
-        }
-        return path;
-    }
-
-    private static PointF[] BuildInnerBoundary(int width, int height, double time)
-    {
-        var points = new List<PointF>();
-        var horizontalCount = Math.Max(8, (int)Math.Ceiling((double)Math.Max(1, width) / PointStep));
-        var verticalCount = Math.Max(8, (int)Math.Ceiling((double)Math.Max(1, height) / PointStep));
-
-        for (var index = 0; index <= horizontalCount; index++)
-        {
-            var x = width * index / (float)horizontalCount;
-            points.Add(new PointF(x, WaveThickness(index, time, 0.1)));
-        }
-        for (var index = 0; index <= verticalCount; index++)
-        {
-            var y = height * index / (float)verticalCount;
-            points.Add(new PointF(width - WaveThickness(index, time, 1.4), y));
-        }
-        for (var index = horizontalCount; index >= 0; index--)
-        {
-            var x = width * index / (float)horizontalCount;
-            points.Add(new PointF(x, height - WaveThickness(index, time, 2.7)));
-        }
-        for (var index = verticalCount; index >= 0; index--)
-        {
-            var y = height * index / (float)verticalCount;
-            points.Add(new PointF(WaveThickness(index, time, 4.1), y));
-        }
-        return points.ToArray();
-    }
-
-    private static float WaveThickness(int index, double time, double phase)
-    {
-        var wave = Math.Sin(index * 0.72 + time * 0.0018 + phase) * 0.55
-            + Math.Sin(index * 1.37 - time * 0.0011 + phase * 0.7) * 0.32
-            + Math.Sin(index * 2.41 + time * 0.0007 + phase * 1.9) * 0.13;
-        var normalized = (wave + 1) / 2;
-        return (float)(MinWaveThickness + normalized * (MaxWaveThickness - MinWaveThickness));
-    }
-
-    private void DrawCurrents(Graphics graphics, double time)
-    {
-        using var primary = new Pen(Color.FromArgb(145, 255, 255, 255), 1.4f) { DashPattern = [12, 15, 4, 13] };
-        using var secondary = new Pen(Color.FromArgb(100, 184, 89, 59), 1.1f) { DashPattern = [8, 17, 3, 11] };
-        primary.DashOffset = (float)(-time * 0.018 % 44);
-        secondary.DashOffset = (float)(time * 0.013 % 39);
-        var inset = RestWaveThickness;
-        graphics.DrawRectangle(primary, inset, inset, Math.Max(1, Width - inset * 2), Math.Max(1, Height - inset * 2));
-        graphics.DrawRectangle(secondary, inset + 2, inset + 2, Math.Max(1, Width - (inset + 2) * 2), Math.Max(1, Height - (inset + 2) * 2));
-    }
-
-    private void DrawTargetFrame(Graphics graphics)
-    {
-        if (_targetRect is not { } target || target.Width < 24 || target.Height < 24) return;
-
-        using var glow = new Pen(Color.FromArgb(74, BrandColor), 8f);
-        using var outer = new Pen(Color.FromArgb(210, BrandColor), 2f);
-        using var inner = new Pen(Color.FromArgb(140, 255, 255, 255), 1f);
-        graphics.DrawRectangle(glow, target.X, target.Y, target.Width, target.Height);
-        graphics.DrawRectangle(outer, target.X, target.Y, target.Width, target.Height);
-        graphics.DrawRectangle(inner, target.X + 3, target.Y + 3, Math.Max(1, target.Width - 6), Math.Max(1, target.Height - 6));
+        var phase = OverlayTheme.PhaseAtElapsedMilliseconds(_animationClock.Elapsed.TotalMilliseconds);
+        using var frame = OverlayRenderer.Render(ClientSize, phase, _targetRect);
+        _presenter.Present(this, frame, new Point(Left, Top));
     }
 
     private void SyncTargetRect()
@@ -261,7 +166,7 @@ internal sealed class OverlayForm : Form
         if (payload == _lastTargetRectPayload) return;
         _lastTargetRectPayload = payload;
         _targetRect = ToOverlayRelativeRect(payload);
-        Invalidate();
+        PresentFrame();
     }
 
     private RectangleF? ToOverlayRelativeRect(string payload)
