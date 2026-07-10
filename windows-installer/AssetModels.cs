@@ -120,9 +120,14 @@ internal sealed class AssetVerificationResult
 
 internal sealed class AssetOperationResult
 {
+    public string Type { get; set; } = "terminal";
     public string Status { get; set; } = "";
     public string Operation { get; set; } = "";
     public string OperationId { get; set; } = "";
+    public int Sequence { get; set; }
+    public string State { get; set; } = "";
+    public int Percent { get; set; } = 100;
+    public bool Terminal { get; set; } = true;
     public string? ReleaseId { get; set; }
     public string? CurrentReleaseId { get; set; }
     public string? PreviousReleaseId { get; set; }
@@ -132,6 +137,21 @@ internal sealed class AssetOperationResult
     public int CacheMissCount { get; set; }
     public bool ResumeUsed { get; set; }
     public List<MaterializedAsset> Assets { get; set; } = [];
+    public bool StartsDesktopControl { get; set; }
+    public bool IncludeUserOverlay { get; set; }
+    public InstallerErrorInfo? Error { get; set; }
+}
+
+internal sealed class AssetProgressEvent
+{
+    public string Type { get; set; } = "progress";
+    public string Operation { get; set; } = "";
+    public string OperationId { get; set; } = "";
+    public int Sequence { get; set; }
+    public string State { get; set; } = "";
+    public int Percent { get; set; }
+    public string? AssetId { get; set; }
+    public bool Terminal { get; set; }
     public bool StartsDesktopControl { get; set; }
     public bool IncludeUserOverlay { get; set; }
 }

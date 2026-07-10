@@ -34,6 +34,9 @@ export class ComputerUseProviderRouter {
     this.pendingAccessApproval = null;
     this.lastCapture = null;
     this.pendingRepairApproval = null;
+    this.assetOperationManager = options.assetOperationManager ?? null;
+    this.assetDeliveryConfig = options.assetDeliveryConfig ?? null;
+    this.installCacheDoctor = options.installCacheDoctor ?? runInstallCacheDoctor;
     this.auditEvents = [];
     this.policy = options.policy ?? createComputerUsePolicy(options.policyOptions);
     this.actionPolicy = this.policy.describe();
@@ -142,7 +145,7 @@ export class ComputerUseProviderRouter {
     });
     const installCache = options.includeInstallCache === false
       ? null
-      : await runInstallCacheDoctor();
+      : await this.installCacheDoctor();
     const runtimeSupervisor = this.processSupervisor?.health
       ? this.processSupervisor.health()
       : null;
@@ -182,6 +185,20 @@ export class ComputerUseProviderRouter {
   }
 
   async repair(options = {}) {
+    const operation = options.operation ?? "plan";
+    if (operation === "status") {
+      return this.assetOperationResult({
+        status: "repair_status",
+        operation: await this.requireAssetOperationManager().status(options.operationId),
+      });
+    }
+    if (operation === "cancel") {
+      return this.assetOperationResult({
+        status: "repair_cancelled",
+        operation: await this.requireAssetOperationManager().cancel(options.operationId, "mcp-cancel"),
+      });
+    }
+
     const doctor = await this.doctor({
       fast: true,
       includeInstallCache: options.includeInstallCache,
@@ -208,6 +225,8 @@ export class ComputerUseProviderRouter {
       requestApproval: options.requestApproval,
       approvalTtlMs: options.approvalTtlMs,
       repairPlan,
+      actionIds: actions.map((action) => action.id),
+      allowNetwork: options.allowNetwork === true,
     });
     const progressPlan = createRepairProgressPlan({
       repairPlan,
@@ -275,6 +294,41 @@ export class ComputerUseProviderRouter {
         includeUserOverlay: false,
         startsDesktopControl: false,
       };
+    }
+    const shouldStartAssetOperation = operation === "start"
+      && approved
+      && approval.status === "approved"
+      && dryRun === false;
+    if (shouldStartAssetOperation) {
+      if (actions.length === 0) {
+        return this.assetOperationResult({
+          status: "planned",
+          operation: null,
+          approval,
+          repairPlan,
+          progressPlan,
+          reason: "no-selected-actions",
+        });
+      }
+      const manager = this.requireAssetOperationManager();
+      if (!this.assetDeliveryConfig) {
+        throw new Error("asset.delivery_config_required");
+      }
+      const operationState = await manager.start({
+        ...this.assetDeliveryConfig,
+        operationId: options.operationId,
+        actionIds: actions.map((action) => action.id),
+        allowNetwork: options.allowNetwork === true,
+        timeoutMs: options.timeoutMs,
+      });
+      this.pendingRepairApproval = null;
+      return this.assetOperationResult({
+        status: "repair_started",
+        operation: operationState,
+        approval,
+        repairPlan,
+        progressPlan,
+      });
     }
     const executableProcessActions = actions
       .filter((action) => action.kind === "process-restart");
@@ -623,6 +677,7 @@ export class ComputerUseProviderRouter {
     this.activeController = null;
     this.lastCapture = null;
     this.pendingRepairApproval = null;
+    await this.assetOperationManager?.cancelAll?.(args.reason ?? "router-revoked");
     await this.stopOverlay();
     this.recordAudit("computer.revoked", {
       controllerId: previous?.controllerId,
@@ -746,6 +801,7 @@ export class ComputerUseProviderRouter {
     this.pendingRepairApproval = null;
     this.pendingAccessApproval = null;
     this.controllerRequestInProgress = false;
+    await this.assetOperationManager?.close?.(args.reason ?? "router-close");
     await this.stopOverlay();
     if (previous) {
       this.recordAudit("computer.controller.closed", {
@@ -934,7 +990,7 @@ export class ComputerUseProviderRouter {
     });
   }
 
-  resolveRepairApproval({ approved, denied, approvalToken, requestApproval, approvalTtlMs, repairPlan }) {
+  resolveRepairApproval({ approved, denied, approvalToken, requestApproval, approvalTtlMs, repairPlan, actionIds, allowNetwork }) {
     if (approvalToken) {
       const pending = this.pendingRepairApproval;
       if (!pending || pending.token !== approvalToken) {
@@ -954,6 +1010,13 @@ export class ComputerUseProviderRouter {
           status: "denied",
           token: approvalToken,
           expiresAt: pending.expiresAt,
+        };
+      }
+      if (approved && !repairApprovalMatches(pending, { actionIds, allowNetwork })) {
+        return {
+          status: "invalid",
+          token: approvalToken,
+          reason: "approval-scope-mismatch",
         };
       }
       return {
@@ -983,6 +1046,7 @@ export class ComputerUseProviderRouter {
         expiresAt: new Date(expiresAtMs).toISOString(),
         expiresAtMs,
         actionIds: repairPlan.actions.map((action) => action.id),
+        allowNetwork: allowNetwork === true,
       };
       return this.getPendingRepairApproval();
     }
@@ -1009,6 +1073,35 @@ export class ComputerUseProviderRouter {
       requestedAt: this.pendingRepairApproval.requestedAt,
       expiresAt: this.pendingRepairApproval.expiresAt,
       actionIds: this.pendingRepairApproval.actionIds,
+      allowNetwork: this.pendingRepairApproval.allowNetwork,
+    };
+  }
+
+  requireAssetOperationManager() {
+    if (!this.assetOperationManager) throw new Error("asset.operation_manager_unavailable");
+    return this.assetOperationManager;
+  }
+
+  assetOperationResult({ status, operation, approval = { status: "not_required" }, repairPlan, progressPlan, reason }) {
+    const plan = repairPlan ?? { mode: "plan-only", requiresApproval: false, actions: [] };
+    return {
+      status,
+      mode: "asset-operation",
+      module: "agent-computer-use-mcp",
+      approved: approval.status === "approved",
+      denied: false,
+      dryRun: false,
+      approval,
+      repairPlan: plan,
+      progressPlan: progressPlan ?? { operationId: operation?.operationId ?? null, stages: [] },
+      executesImmediately: status === "repair_started",
+      execution: {
+        status: operation?.status ?? "not_started",
+        reason: reason ?? "asset-operation",
+        operation,
+      },
+      includeUserOverlay: false,
+      startsDesktopControl: false,
     };
   }
 
@@ -1051,6 +1144,14 @@ function mergeRepairPlans(installRepairPlan, ...recoverActionGroups) {
     actions,
     requiresApproval: actions.length > 0,
   };
+}
+
+function repairApprovalMatches(pending, requested) {
+  const approvedActions = [...new Set(pending.actionIds ?? [])].sort();
+  const requestedActions = [...new Set(requested.actionIds ?? [])].sort();
+  return pending.allowNetwork === (requested.allowNetwork === true)
+    && approvedActions.length === requestedActions.length
+    && approvedActions.every((actionId, index) => actionId === requestedActions[index]);
 }
 
 function normalizeRuntimeCleanupDoctor(report) {

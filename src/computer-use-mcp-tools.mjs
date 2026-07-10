@@ -95,6 +95,35 @@ export const COMPUTER_USE_MCP_TOOLS = [
     inputSchema: {
       type: "object",
       properties: {
+        operation: {
+          type: "string",
+          enum: ["plan", "start", "status", "cancel"],
+          description: "Asset repair lifecycle operation. Defaults to plan.",
+        },
+        operationId: {
+          type: "string",
+          description: "Stable caller-provided id for start, status, and cancel operations.",
+        },
+        requestApproval: {
+          type: "boolean",
+          description: "Create a time-bounded approval request for the selected repair actions.",
+        },
+        approvalToken: {
+          type: "string",
+          description: "Approval token returned by an earlier repair request.",
+        },
+        approvalTtlMs: {
+          type: "number",
+          description: "Requested approval lifetime in milliseconds.",
+        },
+        allowNetwork: {
+          type: "boolean",
+          description: "Allow approved asset acquisition from manifest-declared network sources.",
+        },
+        timeoutMs: {
+          type: "number",
+          description: "Maximum duration for an approved asset operation.",
+        },
         dryRun: {
           type: "boolean",
           description: "When true, only return the repair plan and never execute actions.",

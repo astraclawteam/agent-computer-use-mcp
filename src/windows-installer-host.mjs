@@ -29,7 +29,7 @@ export async function ensureWindowsInstallerBuilt(options = {}) {
           "--configuration",
           "Release",
           "--nologo",
-        ]);
+        ], { env: options.env, signal: options.signal });
         if (build.exitCode !== 0) {
           throw new Error(`installer.build_failed: ${build.stderr || build.stdout}`);
         }
@@ -70,13 +70,24 @@ export async function runWindowsInstaller(operation, options = {}) {
   if (options.releaseId) args.push("--release-id", options.releaseId);
   if (options.operationId) args.push("--operation-id", options.operationId);
   if (options.allowNetwork === true) args.push("--allow-network", "true");
-  const result = await runCommand("dotnet", args, options.env);
+  const records = [];
+  let progressQueue = Promise.resolve();
+  const result = await runCommand("dotnet", args, {
+    env: options.env,
+    signal: options.signal,
+    onStdoutLine(line) {
+      const record = parseInstallerLine(line);
+      if (!record) return;
+      records.push(record);
+      if (record.type === "progress" && options.onProgress) {
+        progressQueue = progressQueue.then(() => options.onProgress(record));
+      }
+    },
+  });
+  await progressQueue;
   let report;
-  try {
-    report = JSON.parse(result.stdout);
-  } catch {
-    throw new Error(`installer.output_invalid: ${result.stderr || result.stdout}`);
-  }
+  report = [...records].reverse().find((record) => record.type !== "progress");
+  if (!report) throw new Error(`installer.output_invalid: ${result.stderr || result.stdout}`);
   return { ...result, report };
 }
 
@@ -110,27 +121,46 @@ async function lockIsStale() {
   return Boolean(lockStat && Date.now() - lockStat.mtimeMs > LOCK_STALE_MS);
 }
 
-function runCommand(command, args, envOverrides = {}) {
+function runCommand(command, args, options = {}) {
   return new Promise((resolvePromise, reject) => {
     const child = spawn(command, args, {
       cwd: process.cwd(),
-      env: { ...process.env, ...envOverrides },
+      env: { ...process.env, ...options.env },
       stdio: ["ignore", "pipe", "pipe"],
       windowsHide: true,
+      signal: options.signal,
     });
     let stdout = "";
+    let stdoutLineBuffer = "";
     let stderr = "";
     child.stdout.on("data", (chunk) => {
-      stdout += chunk.toString("utf8");
+      const text = chunk.toString("utf8");
+      stdout += text;
+      stdoutLineBuffer += text;
+      let newlineIndex;
+      while ((newlineIndex = stdoutLineBuffer.indexOf("\n")) >= 0) {
+        const line = stdoutLineBuffer.slice(0, newlineIndex).replace(/\r$/, "");
+        stdoutLineBuffer = stdoutLineBuffer.slice(newlineIndex + 1);
+        if (line) options.onStdoutLine?.(line);
+      }
     });
     child.stderr.on("data", (chunk) => {
       stderr += chunk.toString("utf8");
     });
     child.on("error", reject);
     child.on("close", (exitCode) => {
+      if (stdoutLineBuffer) options.onStdoutLine?.(stdoutLineBuffer.replace(/\r$/, ""));
       resolvePromise({ exitCode, stdout, stderr });
     });
   });
+}
+
+function parseInstallerLine(line) {
+  try {
+    return JSON.parse(line);
+  } catch {
+    return null;
+  }
 }
 
 function delay(ms) {

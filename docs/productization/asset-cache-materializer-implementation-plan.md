@@ -15,6 +15,7 @@
 - First-party Windows executables require valid manifest signature, exact hashes, WinTrust verification, timestamp evidence, and an allowed publisher.
 - Upstream unsigned `cua-driver` is accepted only under explicit `vendor-unsigned` policy plus signed manifest, exact official archive SHA-256, release identity, and extracted-file hashes.
 - Offline source is attempted first. Network requires explicit approval and `allowNetwork=true`.
+- Manifest, signature, keyring, offline bundle, program, and data roots are host-owned configuration and are never accepted from public MCP input.
 - HTTP sources must be HTTPS in production. Private-network HTTP is dependency-injected only in tests with a development-only manifest.
 - Blobs and materialized asset versions are immutable and content-addressed.
 - Any verification, download, extraction, materialization, or activation failure leaves current asset state unchanged.
@@ -368,12 +369,13 @@ git commit -m "feat: enforce Windows asset trust"
 **Interfaces:**
 
 - `new AssetOperationManager({ executor, stateRoot, clock })`
-- `start({ operationId, manifestPath, signaturePath, keyringPath, actionIds, offlineRoot, allowNetwork, timeoutMs })`
+- Internal host call: `start({ operationId, actionIds, allowNetwork, timeoutMs, ...fixedHostAssetConfig })`
 - `status(operationId)`
 - `cancel(operationId, reason)`
-- Optional `computer.repair` inputs: `operation`, `operationId`, `requestApproval`, `approvalToken`, `approvalTtlMs`, `allowNetwork`, `timeoutMs`, `manifestPath`, `signaturePath`, `keyringPath`, `offlineRoot`.
+- Optional public `computer.repair` inputs: `operation`, `operationId`, `requestApproval`, `approvalToken`, `approvalTtlMs`, `allowNetwork`, `timeoutMs`.
+- Public input MUST NOT expose `manifestPath`, `signaturePath`, `keyringPath`, `offlineRoot`, `programRoot`, or `dataRoot`; accepting those would let an agent replace the trust root.
 
-- [ ] **Step 1: Write failing operation-manager tests**
+- [x] **Step 1: Write failing operation-manager tests**
 
 ```js
 test("approved asset repair starts reports progress and completes", async () => {
@@ -394,31 +396,31 @@ test("asset repair cancellation terminates execution and preserves resumable sta
 
 Add idempotent duplicate start, single activation lock, unknown operation, timeout, disconnect/shutdown cancellation, path redaction, no network without approved `allowNetwork`, and state reload after manager restart.
 
-- [ ] **Step 2: Run manager tests and verify RED**
+- [x] **Step 2: Run manager tests and verify RED**
 
 Run: `node --test test/asset-operation-manager.test.mjs`
 
 Expected: FAIL because the manager does not exist.
 
-- [ ] **Step 3: Implement persisted managed execution**
+- [x] **Step 3: Implement persisted managed execution**
 
-The host spawns the native helper with argument arrays and `shell:false`, parses NDJSON, writes redacted operation snapshots atomically, bounds retained events, enforces timeout with `AbortController`, kills the child tree on Windows cancellation, and releases the activation lock in `finally`.
+The host spawns the single-process native helper with argument arrays and `shell:false`, parses NDJSON progress plus its terminal record, writes redacted operation snapshots atomically, bounds retained events, enforces timeout and cancellation with `AbortController`, and releases the activation lock in `finally`.
 
-- [ ] **Step 4: Write failing standard MCP repair tests**
+- [x] **Step 4: Write failing standard MCP repair tests**
 
 Use the official MCP SDK client. Request an approval token, start an offline asset repair with `dryRun:false`, poll `computer.repair({ operation:"status" })`, and cancel a second operation. Assert no action runs without approval and no operation enables Computer Use.
 
-- [ ] **Step 5: Extend repair schema and router compatibly**
+- [x] **Step 5: Extend repair schema and router compatibly**
 
-`operation` defaults to `plan`. `start` requires valid approval, selected action IDs, explicit paths under approved product roots, and `dryRun:false`. `status` and `cancel` never request new approval. Existing process-restart and runtime-cleanup execution remains unchanged.
+`operation` defaults to `plan`. `start` requires valid approval, selected action IDs, host-fixed asset delivery configuration, and `dryRun:false`. The approval binds the exact action set and network permission. `status` and `cancel` never request new approval. Existing process-restart and runtime-cleanup execution remains unchanged.
 
-- [ ] **Step 6: Run focused and MCP contract tests**
+- [x] **Step 6: Run focused and MCP contract tests**
 
 Run: `node --test test/asset-operation-manager.test.mjs test/asset-repair-mcp.test.mjs test/phase-2-1-repair.test.mjs test/phase-5-3-tool-output-schemas.test.mjs test/phase-5-7-public-contract-review.test.mjs`
 
 Expected: PASS with unchanged tool names and strict schemas.
 
-- [ ] **Step 7: Commit Task 5**
+- [x] **Step 7: Commit Task 5**
 
 ```sh
 git add src/asset-installer-host.mjs src/asset-operation-manager.mjs src/computer-use-provider-router.mjs src/computer-use-mcp-tools.mjs src/repair-progress-plan.mjs test

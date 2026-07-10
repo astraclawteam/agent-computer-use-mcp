@@ -8,6 +8,7 @@ internal static class Program
     {
         var operation = args.Length > 0 ? args[0] : "unknown";
         InstallerLayout? layout = null;
+        AssetProgressWriter? assetProgress = null;
         try
         {
             var options = ParseOptions(args.Skip(1).ToArray());
@@ -45,6 +46,8 @@ internal static class Program
                     new AuthenticodeVerifier(),
                     new AssetStateStore(layout, materializer));
                 var operationId = options.GetValueOrDefault("operation-id", $"{operation}-{Guid.NewGuid():N}");
+                assetProgress = new AssetProgressWriter(operation, operationId);
+                assetProgress.WriteProgress("accepted", 0);
                 var assetResult = operation switch
                 {
                     "asset-prepare" => await assetEngine.PrepareAsync(
@@ -55,8 +58,11 @@ internal static class Program
                         ParseAssetIds(options.GetValueOrDefault("asset-ids", "")),
                         operationId,
                         string.Equals(options.GetValueOrDefault("allow-network"), "true", StringComparison.Ordinal),
+                        assetProgress,
                         CancellationToken.None),
-                    "asset-activate" => await assetEngine.ActivateAsync(
+                    "asset-activate" => await ActivateAsync(
+                        assetProgress,
+                        assetEngine,
                         RequireOption(options, "release-id"),
                         operationId,
                         CancellationToken.None),
@@ -64,7 +70,7 @@ internal static class Program
                     "asset-rollback" => await assetEngine.RollbackAsync(operationId, CancellationToken.None),
                     _ => throw new InstallerException("installer.operation_invalid", $"Unsupported operation: {operation}"),
                 };
-                AssetProgressWriter.WriteTerminal(assetResult);
+                assetProgress.WriteTerminal(assetResult);
                 return 0;
             }
             var result = operation switch
@@ -79,14 +85,35 @@ internal static class Program
         }
         catch (InstallerException error)
         {
+            if (assetProgress is not null)
+            {
+                assetProgress.WriteFailure(error.Code, error.Message);
+                return 2;
+            }
             WriteResult(FailedResult(operation, layout, error.Code, error.Message));
             return 2;
         }
         catch (Exception error)
         {
+            if (assetProgress is not null)
+            {
+                assetProgress.WriteFailure("installer.internal_error", error.Message);
+                return 2;
+            }
             WriteResult(FailedResult(operation, layout, "installer.internal_error", error.Message));
             return 2;
         }
+    }
+
+    private static async Task<AssetOperationResult> ActivateAsync(
+        AssetProgressWriter progress,
+        AssetEngine engine,
+        string releaseId,
+        string operationId,
+        CancellationToken cancellationToken)
+    {
+        progress.WriteProgress("activating", 50);
+        return await engine.ActivateAsync(releaseId, operationId, cancellationToken);
     }
 
     private static Dictionary<string, string> ParseOptions(string[] args)

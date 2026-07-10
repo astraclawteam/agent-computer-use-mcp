@@ -42,6 +42,8 @@ The existing .NET NativeAOT installer remains the only component allowed to writ
 
 The Node MCP process owns user approval, operation lifecycle, progress reporting, cancellation, timeout, and host-facing structured results. It delegates privileged filesystem and Windows trust work to the installer helper and never directly writes active asset directories.
 
+The asset manifest path, detached signature path, trusted public-key keyring, offline bundle root, program root, and data root are host-owned installation configuration. They are resolved once when the MCP server starts from the installed product layout and `AGENT_COMPUTER_USE_*` environment configuration. They are never accepted in public MCP tool input. An agent may select advertised repair actions and request approved network use, but it cannot replace the manifest, signature, keyring, or filesystem roots. This prevents an agent from introducing its own key and self-signing an untrusted payload.
+
 Upstream package managers and install scripts are not execution dependencies. They may be used by release engineering to discover source artifacts, but clients consume only a release-pinned signed manifest.
 
 ## Trust Model
@@ -282,6 +284,7 @@ Tests pass explicit program/data roots. Production defaults remain per-user. Ass
   "approvalToken": "approval-token",
   "approvalTtlMs": 300000,
   "allowNetwork": false,
+  "timeoutMs": 300000,
   "dryRun": true,
   "actionIds": []
 }
@@ -292,6 +295,8 @@ Behavior:
 - `plan` is the default and preserves current behavior.
 - `start` requires a valid approval token, `dryRun: false`, and explicit selected actions.
 - `allowNetwork` defaults to false and must have been included in the approved request.
+- approval binds the exact selected action ID set and the `allowNetwork` value; either changing after approval fails closed.
+- trust roots and asset source paths are host configuration and are not fields in the public MCP schema.
 - `status` returns persisted progress and terminal results without starting work.
 - `cancel` terminates the managed helper process, records a terminal cancelled event, and retains safe resumable partials.
 - duplicate `start` calls with the same operation ID are idempotent;

@@ -17,10 +17,12 @@ internal sealed class AssetEngine(
         IReadOnlySet<string> selectedIds,
         string operationId,
         bool allowNetwork,
+        AssetProgressWriter progress,
         CancellationToken cancellationToken)
     {
         layout.Initialize();
         var verified = manifestVerifier.Verify(manifestPath, signaturePath, keyringPath);
+        progress.WriteProgress("manifest_verified", 10);
         var selected = selectedIds.Count == 0
             ? verified.Manifest.Assets
             : verified.Manifest.Assets.Where(asset => selectedIds.Contains(asset.Id)).ToList();
@@ -37,9 +39,12 @@ internal sealed class AssetEngine(
         Directory.CreateDirectory(transactionRoot);
         try
         {
-            foreach (var asset in selected)
+            for (var index = 0; index < selected.Count; index++)
             {
+                var asset = selected[index];
                 cancellationToken.ThrowIfCancellationRequested();
+                var basePercent = 15 + (index * 70 / selected.Count);
+                progress.WriteProgress("acquiring", basePercent, asset.Id);
                 CachedAssetBlob blob;
                 if (cache.OfflineBlobExists(asset, offlineRoot))
                 {
@@ -56,7 +61,9 @@ internal sealed class AssetEngine(
                 if (blob.CacheHit) cacheHitCount += 1;
                 else cacheMissCount += 1;
                 resumeUsed |= blob.ResumeUsed;
+                progress.WriteProgress("materializing", basePercent + 20 / selected.Count, asset.Id);
                 preparedAssets.Add(await MaterializeAssetAsync(asset, blob.Path, transactionRoot, cancellationToken));
+                progress.WriteProgress("asset_verified", basePercent + 50 / selected.Count, asset.Id);
             }
 
             var cachedManifest = CacheManifestFiles(verified, keyringPath);
@@ -71,6 +78,7 @@ internal sealed class AssetEngine(
                 Assets = preparedAssets,
             };
             stateStore.WritePrepared(prepared);
+            progress.WriteProgress("prepared", 95);
             return BuildResult("prepared", "asset-prepare", operationId, prepared, stateStore.ReadActive(), cacheHitCount, cacheMissCount, resumeUsed);
         }
         finally

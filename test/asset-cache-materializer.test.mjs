@@ -22,9 +22,18 @@ test("offline prepare activate and rollback use immutable content-addressed asse
   const v1 = await createOfflineDriverFixture({ root: harness.root, version: "0.7.1", releaseId: "assets-v1" });
   const v2 = await createOfflineDriverFixture({ root: harness.root, version: "0.7.2", releaseId: "assets-v2" });
 
-  const preparedV1 = await harness.prepare(v1);
+  const progress = [];
+  const preparedV1 = await harness.prepare(v1, 0, {
+    onProgress: async (event) => progress.push(event),
+  });
   assert.equal(preparedV1.status, "prepared");
   assert.equal(preparedV1.cacheMissCount, 1);
+  assert.equal(progress.length >= 3, true);
+  assert.equal(progress[0].operationId, "asset-prepare-assets-v1");
+  assert.equal(progress.every((event) => event.type === "progress" && event.terminal === false), true);
+  assert.deepEqual([...progress].map((event) => event.sequence), progress.map((_, index) => index));
+  assert.equal(progress.some((event) => event.state === "acquiring"), true);
+  assert.equal(progress.some((event) => event.state === "materializing"), true);
   const activeV1 = await harness.activate(v1);
   assert.equal(activeV1.currentReleaseId, "assets-v1");
   assert.equal(activeV1.previousReleaseId, null);
@@ -122,13 +131,13 @@ async function createHarness() {
     root,
     programRoot,
     dataRoot,
-    async prepare(fixture, expectedExitCode = 0) {
-      return this.run("asset-prepare", fixture, expectedExitCode);
+    async prepare(fixture, expectedExitCode = 0, options = {}) {
+      return this.run("asset-prepare", fixture, expectedExitCode, options);
     },
     async activate(fixture, expectedExitCode = 0) {
       return this.run("asset-activate", fixture, expectedExitCode);
     },
-    async run(operation, fixture, expectedExitCode = 0) {
+    async run(operation, fixture, expectedExitCode = 0, options = {}) {
       const result = await runWindowsInstaller(operation, {
         programRoot,
         dataRoot,
@@ -139,6 +148,7 @@ async function createHarness() {
         assetIds: [fixture.asset.id],
         releaseId: fixture.manifest.releaseId,
         operationId: `${operation}-${fixture.manifest.releaseId}`,
+        onProgress: options.onProgress,
       });
       assert.equal(result.exitCode, expectedExitCode, result.stderr || result.stdout);
       return result.report;
