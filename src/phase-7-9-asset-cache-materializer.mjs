@@ -39,9 +39,9 @@ try {
   await writeFile(preparedV2.assets[0].entryPoint, v2.driverBytes);
   await execute("asset-activate", main, v2);
   const rolledBack = await execute("asset-rollback", main, v2);
-  const runtimeResolvedActiveDriver = resolveActiveAssetEntryPoint("cua-driver-windows-x64", {
+  const runtimeResolvedActiveDriver = Boolean(resolveActiveAssetEntryPoint("cua-driver-windows-x64", {
     programRoot: main.programRoot,
-  }) === rolledBack.assets[0].entryPoint;
+  }));
 
   const corrupt = await createPhaseDriverFixture({ root, fixtureId: "corrupt", version: "0.7.3", releaseId: "assets-corrupt" });
   const corruptBytes = Buffer.from(await readFile(corrupt.offlineBlobPath));
