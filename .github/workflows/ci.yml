@@ -51,3 +51,6 @@ jobs:
 
       - name: Verify trusted asset delivery
         run: npm run phase:7.9
+
+      - name: Assemble and install real Windows release candidate
+        run: npm run phase:0.15

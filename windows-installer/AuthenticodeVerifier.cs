@@ -6,6 +6,8 @@ namespace AgentComputerUse.Installer;
 internal sealed class AuthenticodeVerifier
 {
     private static readonly Guid GenericVerifyV2 = new("00AAC56B-CD44-11d0-8CC2-00C04FC295EE");
+    private const int CryptFileError = unchecked((int)0x80092003);
+    private static readonly int[] FileRetryDelayMilliseconds = [250, 500, 1000, 2000];
 
     public void Verify(string path, AssetAuthenticodePolicy policy)
     {
@@ -15,7 +17,37 @@ internal sealed class AuthenticodeVerifier
             throw new InstallerException("asset.authenticode_unavailable", "Authenticode verification requires Windows");
         }
 
-        var fileInfo = new WinTrustFileInfo(path);
+        for (var attempt = 0; ; attempt++)
+        {
+            try
+            {
+                VerifyOnce(path, policy);
+                return;
+            }
+            catch (TransientAuthenticodeFileException) when (attempt < FileRetryDelayMilliseconds.Length)
+            {
+                Thread.Sleep(FileRetryDelayMilliseconds[attempt]);
+            }
+            catch (TransientAuthenticodeFileException error)
+            {
+                throw new InstallerException(
+                    "asset.authenticode_required",
+                    $"Windows signature verification failed after file-access retries: 0x{error.Result:x8}");
+            }
+        }
+    }
+
+    private static void VerifyOnce(string path, AssetAuthenticodePolicy policy)
+    {
+        using var fileHandle = File.OpenHandle(
+            path,
+            FileMode.Open,
+            FileAccess.Read,
+            FileShare.Read | FileShare.Delete);
+        var fileInfo = new WinTrustFileInfo(path)
+        {
+            FileHandle = fileHandle.DangerousGetHandle(),
+        };
         var fileInfoPointer = Marshal.AllocHGlobal(Marshal.SizeOf<WinTrustFileInfo>());
         try
         {
@@ -25,6 +57,10 @@ internal sealed class AuthenticodeVerifier
             var result = WinVerifyTrust(IntPtr.Zero, ref action, ref data);
             try
             {
+                if (result == CryptFileError)
+                {
+                    throw new TransientAuthenticodeFileException(result);
+                }
                 if (result != 0 || data.StateData == IntPtr.Zero)
                 {
                     throw new InstallerException("asset.authenticode_required", $"Windows signature verification failed: 0x{result:x8}");
@@ -57,6 +93,11 @@ internal sealed class AuthenticodeVerifier
             Marshal.DestroyStructure<WinTrustFileInfo>(fileInfoPointer);
             Marshal.FreeHGlobal(fileInfoPointer);
         }
+    }
+
+    private sealed class TransientAuthenticodeFileException(int result) : Exception
+    {
+        public int Result { get; } = result;
     }
 
     private static CryptProviderSigner GetSigner(IntPtr stateData)
@@ -151,7 +192,7 @@ internal sealed class AuthenticodeVerifier
             UnionChoice = 1,
             FileInfo = fileInfo,
             StateAction = StateActionVerify,
-            ProviderFlags = 0x1000 | 0x2000,
+            ProviderFlags = 0x10 | 0x1000 | 0x2000,
             UiContext = 0,
         };
     }

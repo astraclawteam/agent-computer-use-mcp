@@ -11,6 +11,15 @@ import { createSignedAssetFixture } from "./helpers/asset-fixture.mjs";
 
 const fixtureRoots = [];
 
+test("Authenticode verification retries transient file access without bypassing WinTrust", async () => {
+  const source = await readFile("windows-installer/AuthenticodeVerifier.cs", "utf8");
+  assert.match(source, /CryptFileError\s*=\s*unchecked\(\(int\)0x80092003\)/u);
+  assert.match(source, /File\.OpenHandle\([\s\S]*FileShare\.Read\s*\|\s*FileShare\.Delete/u);
+  assert.match(source, /FileHandle\s*=\s*fileHandle\.DangerousGetHandle\(\)/u);
+  assert.match(source, /catch\s*\(TransientAuthenticodeFileException\)[\s\S]*Thread\.Sleep/u);
+  assert.match(source, /throw new InstallerException\("asset\.authenticode_required"/u);
+});
+
 before(async () => {
   await ensureWindowsInstallerBuilt();
 });

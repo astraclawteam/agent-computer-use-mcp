@@ -20,6 +20,7 @@ npm run phase:0.11
 npm run phase:0.12
 npm run phase:0.13
 npm run phase:0.14
+npm run phase:0.15
 npm run phase:1.6
 npm run phase:1.7
 npm run phase:1.8
@@ -87,6 +88,7 @@ Required evidence:
 - `npm run phase:0.12` verifies release artifact hashes and Windows helper signing evidence.
 - `npm run phase:0.13` verifies Windows helper signing inventory coverage for required helper artifacts and reserved future sidecars.
 - `npm run phase:0.14` builds, integrity-checks, MCP-smokes, and packs the protected npm release with no source or Source Maps.
+- `npm run phase:0.15` verifies six locked upstream assets, assembles the real Windows candidate under a fixed artifact contract, verifies the offline ZIP's exact internal inventory and hashes, installs and activates it with installer network access disabled, proves `computer.doctor` resolves the activated candidate cua-driver rather than host overrides, starts the protected MCP with portable Node.js, and verifies release checksums and CycloneDX SBOM evidence.
 - `npm run assets:manifest` records offline/cacheable asset packs.
 - `npm run doctor:install-cache` records readiness and repair actions without starting desktop control.
 - `npm run phase:1.9` verifies permission tiers, unsafe-window deny policy, and secure-field fail-closed behavior.
@@ -186,6 +188,7 @@ Required evidence:
 - Clean install degraded proof report from `npm run phase:7.7`.
 - Windows installer transaction report from `npm run phase:7.8`.
 - Protected npm release report from `npm run phase:0.14`.
+- Real Windows candidate assembly and offline install report from `npm run phase:0.15`.
 - OCR latency report with warm p95 values.
 - App matrix report in `docs/productization/app-smoke-matrix.md`.
 
@@ -207,6 +210,7 @@ Required evidence:
 - Signing verification output from `npm run phase:0.12`.
 - Signed Windows helper inventory proof from `npm run phase:0.13`.
 - Protected npm tarball proof from `npm run phase:0.14`, including SHA-256 and zero source/Source Map counts.
+- Real Windows candidate proof from `npm run phase:0.15`, including locked bytes, offline installation, standard MCP smoke, checksums, and SBOM verification.
 - Offline install proof from `npm run phase:7.4`.
 - First-enable safety proof from `npm run phase:7.5`.
 - Repair entrypoint catalog proof from `npm run phase:7.6`.
@@ -234,3 +238,4 @@ Any of these block release:
 - `main` receives non-admin direct pushes after branch protection is enabled.
 - CI required checks are bypassed for non-admin merges.
 - A publish-ready npm artifact contains first-party source, tests, C# source, Source Maps, or unobfuscated runtime entrypoints.
+- A PR4 `blocked_unsigned` candidate or development-only asset signature is uploaded to a GitHub Release, npm, or another distribution channel before PR5 production signing.

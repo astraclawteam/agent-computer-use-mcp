@@ -55,6 +55,11 @@ export function buildReleaseMetadata(options = {}) {
         required: true,
       },
       {
+        name: "real-release-assembly",
+        command: "npm run phase:0.15",
+        required: true,
+      },
+      {
         name: "offline-install-proof",
         command: "npm run phase:7.4",
         required: true,
