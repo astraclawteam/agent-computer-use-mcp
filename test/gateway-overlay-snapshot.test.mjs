@@ -11,11 +11,31 @@ const overlayExe = resolve("gateway-overlay/bin/Debug/net10.0-windows/GatewayCom
 
 test("native overlay snapshots render valid, dimensioned, distinct PNGs", async () => {
   const theme = await readFile(resolve("gateway-overlay/OverlayTheme.cs"), "utf8");
+  const renderer = await readFile(resolve("gateway-overlay/OverlayRenderer.cs"), "utf8");
+  const program = await readFile(resolve("gateway-overlay/Program.cs"), "utf8");
+
   assert.match(theme, /Color\.FromArgb\(217, 119, 87\)/);
   assert.match(theme, /Color\.FromArgb\(184, 89, 59\)/);
   assert.match(theme, /Color\.FromArgb\(247, 210, 195\)/);
   assert.match(theme, /MinFillAlpha = 0\.14/);
   assert.match(theme, /MaxFillAlpha = 0\.32/);
+  assert.match(theme, /BreathPeriodMilliseconds = 3200/);
+  assert.match(theme, /PhaseAtElapsedMilliseconds\(double elapsedMilliseconds\)/);
+  assert.match(theme, /var elapsedInPeriod = elapsedMilliseconds % BreathPeriodMilliseconds;/);
+  assert.match(theme, /return elapsedInPeriod \/ BreathPeriodMilliseconds;/);
+  assert.match(theme, /var normalized = phase - Math\.Floor\(phase\);/);
+  assert.match(theme, /var breath = 0\.5 - 0\.5 \* Math\.Cos\(2 \* Math\.PI \* normalized\);/);
+  assert.match(theme, /var baseThickness = 23 \+ \(31 - 23\) \* breath;/);
+  assert.match(theme, /var fillAlpha = MinFillAlpha \+ \(MaxFillAlpha - MinFillAlpha\) \* breath;/);
+  assert.match(renderer, /new Bitmap\(width, height, PixelFormat\.Format32bppPArgb\)/);
+  assert.match(renderer, /public static Bitmap Render\(Size size, double phase, RectangleF\? targetRect\)/);
+  assert.match(renderer, /DrawTargetFrame\(graphics, targetRect, state\)/);
+  assert.match(renderer, /targetRect is not \{\ } target \|\| target\.Width < 24 \|\| target\.Height < 24/);
+  assert.match(program, /SnapshotCompositor\.Render\(snapshot\);[\s\S]*?return 0;/);
+  assert.match(program, /Directory\.CreateDirectory\(outputDirectory!\)/);
+  assert.match(program, /bitmap\.Save\(options\.OutputPath, ImageFormat\.Png\)/);
+  assert.ok(program.indexOf("ApplicationConfiguration.Initialize()") > program.indexOf("SnapshotCompositor.Render(snapshot)"));
+  assert.ok(program.indexOf("Application.Run(new OverlayForm())") > program.indexOf("SnapshotCompositor.Render(snapshot)"));
 
   await run("dotnet", ["build", overlayProject, "--nologo"]);
   const outputDirectory = await mkdtemp(join(tmpdir(), "gateway-overlay-snapshot-"));

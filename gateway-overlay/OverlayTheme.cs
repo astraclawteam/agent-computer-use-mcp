@@ -12,6 +12,23 @@ internal static class OverlayTheme
 
     public const double MinFillAlpha = 0.14;
     public const double MaxFillAlpha = 0.32;
+    public const double BreathPeriodMilliseconds = 3200;
+
+    public static double PhaseAtElapsedMilliseconds(double elapsedMilliseconds)
+    {
+        if (!double.IsFinite(elapsedMilliseconds))
+        {
+            throw new ArgumentOutOfRangeException(nameof(elapsedMilliseconds), "elapsed milliseconds must be finite");
+        }
+
+        var elapsedInPeriod = elapsedMilliseconds % BreathPeriodMilliseconds;
+        if (elapsedInPeriod < 0)
+        {
+            elapsedInPeriod += BreathPeriodMilliseconds;
+        }
+
+        return elapsedInPeriod / BreathPeriodMilliseconds;
+    }
 
     public static OverlayFrameState AtPhase(double phase)
     {
