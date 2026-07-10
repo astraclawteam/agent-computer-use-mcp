@@ -50,6 +50,7 @@ test("maintainer package is non-publishable and pins build-only protection tools
   assert.deepEqual(packageJson.devDependencies, {
     esbuild: "0.28.1",
     "javascript-obfuscator": "5.4.6",
+    yaml: "2.9.0",
   });
 });
 

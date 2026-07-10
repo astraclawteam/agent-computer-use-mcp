@@ -208,7 +208,7 @@ git commit -m "feat: acquire locked release assets"
 - Produces: `buildWindowsReleasePayload({ outputRoot, acquiredAssets, generatedAt }): Promise<WindowsPayloadReport>`.
 - `WindowsPayloadReport` exposes `bundleRoot`, `installerPath`, `overlayRoot`, `runtimeDescriptorPath`, file counts, and `distributionStatus`.
 
-- [ ] **Step 1: Write failing payload tests**
+- [x] **Step 1: Write failing payload tests**
 
 The test assembles from a small valid Node ZIP fixture and real local .NET builds, then asserts:
 
@@ -225,7 +225,7 @@ assert.equal(report.sourceMapCount, 0);
 
 Assert the runtime descriptor uses `runtime/node/node.exe` plus `package/dist/launcher.mjs`, and no path points to the worktree, global npm, or a machine-wide Node installation.
 
-- [ ] **Step 2: Run the test and verify RED**
+- [x] **Step 2: Run the test and verify RED**
 
 Run:
 
@@ -235,7 +235,7 @@ node --test test/windows-release-payload.test.mjs
 
 Expected: FAIL because the payload builder does not exist.
 
-- [ ] **Step 3: Implement safe ZIP extraction and portable dependency staging**
+- [x] **Step 3: Implement safe ZIP extraction and portable dependency staging**
 
 `expand-verified-zip.ps1` first enumerates every ZIP entry, rejects absolute paths, `..`, duplicate case-insensitive paths, links, and output escape, then extracts to a fresh root.
 
@@ -256,7 +256,7 @@ materializeReleaseBundle into output/release
 
 Update the overlay project/publish command so the GitHub payload does not require a machine-wide .NET runtime. Do not use single-file settings if they break WebView2 native loading; include and inventory every required output instead.
 
-- [ ] **Step 4: Run focused tests and real builds**
+- [x] **Step 4: Run focused tests and real builds**
 
 Run:
 
@@ -268,7 +268,7 @@ dotnet publish gateway-overlay/GatewayComputerUseOverlay.csproj --configuration 
 
 Expected: PASS; generated native output remains ignored.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```powershell
 git add src/windows-release-payload.mjs scripts/expand-verified-zip.ps1 test/windows-release-payload.test.mjs gateway-overlay/GatewayComputerUseOverlay.csproj package.json
