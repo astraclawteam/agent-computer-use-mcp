@@ -138,7 +138,7 @@ Expected: PASS; one focused commit.
 - Produces: `acquireReleaseAssets({ lock, cacheRoot, allowNetwork, fetchImpl, onProgress }): Promise<AcquiredAsset[]>`.
 - `AcquiredAsset` is `{ id, version, path, sizeBytes, sha256, cacheHit, sourceUrl }`.
 
-- [ ] **Step 1: Write failing acquisition tests**
+- [x] **Step 1: Write failing acquisition tests**
 
 Tests use a local in-memory fetch adapter and assert:
 
@@ -152,7 +152,7 @@ await assert.rejects(() => acquireReleaseAssets({ lock, cacheRoot, allowNetwork:
 
 Also verify a corrupt cache hit is deleted and never returned, temporary `.part` files are removed after failure, redirects remain HTTPS, and progress events expose no credential or local user path.
 
-- [ ] **Step 2: Run the test and verify RED**
+- [x] **Step 2: Run the test and verify RED**
 
 Run:
 
@@ -162,7 +162,7 @@ node --test test/release-asset-acquirer.test.mjs
 
 Expected: FAIL because the acquisition module does not exist.
 
-- [ ] **Step 3: Implement exact acquisition**
+- [x] **Step 3: Implement exact acquisition**
 
 Use Node `fetch`, stream to `<hash>.part`, count bytes, hash while writing, fsync, and atomically rename only after exact size/hash validation. Re-verify every cache hit. `allowNetwork:false` must never call `fetchImpl`.
 
@@ -176,7 +176,7 @@ const assets = await acquireReleaseAssets({
 });
 ```
 
-- [ ] **Step 4: Run focused tests and a real acquisition**
+- [x] **Step 4: Run focused tests and a real acquisition**
 
 Run:
 
@@ -187,7 +187,7 @@ node scripts/fetch-windows-release-assets.mjs
 
 Expected: tests PASS; six real assets are present under `artifacts/release-cache/sha256`; the report records `startsDesktopControl:false` and `includeUserOverlay:false`.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```powershell
 git add src/release-asset-acquirer.mjs scripts/fetch-windows-release-assets.mjs test/release-asset-acquirer.test.mjs
