@@ -256,7 +256,7 @@ Extraction occurs only under a transaction directory. The implementation verifie
 
 `asset-activate` atomically switches `asset-state.json`. Existing processes continue using their current files; new daemon sessions resolve paths from the new state. The previous state is retained until the next successful doctor run.
 
-Before a new daemon session executes an active asset, the Node host resolves its entry point from `asset-state.json`, requires the asset root and entry point to remain inside the product assets root, and rechecks every declared file size and SHA-256. Invalid, escaped, missing, or modified active state fails closed and falls through to an explicit repair result rather than executing the path.
+Before a new daemon session executes an active asset, the Node host resolves its entry point from `asset-state.json`, canonicalizes equivalent Windows short-name/root aliases, requires the physical asset root and entry point to remain inside the product assets root, rejects junctions/symlinks within that subtree, and rechecks every declared file size and SHA-256. Invalid, escaped, linked, missing, or modified active state fails closed and falls through to an explicit repair result rather than executing the path.
 
 `asset-rollback` verifies the previous manifest and every referenced immutable asset before swapping current and previous state. Missing or corrupted previous assets make rollback fail closed.
 

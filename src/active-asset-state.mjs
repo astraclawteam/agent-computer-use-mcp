@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { existsSync, lstatSync, readFileSync, statSync } from "node:fs";
+import { existsSync, lstatSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { isAbsolute, join, relative, resolve } from "node:path";
 
 import { getInstallLayout } from "./package-foundation.mjs";
@@ -33,19 +33,25 @@ export function inspectActiveAssetEntryPoint(assetId, options = {}) {
     const assetsRoot = join(programRoot, "assets");
     const assetRoot = resolve(asset.root);
     const entryPoint = resolve(asset.entryPoint);
-    if (!pathIsInside(assetsRoot, assetRoot) || !pathIsInside(assetRoot, entryPoint)) {
-      return unavailable("asset.path_outside_root");
-    }
     if (!existsSync(entryPoint)) return unavailable("asset.entry_point_missing");
     if (pathContainsLink(assetsRoot, assetRoot) || pathContainsLink(assetRoot, entryPoint)) {
       return unavailable("asset.linked_path");
+    }
+    const canonicalAssetsRoot = realpathSync.native(assetsRoot);
+    const canonicalAssetRoot = realpathSync.native(assetRoot);
+    const canonicalEntryPoint = realpathSync.native(entryPoint);
+    if (!pathIsInside(canonicalAssetsRoot, canonicalAssetRoot)
+      || !pathIsInside(canonicalAssetRoot, canonicalEntryPoint)) {
+      return unavailable("asset.path_outside_root");
     }
     for (const file of asset.files) {
       if (!file || typeof file.path !== "string" || !Number.isSafeInteger(file.sizeBytes)
         || !/^[a-f0-9]{64}$/.test(file.sha256 ?? "")) return unavailable("asset.file_metadata_invalid");
       const filePath = resolve(assetRoot, ...file.path.split("/"));
-      if (!pathIsInside(assetRoot, filePath)) return unavailable("asset.path_outside_root");
       if (pathContainsLink(assetRoot, filePath)) return unavailable("asset.linked_path");
+      if (!pathIsInside(canonicalAssetRoot, realpathSync.native(filePath))) {
+        return unavailable("asset.path_outside_root");
+      }
       const info = statSync(filePath);
       if (!info.isFile()) return unavailable("asset.file_unavailable");
       if (info.size !== file.sizeBytes) return unavailable("asset.size_mismatch");
@@ -70,9 +76,18 @@ function pathIsInside(root, candidate) {
 function pathContainsLink(root, candidate) {
   let current = resolve(root);
   if (lstatSync(current).isSymbolicLink()) return true;
-  for (const segment of relative(current, resolve(candidate)).split(/[\\/]/).filter(Boolean)) {
+  const lexicalPath = relative(current, resolve(candidate));
+  const canonicalRoot = realpathSync.native(current);
+  const canonicalCandidate = realpathSync.native(candidate);
+  const canonicalPath = relative(canonicalRoot, canonicalCandidate);
+  const path = relativePathIsInside(lexicalPath) ? lexicalPath : canonicalPath;
+  for (const segment of path.split(/[\\/]/).filter(Boolean)) {
     current = join(current, segment);
     if (lstatSync(current).isSymbolicLink()) return true;
   }
   return false;
+}
+
+function relativePathIsInside(path) {
+  return path.length > 0 && !path.startsWith("..") && !isAbsolute(path);
 }

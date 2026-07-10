@@ -80,6 +80,16 @@ test("active asset resolver rejects a linked asset root", async () => {
   assert.equal(inspectActiveAssetEntryPoint("cua-driver-windows-x64", { programRoot }).reason, "asset.linked_path");
 });
 
+test("active asset resolver accepts a host root alias for the same physical product root", async () => {
+  const fixture = await createActiveAssetFixture();
+  const aliasRoot = join(fixture.root, "program-alias");
+  await symlink(fixture.programRoot, aliasRoot, process.platform === "win32" ? "junction" : "dir");
+
+  assert.equal(resolveActiveAssetEntryPoint("cua-driver-windows-x64", {
+    programRoot: aliasRoot,
+  }), fixture.entryPoint);
+});
+
 async function createActiveAssetFixture() {
   const root = await mkdtemp(join(tmpdir(), "agent-computer-use-active-asset-"));
   roots.push(root);
