@@ -229,8 +229,10 @@ function requestOptions() {
 
 function childEnvironment(overrides, omittedKeys = []) {
   const env = { ...process.env, ...overrides };
-  for (const key of omittedKeys) delete env[key];
-  return Object.fromEntries(Object.entries(env).filter(([, value]) => typeof value === "string"));
+  const omitted = new Set(omittedKeys.map((key) => key.toUpperCase()));
+  return Object.fromEntries(Object.entries(env).filter(([key, value]) => (
+    typeof value === "string" && !omitted.has(key.toUpperCase())
+  )));
 }
 
 function samePath(left, right) {

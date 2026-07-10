@@ -90,7 +90,7 @@ function runNode(args) {
       cwd: process.cwd(),
       env: {
         ...process.env,
-        AGENT_COMPUTER_USE_CUA_DRIVER: "C:\\host-tools\\must-not-be-used\\cua-driver.exe",
+        agent_computer_use_cua_driver: "C:\\host-tools\\must-not-be-used\\cua-driver.exe",
       },
       stdio: ["ignore", "pipe", "pipe"],
       windowsHide: true,
