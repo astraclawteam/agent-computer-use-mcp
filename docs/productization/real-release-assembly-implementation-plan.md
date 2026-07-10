@@ -483,7 +483,7 @@ Expected: FAIL because orchestration and Phase 0.15 are absent.
 
 - [x] **Step 4: Implement atomic assembly**
 
-Assemble under `<output>.staging-<uuid>`, verify every output, move a recognized previous candidate aside, atomically promote only after all stages pass, and restore the previous candidate if promotion fails. Refuse to replace an unrelated directory. The candidate command uses the real checked-in asset lock and defaults to network acquisition during assembly.
+Assemble under `<output>.staging-<uuid>`, verify every output against a fixed ID/file-name/media-type contract, move a recognized previous candidate aside, atomically promote only after all stages pass, and restore the previous candidate if promotion fails. Refuse to replace an unrelated directory. Once promotion succeeds, a previous-candidate cleanup failure is reported as deferred recovery evidence instead of falsely reporting that promotion failed. The candidate command uses the real checked-in asset lock and defaults to network acquisition during assembly.
 
 The phase gate then creates temporary program/data roots and, with network disabled:
 
@@ -491,7 +491,7 @@ The phase gate then creates temporary program/data roots and, with network disab
 2. prepares and activates all asset views from the offline bundle through the native installer;
 3. launches the installed portable Node plus protected launcher;
 4. connects with the official MCP SDK;
-5. initializes, lists tools, calls `computer.health({fast:true})`, and uses `computer.doctor({fast:true})` to resolve the activated cua-driver;
+5. initializes, lists tools, calls `computer.health({fast:true})`, clears host driver overrides, and uses `computer.doctor({fast:true})` to prove the resolved cua-driver path exactly matches the activated candidate entry point;
 6. verifies the offline ZIP's exact internal file inventory and every SHA-256 from `metadata/checksums.txt`.
 7. confirms active driver, overlay, model pack, WebView2 installer, hashes, and runtime entrypoints resolve inside temporary installed roots;
 8. closes the client and removes all temporary roots.

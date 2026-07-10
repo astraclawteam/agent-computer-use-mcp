@@ -182,6 +182,47 @@ test("Windows candidate verification rejects files outside the release inventory
   );
 });
 
+test("Windows candidate verification enforces exact artifact filenames and media types", async () => {
+  for (const mutation of ["media-type", "file-name"]) {
+    const fixture = await createFixture();
+    await assembleWindowsReleaseCandidate({
+      outputRoot: fixture.outputRoot,
+      cacheRoot: join(fixture.root, "cache"),
+      allowNetwork: false,
+      generatedAt: "2026-07-10T00:00:00.000Z",
+      lock: fixture.lock,
+      identity: fixture.identity,
+      dependencies: fixture.dependencies([]),
+    });
+    const manifestPath = join(fixture.outputRoot, "agent-computer-use-mcp-0.0.1-release-manifest.json");
+    const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
+    const installer = manifest.artifacts.find((artifact) => artifact.id === "windows-installer");
+    if (mutation === "media-type") {
+      installer.mediaType = "application/octet-stream";
+    } else {
+      const renamed = "renamed-installer.exe";
+      await rename(join(fixture.outputRoot, installer.fileName), join(fixture.outputRoot, renamed));
+      installer.fileName = renamed;
+    }
+    await writeFile(manifestPath, JSON.stringify(manifest), "utf8");
+    const dependencies = fixture.dependencies([]);
+    dependencies.verifyReleaseOutputs = async () => ({ status: "passed", violations: [] });
+
+    await assert.rejects(
+      () => verifyWindowsReleaseCandidate({
+        outputRoot: fixture.outputRoot,
+        cacheRoot: join(fixture.root, "cache"),
+        lock: fixture.lock,
+        packageJson: { name: fixture.identity.packageName, version: fixture.identity.version },
+        expectedCommit: fixture.identity.commit,
+        dependencies,
+      }),
+      (error) => error?.code === "release.candidate_inventory_invalid",
+      mutation,
+    );
+  }
+});
+
 test("Windows release assembly refuses to replace an unrelated output directory", async () => {
   const fixture = await createFixture();
   await mkdir(fixture.outputRoot, { recursive: true });
@@ -231,6 +272,32 @@ test("candidate promotion restores the previous output when the final rename fai
   assert.equal(await readFile(join(outputRoot, "old.txt"), "utf8"), "old");
   assert.equal(await readFile(join(stageRoot, "new.txt"), "utf8"), "new");
   assert.deepEqual((await readdir(root)).filter((entry) => entry.includes(".previous-")), []);
+});
+
+test("candidate promotion reports deferred backup cleanup after the new output is active", async () => {
+  const root = await mkdtemp(join(tmpdir(), "agent-release-cleanup-"));
+  roots.push(root);
+  const outputRoot = join(root, "candidate");
+  const stageRoot = join(root, "candidate.staging");
+  await writeFixture(join(outputRoot, "old.txt"), "old");
+  await writeFixture(join(stageRoot, "new.txt"), "new");
+
+  const result = await promoteReleaseCandidate({
+    outputRoot,
+    stageRoot,
+    async rmImpl() {
+      const error = new Error("simulated cleanup failure");
+      error.code = "EACCES";
+      throw error;
+    },
+  });
+
+  assert.equal(result.status, "promoted");
+  assert.equal(result.previousCandidateCleanup.status, "deferred");
+  assert.equal(await readFile(join(outputRoot, "new.txt"), "utf8"), "new");
+  const backups = (await readdir(root)).filter((entry) => entry.includes(".previous-"));
+  assert.equal(backups.length, 1);
+  assert.equal(await readFile(join(root, backups[0], "old.txt"), "utf8"), "old");
 });
 
 async function createFixture() {

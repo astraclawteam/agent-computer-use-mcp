@@ -72,6 +72,7 @@ test("Phase 0.15 assembles installs and smokes a real offline Windows release ca
   assert.equal(report.assetsPreparedAndActivatedOffline, true);
   assert.equal(report.standardMcpSmokePassed, true);
   assert.equal(report.activatedDriverResolvedByMcp, true);
+  assert.equal(report.activatedDriverPathMatches, true);
   assert.equal(report.mcpDeadlineMs, 15_000);
   assert.equal(report.ocrModelPackPresent, true);
   assert.equal(report.webView2InstallerPresent, true);
@@ -87,6 +88,10 @@ function runNode(args) {
   return new Promise((resolve, reject) => {
     const child = spawn(process.execPath, args, {
       cwd: process.cwd(),
+      env: {
+        ...process.env,
+        AGENT_COMPUTER_USE_CUA_DRIVER: "C:\\host-tools\\must-not-be-used\\cua-driver.exe",
+      },
       stdio: ["ignore", "pipe", "pipe"],
       windowsHide: true,
     });

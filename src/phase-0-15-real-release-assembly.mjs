@@ -29,6 +29,13 @@ const REQUIRED_SBOM_COMPONENTS = new Set([
   "webview2-evergreen-standalone-windows-x64",
 ]);
 const MCP_SMOKE_TIMEOUT_MS = 15_000;
+const DRIVER_OVERRIDE_ENV_KEYS = Object.freeze([
+  "AGENT_COMPUTER_USE_CUA_DRIVER",
+  "AGENT_COMPUTER_USE_CUA_DRIVER_PATH",
+  "XIAOZHICLAW_CUA_DRIVER",
+  "XIAOZHICLAW_CUA_DRIVER_PATH",
+  "CUA_DRIVER",
+]);
 
 export async function runRealReleaseAssemblyPhase(options = {}) {
   const packageJson = JSON.parse(await readFile("package.json", "utf8"));
@@ -98,7 +105,13 @@ export async function runRealReleaseAssemblyPhase(options = {}) {
 
     const activePayloadRoot = install.report.activePayloadRoot;
     const runtime = JSON.parse(await readFile(join(activePayloadRoot, "runtime-entrypoints.json"), "utf8"));
-    const mcpSmoke = await smokeInstalledMcp({ activePayloadRoot, runtime, localAppData });
+    const driver = activated.report.assets.find((asset) => asset.id === "cua-driver-windows-x64");
+    const mcpSmoke = await smokeInstalledMcp({
+      activePayloadRoot,
+      runtime,
+      localAppData,
+      expectedDriverPath: driver?.entryPoint,
+    });
     const model = activated.report.assets.find((asset) => asset.id === "ocr-model-pp-ocrv6-small");
     const webView = activated.report.assets.find((asset) => asset.id === "webview2-evergreen-standalone-windows-x64");
     const ocrModelPackPresent = await assetFilesPresent(model, PP_OCRV6_SMALL_MODEL_PACK.files);
@@ -129,6 +142,7 @@ export async function runRealReleaseAssemblyPhase(options = {}) {
       assetsPreparedAndActivatedOffline: prepared.report.status === "prepared" && activated.report.status === "activated",
       standardMcpSmokePassed: mcpSmoke.status === "passed",
       activatedDriverResolvedByMcp: mcpSmoke.activatedDriverResolved,
+      activatedDriverPathMatches: mcpSmoke.activatedDriverPathMatches,
       mcpDeadlineMs: MCP_SMOKE_TIMEOUT_MS,
       ocrModelPackPresent,
       webView2InstallerPresent,
@@ -145,7 +159,7 @@ export async function runRealReleaseAssemblyPhase(options = {}) {
   }
 }
 
-async function smokeInstalledMcp({ activePayloadRoot, runtime, localAppData }) {
+async function smokeInstalledMcp({ activePayloadRoot, runtime, localAppData, expectedDriverPath }) {
   const nodePath = join(activePayloadRoot, ...runtime.mcp.command.split("/"));
   const launcherPath = join(activePayloadRoot, ...runtime.mcp.args[0].split("/"));
   const packageRoot = join(activePayloadRoot, "package");
@@ -160,7 +174,7 @@ async function smokeInstalledMcp({ activePayloadRoot, runtime, localAppData }) {
     command: nodePath,
     args: [launcherPath],
     cwd: packageRoot,
-    env: childEnvironment({ LOCALAPPDATA: localAppData }),
+    env: childEnvironment({ LOCALAPPDATA: localAppData }, DRIVER_OVERRIDE_ENV_KEYS),
   });
   try {
     await client.connect(transport, requestOptions());
@@ -175,13 +189,14 @@ async function smokeInstalledMcp({ activePayloadRoot, runtime, localAppData }) {
       undefined,
       requestOptions(),
     );
-    const activatedDriverResolved = doctor.structuredContent?.installCache?.assets?.some((asset) => (
-      asset.id === "cua-driver-windows-x64" && asset.status === "healthy"
-    )) === true;
+    const driver = doctor.structuredContent?.installCache?.assets?.find((asset) => asset.id === "cua-driver-windows-x64");
+    const activatedDriverPathMatches = samePath(driver?.health?.driverPath ?? driver?.path, expectedDriverPath);
+    const activatedDriverResolved = driver?.status === "healthy" && activatedDriverPathMatches;
     return {
       status: !health.isError && !doctor.isError && activatedDriverResolved
         && tools.tools.some((tool) => tool.name === "computer.health") ? "passed" : "failed",
       activatedDriverResolved,
+      activatedDriverPathMatches,
     };
   } finally {
     await closeMcpClient(client, transport);
@@ -212,10 +227,16 @@ function requestOptions() {
   return { timeout: MCP_SMOKE_TIMEOUT_MS, maxTotalTimeout: MCP_SMOKE_TIMEOUT_MS };
 }
 
-function childEnvironment(overrides) {
-  return Object.fromEntries(
-    Object.entries({ ...process.env, ...overrides }).filter(([, value]) => typeof value === "string"),
-  );
+function childEnvironment(overrides, omittedKeys = []) {
+  const env = { ...process.env, ...overrides };
+  for (const key of omittedKeys) delete env[key];
+  return Object.fromEntries(Object.entries(env).filter(([, value]) => typeof value === "string"));
+}
+
+function samePath(left, right) {
+  if (typeof left !== "string" || typeof right !== "string") return false;
+  const normalize = (value) => process.platform === "win32" ? resolve(value).toLowerCase() : resolve(value);
+  return normalize(left) === normalize(right);
 }
 
 async function closeMcpClient(client, transport) {

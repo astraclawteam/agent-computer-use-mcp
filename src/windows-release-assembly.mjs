@@ -22,16 +22,6 @@ const DEFAULT_DEPENDENCIES = Object.freeze({
   verifyReleaseOutputs,
   writeReleaseOutputManifest,
 });
-const REQUIRED_ARTIFACT_IDS = Object.freeze([
-  "windows-installer",
-  "windows-offline-bundle",
-  "protected-npm-package",
-  "release-sbom",
-  "candidate-asset-manifest",
-  "candidate-asset-signature",
-  "candidate-asset-keyring",
-]);
-
 export async function assembleWindowsReleaseCandidate(options = {}) {
   if (process.platform !== "win32") {
     throw releaseError("release.windows_required", "Windows release assembly requires Windows");
@@ -139,7 +129,7 @@ export async function assembleWindowsReleaseCandidate(options = {}) {
     }
 
     await mkdir(dirname(outputRoot), { recursive: true });
-    await promoteReleaseCandidate({ stageRoot, outputRoot });
+    const promotion = await promoteReleaseCandidate({ stageRoot, outputRoot });
     return {
       status: "passed",
       platform: "windows-x64",
@@ -160,6 +150,7 @@ export async function assembleWindowsReleaseCandidate(options = {}) {
       firstEnableDownloadCount: offlineReport.firstEnableDownloadCount ?? 0,
       startsDesktopControl: false,
       includeUserOverlay: false,
+      previousCandidateCleanup: promotion.previousCandidateCleanup,
     };
   } finally {
     await rm(stageRoot, { recursive: true, force: true });
@@ -194,7 +185,20 @@ export async function promoteReleaseCandidate({
     }
     throw cause;
   }
-  if (hasPrevious) await rmImpl(backup, { recursive: true, force: true });
+  let previousCandidateCleanup = { status: "not-required" };
+  if (hasPrevious) {
+    try {
+      await rmImpl(backup, { recursive: true, force: true });
+      previousCandidateCleanup = { status: "completed" };
+    } catch (error) {
+      previousCandidateCleanup = {
+        status: "deferred",
+        recoveryDirectory: basename(backup),
+        errorCode: typeof error?.code === "string" ? error.code : "cleanup-failed",
+      };
+    }
+  }
+  return { status: "promoted", outputRoot: output, previousCandidateCleanup };
 }
 
 export async function verifyWindowsReleaseCandidate(options = {}) {
@@ -224,10 +228,15 @@ export async function verifyWindowsReleaseCandidate(options = {}) {
     mediaType: entry.mediaType,
     distributionStatus: entry.distributionStatus,
   }));
+  const contracts = candidateArtifactContracts(prefix);
   const byId = new Map(artifacts.map((entry) => [entry.id, entry]));
-  if (artifacts.length !== REQUIRED_ARTIFACT_IDS.length || byId.size !== artifacts.length
-    || REQUIRED_ARTIFACT_IDS.some((id) => !byId.has(id))
-    || artifacts.some((entry) => entry.distributionStatus !== "blocked_unsigned")) {
+  const fileNames = new Set(artifacts.map((entry) => entry.fileName));
+  if (artifacts.length !== contracts.length || byId.size !== artifacts.length || fileNames.size !== artifacts.length
+    || contracts.some((contract) => {
+      const entry = byId.get(contract.id);
+      return !entry || entry.fileName !== contract.fileName || entry.mediaType !== contract.mediaType
+        || entry.distributionStatus !== "blocked_unsigned";
+    })) {
     throw releaseError("release.candidate_inventory_invalid", "existing candidate artifact inventory is incomplete or distributable");
   }
   const expectedFiles = new Set([
@@ -261,6 +270,18 @@ export async function verifyWindowsReleaseCandidate(options = {}) {
     startsDesktopControl: false,
     includeUserOverlay: false,
   };
+}
+
+function candidateArtifactContracts(prefix) {
+  return [
+    { id: "windows-installer", fileName: `${prefix}-windows-x64-installer.candidate.exe`, mediaType: "application/vnd.microsoft.portable-executable" },
+    { id: "windows-offline-bundle", fileName: `${prefix}-windows-x64-offline.candidate.zip`, mediaType: "application/zip" },
+    { id: "protected-npm-package", fileName: `${prefix}.tgz`, mediaType: "application/gzip" },
+    { id: "release-sbom", fileName: `${prefix}-sbom.cdx.json`, mediaType: "application/vnd.cyclonedx+json" },
+    { id: "candidate-asset-manifest", fileName: `${prefix}-asset-manifest.candidate.json`, mediaType: "application/json" },
+    { id: "candidate-asset-signature", fileName: `${prefix}-asset-manifest.candidate.sig`, mediaType: "application/json" },
+    { id: "candidate-asset-keyring", fileName: `${prefix}-asset-keyring.candidate.json`, mediaType: "application/json" },
+  ];
 }
 
 async function verifyAcquiredAssets(lock, acquiredAssets) {
