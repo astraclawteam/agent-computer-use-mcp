@@ -151,7 +151,7 @@ internal sealed class AuthenticodeVerifier
             UnionChoice = 1,
             FileInfo = fileInfo,
             StateAction = StateActionVerify,
-            ProviderFlags = 0x1000 | 0x2000,
+            ProviderFlags = 0x10 | 0x1000 | 0x2000,
             UiContext = 0,
         };
     }

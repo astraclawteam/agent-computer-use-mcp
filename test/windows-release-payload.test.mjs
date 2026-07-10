@@ -23,6 +23,8 @@ test("Windows release payload contains portable protected runtime and native hel
   await createZip(nodeArchivePath, [
     { path: "node-v24.12.0-win-x64/node.exe", contents: "portable-node-fixture" },
     { path: "node-v24.12.0-win-x64/LICENSE", contents: "MIT fixture" },
+    { path: "node-v24.12.0-win-x64/node_modules/npm/node_modules/dependency/index.ts", contents: "export {};" },
+    { path: "node-v24.12.0-win-x64/node_modules/npm/node_modules/dependency/index.js.map", contents: "{}" },
   ]);
 
   const report = await buildWindowsReleasePayload({
@@ -36,6 +38,8 @@ test("Windows release payload contains portable protected runtime and native hel
   assert.equal(report.sourceEntryCount, 0);
   assert.equal(report.sourceMapCount, 0);
   assert.equal(await exists(join(report.bundleRoot, "payload/runtime/node/node.exe")), true);
+  assert.equal(await exists(join(report.bundleRoot, "payload/runtime/node/node_modules/npm/node_modules/dependency/index.ts")), false);
+  assert.equal(await exists(join(report.bundleRoot, "payload/runtime/node/node_modules/npm/node_modules/dependency/index.js.map")), false);
   assert.equal(await exists(join(report.bundleRoot, "payload/package/dist/launcher.mjs")), true);
   assert.equal(await exists(join(report.bundleRoot, "payload/helpers/overlay/GatewayComputerUseOverlay.exe")), true);
   assert.equal(await exists(join(report.bundleRoot, "payload/bin/AgentComputerUse.Installer.exe")), true);

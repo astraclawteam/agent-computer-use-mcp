@@ -107,7 +107,7 @@ test("candidate preparation turns locked driver OCR and WebView2 bytes into inst
   const lock = {
     assets: acquiredAssets.map((asset) => ({
       id: asset.id,
-      version: asset.version,
+      version: asset.id === "webview2-evergreen-standalone-windows-x64" ? "1.3.241.15" : asset.version,
       source: { sizeBytes: asset.sizeBytes, sha256: asset.sha256, fileName: asset.id, url: `https://example.test/${asset.id}` },
       license: { spdx: "MIT", sourceUrl: "https://example.test/license" },
     })),
@@ -131,7 +131,9 @@ test("candidate preparation turns locked driver OCR and WebView2 bytes into inst
   const manifest = JSON.parse(await readFile(prepared.trust.manifestPath, "utf8"));
   assert.equal(manifest.developmentOnly, true);
   assert.deepEqual(manifest.assets.map((asset) => asset.id), prepared.assets.map((asset) => asset.id));
-  assert.equal(manifest.assets.find((asset) => asset.id === "webview2-evergreen-standalone-windows-x64").authenticode.mode, "microsoft");
+  const webView = manifest.assets.find((asset) => asset.id === "webview2-evergreen-standalone-windows-x64");
+  assert.equal(webView.authenticode.mode, "microsoft");
+  assert.equal(webView.version, "1.3.241+15");
 });
 
 async function offlineFixture(root) {

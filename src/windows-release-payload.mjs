@@ -35,7 +35,11 @@ export async function buildWindowsReleasePayload(options = {}) {
       throw releaseError("release.node_layout_invalid", "Portable Node archive must contain exactly one node.exe");
     }
     const nodeDistributionRoot = dirname(join(expandedNodeRoot, nodeExePaths[0]));
-    await cp(nodeDistributionRoot, join(sourceRoot, "runtime", "node"), { recursive: true });
+    await copyDirectoryFiltered(
+      nodeDistributionRoot,
+      join(sourceRoot, "runtime", "node"),
+      (path) => !/\.(?:cs|map|py|ts|tsx)$/iu.test(path),
+    );
 
     const nativeRoot = join(stageRoot, "native");
     const installerOutput = join(nativeRoot, "installer");

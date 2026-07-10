@@ -438,7 +438,7 @@ git commit -m "feat: emit release SBOM and checksums"
 - Produces: `assembleWindowsReleaseCandidate({ outputRoot, cacheRoot, allowNetwork, generatedAt }): Promise<AssemblyReport>`.
 - Produces scripts `release:windows:assets`, `release:windows:assemble`, and `phase:0.15`.
 
-- [ ] **Step 1: Write failing orchestration tests**
+- [x] **Step 1: Write failing orchestration tests**
 
 Use acquired local fixture blobs and injected builders to assert ordered execution, atomic output promotion, cleanup after any stage failure, and no output when a required asset is corrupt. Assert a successful report exposes:
 
@@ -453,7 +453,7 @@ assert.equal(report.startsDesktopControl, false);
 assert.equal(report.includeUserOverlay, false);
 ```
 
-- [ ] **Step 2: Write the failing executable Phase 0.15 test**
+- [x] **Step 2: Write the failing executable Phase 0.15 test**
 
 Assert the package script exists and the phase report proves:
 
@@ -470,7 +470,7 @@ assert.equal(report.checksumsVerified, true);
 assert.equal(report.sbomVerified, true);
 ```
 
-- [ ] **Step 3: Run tests and verify RED**
+- [x] **Step 3: Run tests and verify RED**
 
 Run:
 
@@ -480,7 +480,7 @@ node --test test/windows-release-assembly.test.mjs test/phase-0-15-real-release-
 
 Expected: FAIL because orchestration and Phase 0.15 are absent.
 
-- [ ] **Step 4: Implement atomic assembly**
+- [x] **Step 4: Implement atomic assembly**
 
 Assemble under `<output>.staging-<uuid>`, verify every output, remove any previous candidate output, and atomically rename only after all stages pass. The candidate command uses the real checked-in asset lock and defaults to network acquisition during assembly.
 
@@ -494,7 +494,7 @@ The phase gate then creates temporary program/data roots and, with network disab
 6. confirms active driver, overlay, model pack, WebView2 installer, hashes, and runtime entrypoints resolve inside temporary installed roots;
 7. closes the client and removes all temporary roots.
 
-- [ ] **Step 5: Run focused tests and the real candidate gate**
+- [x] **Step 5: Run focused tests and the real candidate gate**
 
 Run:
 
@@ -506,7 +506,7 @@ npm run phase:0.15
 
 Expected: all commands exit `0`; the real candidate is built from six locked upstream assets; the offline install phase performs no network calls.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```powershell
 git add src/windows-release-assembly.mjs scripts/build-windows-release-candidate.mjs src/phase-0-15-real-release-assembly.mjs test/windows-release-assembly.test.mjs test/phase-0-15-real-release-assembly.test.mjs package.json src/release-metadata.mjs src/release-readiness-gate.mjs src/computer-use-provider-router.mjs

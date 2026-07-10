@@ -85,7 +85,7 @@ export async function prepareWindowsOfflineAssets(options = {}) {
   const webViewDefinition = archiveAssetDefinition({
     id: webViewArchive.id,
     kind: "system-runtime",
-    version: lockAssets.get(webView.id)?.version ?? webView.version,
+    version: normalizeAssetVersion(lockAssets.get(webView.id)?.version ?? webView.version),
     packageVersion,
     archive: webViewArchive,
     files: [{
@@ -277,6 +277,13 @@ function requireAcquired(acquired, id) {
   const asset = acquired.get(id);
   if (!asset) throw releaseError("release.offline_bundle_incomplete", `Acquired asset is missing: ${id}`);
   return asset;
+}
+
+function normalizeAssetVersion(value) {
+  if (/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/u.test(value)) return value;
+  const fourPart = /^(\d+\.\d+\.\d+)\.(\d+)$/u.exec(value);
+  if (fourPart) return `${fourPart[1]}+${fourPart[2]}`;
+  throw releaseError("release.asset_version_invalid", `Asset version cannot be represented as SemVer: ${value}`);
 }
 
 async function validateInputs(options) {
