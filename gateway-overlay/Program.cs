@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Drawing;
 using System.Drawing.Drawing2D;
+using System.Drawing.Imaging;
 using System.Globalization;
 using System.Runtime.InteropServices;
 using System.Text.Json;
@@ -78,7 +79,10 @@ internal static class Program
     {
         public static void Render(SnapshotOptions options)
         {
-            throw new NotSupportedException("Snapshot rendering is not supported until the compositor is implemented.");
+            var outputDirectory = Path.GetDirectoryName(Path.GetFullPath(options.OutputPath));
+            Directory.CreateDirectory(outputDirectory!);
+            using var bitmap = OverlayRenderer.Render(new Size(options.Width, options.Height), options.Phase, null);
+            bitmap.Save(options.OutputPath, ImageFormat.Png);
         }
     }
 }

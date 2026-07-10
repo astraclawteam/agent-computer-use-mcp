@@ -10,6 +10,13 @@ const overlayProject = resolve("gateway-overlay/GatewayComputerUseOverlay.csproj
 const overlayExe = resolve("gateway-overlay/bin/Debug/net10.0-windows/GatewayComputerUseOverlay.exe");
 
 test("native overlay snapshots render valid, dimensioned, distinct PNGs", async () => {
+  const theme = await readFile(resolve("gateway-overlay/OverlayTheme.cs"), "utf8");
+  assert.match(theme, /Color\.FromArgb\(217, 119, 87\)/);
+  assert.match(theme, /Color\.FromArgb\(184, 89, 59\)/);
+  assert.match(theme, /Color\.FromArgb\(247, 210, 195\)/);
+  assert.match(theme, /MinFillAlpha = 0\.14/);
+  assert.match(theme, /MaxFillAlpha = 0\.32/);
+
   await run("dotnet", ["build", overlayProject, "--nologo"]);
   const outputDirectory = await mkdtemp(join(tmpdir(), "gateway-overlay-snapshot-"));
 
