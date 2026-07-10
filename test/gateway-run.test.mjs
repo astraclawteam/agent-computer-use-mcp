@@ -1,6 +1,11 @@
 import assert from "node:assert/strict";
+import { execFile } from "node:child_process";
 import { readFile } from "node:fs/promises";
 import { test } from "node:test";
+import { fileURLToPath } from "node:url";
+import { promisify } from "node:util";
+
+const execFileAsync = promisify(execFile);
 
 test("Gateway run script starts desktop overlay before real CUA and always stops it", async () => {
   const script = await readFile(new URL("../src/gateway-run-winforms.mjs", import.meta.url), "utf8");
@@ -80,36 +85,13 @@ test("Desktop gateway overlay freezes the layered native rendering contract", as
   assert.match(renderer, /DrawTargetFrame/);
 });
 
-test("Layered presenter makes native failures and cleanup ownership explicit", async () => {
-  const program = await readFile(new URL("../gateway-overlay/Program.cs", import.meta.url), "utf8");
-  const presenter = await readFile(new URL("../gateway-overlay/LayeredWindowPresenter.cs", import.meta.url), "utf8");
+test("Layered presenter behavior harness exercises cleanup through Present", async () => {
+  const { stdout } = await execFileAsync(
+    "dotnet",
+    ["run", "--project", "gateway-overlay-tests/GatewayComputerUseOverlay.Tests.csproj", "--no-restore"],
+    { cwd: fileURLToPath(new URL("..", import.meta.url)), windowsHide: true },
+  );
 
-  assert.match(presenter, /internal LayeredWindowPresenter\(ILayeredWindowNative native\)/);
-  assert.match(presenter, /ArgumentNullException\.ThrowIfNull\(native\)/);
-  assert.match(presenter, /throw new InvalidOperationException\("GetDC failed\."\)/);
-  assert.match(presenter, /throw new InvalidOperationException\("CreateCompatibleDC failed\."\)/);
-  assert.match(presenter, /throw new InvalidOperationException\("SelectObject failed\."\)/);
-  assert.match(presenter, /throw new Win32Exception\(errorCode, "UpdateLayeredWindow failed\."\)/);
-  assert.match(presenter, /uint crKey/);
-  assert.match(presenter, /SetLastError = true/);
-  assert.equal((presenter.match(/SetLastError = true/g) ?? []).length, 1);
-
-  const cleanup = presenter.slice(presenter.indexOf("private static Exception? Cleanup"));
-  const restoreIndex = cleanup.indexOf("SelectObject(memoryDc, previousBitmap)");
-  const deleteDcIndex = cleanup.indexOf("DeleteDC(memoryDc)");
-  const deleteBitmapIndex = cleanup.indexOf("DeleteObject(bitmap)");
-  assert.ok(restoreIndex >= 0, "cleanup restores the selected bitmap first");
-  assert.ok(deleteDcIndex > restoreIndex, "cleanup deletes the memory DC after restore");
-  assert.ok(deleteBitmapIndex > deleteDcIndex, "cleanup deletes the HBITMAP after the memory DC");
-  assert.match(cleanup, /if \(memoryDcDeleted && bitmap != IntPtr\.Zero\)/);
-  assert.match(cleanup, /if \(!native\.DeleteDC\(memoryDc\)\)/);
-  assert.match(cleanup, /if \(!native\.DeleteObject\(bitmap\)\)/);
-  assert.match(cleanup, /native\.ReleaseDC\(screenDc\) != 1/);
-  assert.match(presenter, /Exception\? presentationException = null/);
-  assert.match(presenter, /if \(presentationException is null && cleanupException is not null\)/);
-  assert.match(presenter, /ExceptionDispatchInfo\.Capture\(cleanupException\)\.Throw\(\)/);
-
-  assert.match(program, /protected override void Dispose\(bool disposing\)/);
-  assert.match(program, /if \(disposing\)[\s\S]*?_animationTimer\.Dispose\(\);[\s\S]*?_targetRectTimer\.Dispose\(\);/);
-  assert.match(program, /base\.Dispose\(disposing\)/);
+  assert.match(stdout, /PASS: preserves presentation exceptions across every thrown cleanup operation/);
+  assert.match(stdout, /PASS: reports false cleanup operations after presentation succeeds/);
 });

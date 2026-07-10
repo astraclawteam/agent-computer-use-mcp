@@ -18,6 +18,11 @@ internal interface ILayeredWindowNative
     bool UpdateLayeredWindow(IntPtr windowHandle, IntPtr screenDc, Point screenLocation, Size size, IntPtr memoryDc, out int errorCode);
 }
 
+internal interface ILayeredWindowBitmapFactory
+{
+    IntPtr CreateHbitmap(Bitmap frame);
+}
+
 internal sealed class LayeredWindowPresenter
 {
     private const byte AC_SRC_OVER = 0;
@@ -26,16 +31,30 @@ internal sealed class LayeredWindowPresenter
     private static readonly IntPtr HgdError = new(-1);
 
     private readonly ILayeredWindowNative _native;
+    private readonly ILayeredWindowBitmapFactory _bitmapFactory;
+    private readonly Func<Form, IntPtr> _windowHandleResolver;
 
     public LayeredWindowPresenter()
-        : this(new WindowsLayeredWindowNative())
+        : this(new WindowsLayeredWindowNative(), new WindowsLayeredWindowBitmapFactory(), static window => window.Handle)
     {
     }
 
     internal LayeredWindowPresenter(ILayeredWindowNative native)
+        : this(native, new WindowsLayeredWindowBitmapFactory(), static window => window.Handle)
+    {
+    }
+
+    internal LayeredWindowPresenter(
+        ILayeredWindowNative native,
+        ILayeredWindowBitmapFactory bitmapFactory,
+        Func<Form, IntPtr> windowHandleResolver)
     {
         ArgumentNullException.ThrowIfNull(native);
+        ArgumentNullException.ThrowIfNull(bitmapFactory);
+        ArgumentNullException.ThrowIfNull(windowHandleResolver);
         _native = native;
+        _bitmapFactory = bitmapFactory;
+        _windowHandleResolver = windowHandleResolver;
     }
 
     public void Present(Form window, Bitmap frame, Point screenLocation)
@@ -55,6 +74,7 @@ internal sealed class LayeredWindowPresenter
 
         try
         {
+            var windowHandle = _windowHandleResolver(window);
             screenDc = _native.GetDC();
             if (screenDc == IntPtr.Zero)
             {
@@ -67,7 +87,7 @@ internal sealed class LayeredWindowPresenter
                 throw new InvalidOperationException("CreateCompatibleDC failed.");
             }
 
-            bitmap = frame.GetHbitmap(Color.FromArgb(0, 0, 0, 0));
+            bitmap = _bitmapFactory.CreateHbitmap(frame);
             if (bitmap == IntPtr.Zero)
             {
                 throw new InvalidOperationException("GetHbitmap failed.");
@@ -79,7 +99,7 @@ internal sealed class LayeredWindowPresenter
                 throw new InvalidOperationException("SelectObject failed.");
             }
 
-            if (!_native.UpdateLayeredWindow(window.Handle, screenDc, screenLocation, frame.Size, memoryDc, out var errorCode))
+            if (!_native.UpdateLayeredWindow(windowHandle, screenDc, screenLocation, frame.Size, memoryDc, out var errorCode))
             {
                 throw new Win32Exception(errorCode, "UpdateLayeredWindow failed.");
             }
@@ -111,39 +131,75 @@ internal sealed class LayeredWindowPresenter
 
         if (memoryDc != IntPtr.Zero && previousBitmap != IntPtr.Zero && previousBitmap != HgdError)
         {
-            var restoredBitmap = native.SelectObject(memoryDc, previousBitmap);
-            if (restoredBitmap != bitmap)
+            try
             {
-                cleanupException = new InvalidOperationException("SelectObject failed while restoring the previous bitmap.");
+                var restoredBitmap = native.SelectObject(memoryDc, previousBitmap);
+                if (restoredBitmap != bitmap)
+                {
+                    cleanupException ??= new InvalidOperationException("SelectObject failed while restoring the previous bitmap.");
+                }
+            }
+            catch (Exception exception)
+            {
+                cleanupException ??= exception;
             }
         }
 
         if (memoryDc != IntPtr.Zero)
         {
-            if (!native.DeleteDC(memoryDc))
+            try
             {
-                cleanupException ??= new InvalidOperationException("DeleteDC failed during cleanup.");
+                if (!native.DeleteDC(memoryDc))
+                {
+                    cleanupException ??= new InvalidOperationException("DeleteDC failed during cleanup.");
+                }
+                else
+                {
+                    memoryDcDeleted = true;
+                }
             }
-            else
+            catch (Exception exception)
             {
-                memoryDcDeleted = true;
+                cleanupException ??= exception;
             }
         }
 
         if (memoryDcDeleted && bitmap != IntPtr.Zero)
         {
-            if (!native.DeleteObject(bitmap))
+            try
             {
-                cleanupException ??= new InvalidOperationException("DeleteObject failed during cleanup.");
+                if (!native.DeleteObject(bitmap))
+                {
+                    cleanupException ??= new InvalidOperationException("DeleteObject failed during cleanup.");
+                }
+            }
+            catch (Exception exception)
+            {
+                cleanupException ??= exception;
             }
         }
 
-        if (screenDc != IntPtr.Zero && native.ReleaseDC(screenDc) != 1)
+        if (screenDc != IntPtr.Zero)
         {
-            cleanupException ??= new InvalidOperationException("ReleaseDC failed during cleanup.");
+            try
+            {
+                if (native.ReleaseDC(screenDc) != 1)
+                {
+                    cleanupException ??= new InvalidOperationException("ReleaseDC failed during cleanup.");
+                }
+            }
+            catch (Exception exception)
+            {
+                cleanupException ??= exception;
+            }
         }
 
         return cleanupException;
+    }
+
+    private sealed class WindowsLayeredWindowBitmapFactory : ILayeredWindowBitmapFactory
+    {
+        public IntPtr CreateHbitmap(Bitmap frame) => frame.GetHbitmap(Color.FromArgb(0, 0, 0, 0));
     }
 
     private sealed class WindowsLayeredWindowNative : ILayeredWindowNative
