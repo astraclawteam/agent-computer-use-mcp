@@ -366,7 +366,7 @@ git commit -m "feat: assemble real offline Windows assets"
 - Produces: `writeReleaseOutputManifest({ identity, artifacts, outputRoot }): Promise<ReleaseOutputReport>`.
 - The manifest artifacts contain `{ id, fileName, mediaType, sizeBytes, sha256, distributionStatus }`.
 
-- [ ] **Step 1: Write failing SBOM tests**
+- [x] **Step 1: Write failing SBOM tests**
 
 Assert CycloneDX format, root package identity, locked components, production npm dependencies, hashes, licenses, and no local path, username, screenshot, OCR text, private key, signature secret, or overlay pixel fields.
 
@@ -383,7 +383,7 @@ ocr-model-pp-ocrv6-small-rec
 webview2-evergreen-standalone-windows-x64
 ```
 
-- [ ] **Step 2: Write failing manifest/checksum tests**
+- [x] **Step 2: Write failing manifest/checksum tests**
 
 Assert sorted artifact names, exact bytes/hashes, LF line endings, no absolute paths, and checksum lines in this form:
 
@@ -393,7 +393,7 @@ Assert sorted artifact names, exact bytes/hashes, LF line endings, no absolute p
 
 Tampering any artifact after manifest generation must make `verifyReleaseOutputs` fail with `release.output_hash_mismatch`.
 
-- [ ] **Step 3: Run tests and verify RED**
+- [x] **Step 3: Run tests and verify RED**
 
 Run:
 
@@ -403,7 +403,7 @@ node --test test/release-sbom.test.mjs test/release-output-manifest.test.mjs
 
 Expected: FAIL because the modules do not exist.
 
-- [ ] **Step 4: Implement SBOM and output evidence**
+- [x] **Step 4: Implement SBOM and output evidence**
 
 Run npm's built-in command from the locked source workspace:
 
@@ -413,7 +413,7 @@ npm sbom --omit dev --sbom-format cyclonedx --sbom-type application
 
 Parse the JSON, add deterministic external/native components from the lock and payload report, sort by `bom-ref`, and write without local paths. Hash only finalized files. `checksums.txt` includes every published candidate output except itself.
 
-- [ ] **Step 5: Run focused tests and commit**
+- [x] **Step 5: Run focused tests and commit**
 
 ```powershell
 node --test test/release-sbom.test.mjs test/release-output-manifest.test.mjs
