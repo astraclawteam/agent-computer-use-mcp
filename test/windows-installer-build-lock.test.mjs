@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, rm, utimes, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, test } from "node:test";
@@ -19,6 +19,16 @@ test("installer build lock policy allows a slow NativeAOT publish to finish", ()
   assert.equal(INSTALLER_BUILD_LOCK_POLICY.buildWaitMs, 300_000);
   assert.equal(INSTALLER_BUILD_LOCK_POLICY.publishWaitMs, 600_000);
   assert.ok(INSTALLER_BUILD_LOCK_POLICY.orphanGraceMs < INSTALLER_BUILD_LOCK_POLICY.buildWaitMs);
+});
+
+test("release payload reuses the serialized NativeAOT installer publisher", async () => {
+  const source = await readFile("src/windows-release-payload.mjs", "utf8");
+  assert.match(source, /import \{ ensureWindowsInstallerPublished \} from "\.\/windows-installer-host\.mjs"/u);
+  assert.match(source, /await ensureWindowsInstallerPublished\(\)/u);
+  assert.doesNotMatch(
+    source,
+    /runChecked\("dotnet", \[[\s\S]*?"publish",[\s\S]*?windows-installer\/AgentComputerUse\.Installer\.csproj/u,
+  );
 });
 
 test("installer build lock never expires while its owner process is alive", async () => {
