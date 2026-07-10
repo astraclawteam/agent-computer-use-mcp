@@ -133,6 +133,14 @@ export async function assembleWindowsReleaseCandidate(options = {}) {
     await rm(workRoot, { recursive: true, force: true });
     const output = await dependencies.writeReleaseOutputManifest({
       identity,
+      evidence: {
+        target,
+        runtimeSelection: payloadReport.runtimeSelection,
+        offlineBundleSizeBytes: offlineSize.sizeBytes,
+        offlineBundleMaxBytes: offlineSize.maxBytes,
+        assetCount: offlineReport.assetCount,
+        blobCount: offlineReport.blobCount,
+      },
       artifacts: candidates,
       outputRoot: stageRoot,
       generatedAt,
@@ -167,6 +175,8 @@ export async function assembleWindowsReleaseCandidate(options = {}) {
         distributionStatus: candidate.distributionStatus,
       })),
       assetCount: lock.assets.length,
+      blobCount: offlineReport.blobCount,
+      runtimeSelection: payloadReport.runtimeSelection,
       offlineBundleSizeBytes: offlineSize.sizeBytes,
       offlineBundleMaxBytes: offlineSize.maxBytes,
       realAssetBytesVerified: true,

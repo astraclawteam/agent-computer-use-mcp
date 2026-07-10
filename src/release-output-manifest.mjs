@@ -6,6 +6,7 @@ const HASH_PATTERN = /^[a-f0-9]{64}$/;
 
 export async function writeReleaseOutputManifest({
   identity,
+  evidence,
   artifacts,
   outputRoot,
   generatedAt = new Date().toISOString(),
@@ -46,6 +47,7 @@ export async function writeReleaseOutputManifest({
     schemaVersion: 1,
     generatedAt,
     release: { ...identity },
+    ...(evidence === undefined ? {} : { evidence }),
     artifacts: records,
   };
   await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, "utf8");

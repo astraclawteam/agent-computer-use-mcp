@@ -129,6 +129,7 @@
     "release:artifacts": "node src/phase-0-12-release-artifacts.mjs",
     "release:windows:assets": "node scripts/fetch-windows-release-assets.mjs",
     "release:windows:assemble": "node scripts/build-windows-release-candidate.mjs",
+    "release:windows:size-report": "node scripts/windows-release-size-report.mjs",
     "governance:protect-main": "node scripts/configure-branch-protection.mjs",
     "serve": "node src/server.mjs"
   },

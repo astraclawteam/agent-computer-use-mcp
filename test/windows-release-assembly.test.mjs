@@ -39,12 +39,27 @@ test("Windows release assembly executes verified stages and atomically promotes 
   assert.equal(report.installable, true);
   assert.equal(report.distributionStatus, "blocked_unsigned");
   assert.equal(report.assetCount, 6);
+  assert.equal(report.blobCount, 6);
+  assert.deepEqual(report.runtimeSelection.retainedNativeFiles, [
+    "DirectML.dll",
+    "dxcompiler.dll",
+    "dxil.dll",
+    "onnxruntime_binding.node",
+    "onnxruntime.dll",
+  ]);
   assert.equal(report.offlineBundleSizeBytes, 11);
   assert.equal(report.offlineBundleMaxBytes, WINDOWS_X64_OFFLINE_MAX_BYTES);
   assert.equal(report.firstEnableDownloadCount, 0);
   assert.equal(report.startsDesktopControl, false);
   assert.equal(report.includeUserOverlay, false);
   assert.equal((await stat(report.manifestPath)).isFile(), true);
+  const manifest = JSON.parse(await readFile(report.manifestPath, "utf8"));
+  assert.deepEqual(manifest.evidence.target, WINDOWS_X64_RELEASE_TARGET);
+  assert.equal(manifest.evidence.offlineBundleSizeBytes, 11);
+  assert.equal(manifest.evidence.offlineBundleMaxBytes, WINDOWS_X64_OFFLINE_MAX_BYTES);
+  assert.equal(manifest.evidence.assetCount, 6);
+  assert.equal(manifest.evidence.blobCount, 6);
+  assert.equal(manifest.evidence.runtimeSelection.packageVersion, "1.27.0");
   assert.equal((await stat(report.checksumsPath)).isFile(), true);
   assert.equal((await readFile(report.checksumsPath, "utf8")).includes("\r"), false);
   assert.deepEqual(await stagingEntries(fixture.outputRoot), []);
@@ -430,6 +445,19 @@ function fixtureDependencies({ calls, acquired, options }) {
       return {
         status: "ready",
         target,
+        runtimeSelection: {
+          target,
+          packageVersion: "1.27.0",
+          retainedNativeFiles: [
+            "DirectML.dll",
+            "dxcompiler.dll",
+            "dxil.dll",
+            "onnxruntime_binding.node",
+            "onnxruntime.dll",
+          ],
+          retainedNativeBytes: 64_000_000,
+          removedNativeBytes: 200_000_000,
+        },
         bundleRoot: outputRoot,
         installerPath,
         files: [{ path: "helpers/overlay/GatewayComputerUseOverlay.exe", bytes: 7, sha256: sha256("overlay") }],
@@ -471,8 +499,8 @@ function fixtureDependencies({ calls, acquired, options }) {
         fileName,
         sizeBytes: options.reportedOfflineSizeBytes ?? sizeBytes,
         firstEnableDownloadCount: 0,
-        assetCount: 1,
-        blobCount: 1,
+        assetCount: 6,
+        blobCount: 6,
       };
     },
     async packProtectedNpmPackage({ releaseRoot }) {

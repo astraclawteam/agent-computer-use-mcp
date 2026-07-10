@@ -6,6 +6,8 @@
 - Release channels: GitHub Release and public npm in one tag-driven workflow.
 - Initial platform: Windows x64.
 - Release channel: `0.x-preview`.
+- Distribution topology: one protected npm package plus platform-specific GitHub Release assets.
+- Enabled target: Windows x64 only. macOS and Linux require real native validation before publication is enabled.
 
 ## Objective
 
@@ -131,7 +133,7 @@ It carries every component required to enable Computer Use without network acces
 - Microsoft-signed WebView2 Evergreen Standalone Installer when WebView2 is absent;
 - third-party notices and component licenses.
 
-The bundle may be large. Package size is recorded as release evidence rather than reduced by silently making first enable download missing components.
+The Windows x64 bundle must not exceed 310 MiB. Release assembly prunes `onnxruntime-node@1.27.0` to the exact Windows x64 DirectML/CPU native inventory, stores each installable asset once as a content-addressed blob, and records target, retained/removed runtime bytes, asset/blob counts, and actual ZIP size in the release manifest. `npm run release:windows:size-report` re-stats the final artifact and fail-closes on any mismatch. Components must never be removed merely to defer them to first-enable downloads.
 
 ## Signing And Trust
 

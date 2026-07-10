@@ -54,3 +54,6 @@ jobs:
 
       - name: Assemble and install real Windows release candidate
         run: npm run phase:0.15
+
+      - name: Verify Windows release size and target inventory
+        run: npm run release:windows:size-report

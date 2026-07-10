@@ -26,6 +26,8 @@ All notable changes to `agent-computer-use-mcp` are tracked here.
 - PID-aware NativeAOT installer build locking prevents slow cold-runner publishes from being mistaken for stale locks and gives concurrent build/publish waiters commercial CI time budgets.
 - Windows release payload assembly reuses the serialized installer publisher, preventing concurrent clean-runner linker writes to the same NativeAOT intermediate files.
 - Authenticode verification supplies WinTrust with an open read handle and retries only transient `CRYPT_E_FILE_ERROR` results, preserving offline publisher/timestamp enforcement on clean Windows runners.
+- Platform release contract keeps one protected npm package and enables Windows x64 only for GitHub Release; macOS and Linux remain blocked pending real native validation.
+- Windows x64 assembly prunes foreign ONNX Runtime native targets, materializes offline assets once by content hash, records runtime/size evidence, and enforces a 310 MiB offline ZIP gate.
 - Commercial policy-deny proof for password, payment, credential, and private surfaces.
 - Computer control approval state machine for approve, deny, cancel, revoke, and timeout flows.
 - MCP approval compatibility proof for pending approval schemas, duplicate-pending rejection, and disconnect cleanup.
