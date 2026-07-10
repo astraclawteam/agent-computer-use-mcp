@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Drawing;
 using System.Drawing.Drawing2D;
+using System.Globalization;
 using System.Runtime.InteropServices;
 using System.Text.Json;
 using System.Windows.Forms;
@@ -10,10 +11,75 @@ namespace GatewayComputerUseOverlay;
 internal static class Program
 {
     [STAThread]
-    private static void Main()
+    private static int Main(string[] args)
     {
+        if (args.Length > 0)
+        {
+            try
+            {
+                var snapshot = ParseSnapshotArguments(args);
+                SnapshotCompositor.Render(snapshot);
+                return 0;
+            }
+            catch (ArgumentException error)
+            {
+                Console.Error.WriteLine($"Invalid arguments: {error.Message}");
+                return 2;
+            }
+            catch (NotSupportedException error)
+            {
+                Console.Error.WriteLine(error.Message);
+                return 3;
+            }
+        }
+
         ApplicationConfiguration.Initialize();
         Application.Run(new OverlayForm());
+        return 0;
+    }
+
+    private static SnapshotOptions ParseSnapshotArguments(string[] args)
+    {
+        if (args.Length != 8
+            || args[0] != "--snapshot"
+            || args[2] != "--width"
+            || args[4] != "--height"
+            || args[6] != "--phase")
+        {
+            throw new ArgumentException("expected --snapshot <png> --width <int> --height <int> --phase <double>");
+        }
+
+        if (string.IsNullOrWhiteSpace(args[1]))
+        {
+            throw new ArgumentException("snapshot path must not be empty");
+        }
+
+        if (!int.TryParse(args[3], NumberStyles.Integer, CultureInfo.InvariantCulture, out var width) || width <= 0)
+        {
+            throw new ArgumentException("width must be a positive integer");
+        }
+
+        if (!int.TryParse(args[5], NumberStyles.Integer, CultureInfo.InvariantCulture, out var height) || height <= 0)
+        {
+            throw new ArgumentException("height must be a positive integer");
+        }
+
+        if (!double.TryParse(args[7], NumberStyles.Float, CultureInfo.InvariantCulture, out var phase) || !double.IsFinite(phase))
+        {
+            throw new ArgumentException("phase must be a finite number");
+        }
+
+        return new SnapshotOptions(args[1], width, height, phase - Math.Floor(phase));
+    }
+
+    private sealed record SnapshotOptions(string OutputPath, int Width, int Height, double Phase);
+
+    private static class SnapshotCompositor
+    {
+        public static void Render(SnapshotOptions options)
+        {
+            throw new NotSupportedException("Snapshot rendering is not supported until the compositor is implemented.");
+        }
     }
 }
 

@@ -24,15 +24,20 @@ test("WinForms real sequence declares cua-driver session and enables cursor rend
   assert.match(script, /windowId:\s*window\.window_id/);
 });
 
-test("Desktop gateway overlay is native, topmost, click-through, and constrained to 8-16px", async () => {
+test("Desktop gateway overlay freezes the layered native rendering contract", async () => {
   const program = await readFile(new URL("../gateway-overlay/Program.cs", import.meta.url), "utf8");
   const project = await readFile(new URL("../gateway-overlay/GatewayComputerUseOverlay.csproj", import.meta.url), "utf8");
   assert.match(program, /TopMost = true/);
   assert.match(program, /WS_EX_TRANSPARENT/);
   assert.match(program, /WS_EX_NOACTIVATE/);
-  assert.match(program, /MinWaveThickness = 8/);
-  assert.match(program, /RestWaveThickness = 12/);
-  assert.match(program, /MaxWaveThickness = 16/);
+  assert.match(program, /WS_EX_LAYERED/);
+  assert.match(program, /UpdateLayeredWindow/);
+  assert.match(program, /AC_SRC_ALPHA/);
+  assert.match(program, /Format32bppPArgb/);
+  assert.match(program, /MinWaveThickness = 18/);
+  assert.match(program, /MaxWaveThickness = 36/);
+  assert.match(program, /BreathPeriodMilliseconds = 3200/);
+  assert.doesNotMatch(program, /TransparencyKey/);
   assert.match(program, /Gateway-managed Computer Use/);
   assert.doesNotMatch(project, /Microsoft\.Web\.WebView2/);
   assert.doesNotMatch(program, /WebView2/);
