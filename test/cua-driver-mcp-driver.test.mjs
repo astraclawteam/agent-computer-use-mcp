@@ -283,3 +283,118 @@ test("CuaDriverMcpClient retries SDK close after a transient close failure", asy
   assert.equal(client.started, false);
   assert.equal(client.transport, null);
 });
+
+test("CuaDriverMcpClient retains and closes its transport after connect fails", async () => {
+  const connectError = new Error("connect failed");
+  const calls = [];
+  const transport = {
+    async close() {
+      calls.push("transport.close");
+    },
+  };
+  const client = new CuaDriverMcpClient({
+    driverPath: "cua-driver",
+    client: {
+      async connect(actualTransport) {
+        calls.push("client.connect");
+        assert.equal(actualTransport, transport);
+        throw connectError;
+      },
+    },
+    transportFactory: () => transport,
+  });
+
+  await assert.rejects(() => client.start(), (error) => error === connectError);
+  assert.equal(client.transport, transport);
+  await client.close();
+
+  assert.deepEqual(calls, ["client.connect", "transport.close"]);
+  assert.equal(client.transport, null);
+  assert.equal(client.started, false);
+});
+
+test("CuaDriverMcpClient coalesces concurrent start and close around one transport", async () => {
+  const calls = [];
+  const connectGate = deferred();
+  const connectEntered = deferred();
+  const transport = { async close() { calls.push("transport.close"); } };
+  const client = new CuaDriverMcpClient({
+    driverPath: "cua-driver",
+    client: {
+      async connect() {
+        calls.push("client.connect");
+        connectEntered.resolve();
+        await connectGate.promise;
+      },
+      async close() {
+        calls.push("client.close");
+      },
+    },
+    transportFactory: () => {
+      calls.push("transport.create");
+      return transport;
+    },
+  });
+
+  const firstStart = client.start();
+  const secondStart = client.start();
+  await connectEntered.promise;
+  const firstClose = client.close();
+  const secondClose = client.close();
+  connectGate.resolve();
+  await Promise.all([firstStart, secondStart, firstClose, secondClose]);
+
+  assert.deepEqual(calls, ["transport.create", "client.connect", "client.close"]);
+  assert.equal(client.transport, null);
+  assert.equal(client.started, false);
+});
+
+test("CuaDriverMcpDriver serializes cursor start, stop, and close", async () => {
+  const calls = [];
+  const enableGate = deferred();
+  const enableEntered = deferred();
+  const driver = new CuaDriverMcpDriver({
+    session: "serialized-lifecycle",
+    client: {
+      async start() {
+        calls.push("client.start");
+      },
+      async callTool(name, args) {
+        calls.push({ name, args });
+        if (name === "set_agent_cursor_enabled" && args.enabled === true) {
+          enableEntered.resolve();
+          await enableGate.promise;
+        }
+        return { status: "ok" };
+      },
+      async close() {
+        calls.push("client.close");
+      },
+    },
+  });
+
+  const start = driver.startCursor();
+  await enableEntered.promise;
+  const stop = driver.stopCursor();
+  const close = driver.close();
+  enableGate.resolve();
+  await Promise.all([start, stop, close]);
+
+  assert.deepEqual(calls.map((call) => typeof call === "string" ? call : `${call.name}:${call.args?.enabled ?? ""}`), [
+    "client.start",
+    "start_session:",
+    "set_agent_cursor_style:",
+    "set_agent_cursor_enabled:true",
+    "set_agent_cursor_enabled:false",
+    "end_session:",
+    "client.close",
+  ]);
+});
+
+function deferred() {
+  let resolve;
+  const promise = new Promise((resolvePromise) => {
+    resolve = resolvePromise;
+  });
+  return { promise, resolve };
+}

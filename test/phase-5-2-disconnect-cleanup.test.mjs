@@ -150,6 +150,7 @@ test("server shutdown coalesces stdin and process triggers without skipping clea
     const routerGate = new Promise((resolve) => {
       releaseRouter = resolve;
     });
+    let unregister = () => {};
     const shutdown = createServerShutdown({
       router: {
         async close() {
@@ -165,11 +166,14 @@ test("server shutdown coalesces stdin and process triggers without skipping clea
       setExitCode(code) {
         calls.push(\`exit.\${code}\`);
       },
+      cleanup() {
+        unregister();
+      },
     });
     const stdin = new EventEmitter();
     const processTarget = new EventEmitter();
     processTarget.stderr = { write() {} };
-    registerServerShutdownHandlers({ shutdown, stdin, processTarget });
+    unregister = registerServerShutdownHandlers({ shutdown, stdin, processTarget });
 
     assert.equal(stdin.listenerCount("end"), 1);
     assert.equal(stdin.listenerCount("close"), 1);
@@ -183,6 +187,11 @@ test("server shutdown coalesces stdin and process triggers without skipping clea
     releaseRouter();
     await shutdown(0);
     assert.deepEqual(calls, ["router.close", "server.close", "exit.0"]);
+    assert.equal(stdin.listenerCount("end"), 0);
+    assert.equal(stdin.listenerCount("close"), 0);
+    assert.equal(processTarget.listenerCount("SIGINT"), 0);
+    assert.equal(processTarget.listenerCount("SIGTERM"), 0);
+    assert.equal(processTarget.listenerCount("uncaughtException"), 0);
 
     const failureCalls = [];
     const failedShutdown = createServerShutdown({
@@ -220,6 +229,23 @@ test("server shutdown coalesces stdin and process triggers without skipping clea
 
   const result = await runNode(["--input-type=module", "--eval", script]);
   assert.equal(result.exitCode, 0, result.stderr);
+});
+
+test("server exits cleanly when an actual stdio client closes stdin", async () => {
+  const child = spawn(process.execPath, ["src/computer-use-mcp-server.mjs"], {
+    cwd: process.cwd(),
+    stdio: ["pipe", "pipe", "pipe"],
+    windowsHide: true,
+  });
+  let stderr = "";
+  child.stderr.on("data", (chunk) => {
+    stderr += chunk.toString("utf8");
+  });
+
+  child.stdin.end();
+  const exitCode = await waitForChildClose(child, 3_000);
+
+  assert.equal(exitCode, 0, stderr);
 });
 
 test("Phase 5.2 has an executable disconnect cleanup smoke script", async () => {
@@ -262,6 +288,23 @@ function runNode(args) {
     child.on("error", reject);
     child.on("close", (exitCode) => {
       resolve({ exitCode, stdout, stderr });
+    });
+  });
+}
+
+function waitForChildClose(child, timeoutMs) {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      child.kill();
+      reject(new Error("server did not exit after stdin EOF"));
+    }, timeoutMs);
+    child.once("error", (error) => {
+      clearTimeout(timer);
+      reject(error);
+    });
+    child.once("close", (exitCode) => {
+      clearTimeout(timer);
+      resolve(exitCode);
     });
   });
 }

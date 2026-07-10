@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { DEFAULT_OCR_PREWARM_BUCKETS, expandRegionToBucket } from "./crop-bucket.mjs";
 import { computeDirtyRegion } from "./image-diff.mjs";
-import { fail } from "./computer-use-errors.mjs";
+import { ComputerUseMcpError, fail } from "./computer-use-errors.mjs";
 import { OcrSidecarSession, normalizeOcrSidecarResponse } from "./ocr-sidecar.mjs";
 import { runInstallCacheDoctor } from "./install-cache-doctor.mjs";
 import { buildDiagnosticsPolicy } from "./diagnostics-policy.mjs";
@@ -23,6 +23,11 @@ export class ComputerUseProviderRouter {
     this.runtimeCleanup = options.runtimeCleanup ?? null;
     this.runtimeCleanupOptions = options.runtimeCleanupOptions ?? {};
     this.overlayHandle = null;
+    this.cursorStartAttempted = false;
+    this.cursorActive = false;
+    this.controlGeneration = 0;
+    this.pendingControlGrant = null;
+    this.controlVisualTail = Promise.resolve();
     this.ocrStarted = false;
     this.artifactRoot = options.artifactRoot;
     this.clock = options.clock ?? {
@@ -35,6 +40,11 @@ export class ComputerUseProviderRouter {
     this.lastCapture = null;
     this.pendingRepairApproval = null;
     this.assetOperationManager = options.assetOperationManager ?? null;
+    this.assetCloseComplete = false;
+    this.driverCloseComplete = false;
+    this.closePromise = null;
+    this.closeComplete = false;
+    this.closeContext = null;
     this.assetDeliveryConfig = options.assetDeliveryConfig ?? null;
     this.installCacheDoctor = options.installCacheDoctor ?? runInstallCacheDoctor;
     this.auditEvents = [];
@@ -439,9 +449,11 @@ export class ComputerUseProviderRouter {
       });
     }
     this.controllerRequestInProgress = true;
+    const grant = this.beginControlGrant();
     try {
       const tier = args.tier ?? "full";
       const window = await this.driver.findWindow({ titlePart: args.titlePart });
+      this.assertControlGrant(grant);
       this.enforcePolicyDecision(this.policy.evaluateAccessRequest({ tier, window }));
       if (args.approvalRequired === true) {
         const approvalTtlMs = Math.max(1, args.approvalTtlMs ?? 300000);
@@ -485,8 +497,10 @@ export class ComputerUseProviderRouter {
         window,
         leaseTtlMs,
         approval: { status: "not_required" },
+        grant,
       });
     } finally {
+      this.finishControlGrant(grant);
       this.controllerRequestInProgress = false;
     }
   }
@@ -552,13 +566,26 @@ export class ComputerUseProviderRouter {
     const { request } = pending;
     this.enforcePolicyDecision(this.policy.evaluateAccessRequest({ tier: request.tier, window: request.window }));
     this.pendingAccessApproval = null;
-    return await this.grantAccessController({
-      tier: request.tier,
-      agentId: request.agentId,
-      window: request.window,
-      leaseTtlMs: Math.max(1, args.leaseTtlMs ?? request.leaseTtlMs ?? 300000),
-      approval: { ...this.serializeAccessApproval(pending), status: "approved" },
-    });
+    if (this.controllerRequestInProgress) {
+      fail("controller.request_in_progress", "A Gateway-managed Computer Use controller request is already in progress.", {
+        includeUserOverlay: false,
+      });
+    }
+    this.controllerRequestInProgress = true;
+    const grant = this.beginControlGrant();
+    try {
+      return await this.grantAccessController({
+        tier: request.tier,
+        agentId: request.agentId,
+        window: request.window,
+        leaseTtlMs: Math.max(1, args.leaseTtlMs ?? request.leaseTtlMs ?? 300000),
+        approval: { ...this.serializeAccessApproval(pending), status: "approved" },
+        grant,
+      });
+    } finally {
+      this.finishControlGrant(grant);
+      this.controllerRequestInProgress = false;
+    }
   }
 
   async capture(args = {}) {
@@ -659,6 +686,10 @@ export class ComputerUseProviderRouter {
   }
 
   async cancel(args = {}) {
+    this.invalidateControlGrant(
+      "controller.cancelled",
+      "The Gateway-managed Computer Use controller request was cancelled.",
+    );
     const previous = this.activeController;
     const previousApproval = this.getPendingAccessApproval();
     this.pendingAccessApproval = null;
@@ -673,6 +704,10 @@ export class ComputerUseProviderRouter {
   }
 
   async revoke(args = {}) {
+    this.invalidateControlGrant(
+      "controller.revoked",
+      "The Gateway-managed Computer Use controller request was revoked.",
+    );
     const previous = this.activeController;
     const previousApproval = this.getPendingAccessApproval();
     this.pendingAccessApproval = null;
@@ -805,53 +840,77 @@ export class ComputerUseProviderRouter {
     };
   }
 
-  async close(args = {}) {
-    const previous = this.activeController;
-    const previousAccessApproval = this.getPendingAccessApproval();
-    this.activeController = null;
-    this.lastCapture = null;
-    this.pendingRepairApproval = null;
-    this.pendingAccessApproval = null;
-    this.controllerRequestInProgress = false;
+  close(args = {}) {
+    this.invalidateControlGrant(
+      "controller.closed",
+      "The Gateway-managed Computer Use controller request was closed.",
+    );
+    if (this.closeComplete) return Promise.resolve();
+    if (this.closePromise) return this.closePromise;
+    this.closePromise = (async () => {
+      try {
+        await this.closeResources(args);
+        this.closeComplete = true;
+      } finally {
+        this.closePromise = null;
+      }
+    })();
+    return this.closePromise;
+  }
+
+  async closeResources(args) {
+    if (!this.closeContext) {
+      this.closeContext = {
+        previous: this.activeController,
+        previousAccessApproval: this.getPendingAccessApproval(),
+      };
+      this.activeController = null;
+      this.lastCapture = null;
+      this.pendingRepairApproval = null;
+      this.pendingAccessApproval = null;
+      if (this.closeContext.previous) {
+        this.recordAudit("computer.controller.closed", {
+          controllerId: this.closeContext.previous.controllerId,
+          reason: args.reason ?? "router-close",
+        });
+      }
+      if (this.closeContext.previousAccessApproval) {
+        this.recordAudit("computer.access.approval_closed", {
+          token: this.closeContext.previousAccessApproval.token,
+          reason: args.reason ?? "router-close",
+        });
+      }
+    }
     let firstError;
-    try {
-      await this.assetOperationManager?.close?.(args.reason ?? "router-close");
-    } catch (error) {
-      firstError = error;
+    if (!this.assetCloseComplete) {
+      try {
+        await this.assetOperationManager?.close?.(args.reason ?? "router-close");
+        this.assetCloseComplete = true;
+      } catch (error) {
+        firstError = error;
+      }
     }
     try {
       await this.stopControlVisuals();
     } catch (error) {
       firstError ??= error;
     }
-    if (previous) {
-      this.recordAudit("computer.controller.closed", {
-        controllerId: previous.controllerId,
-        reason: args.reason ?? "router-close",
-      });
-    }
-    if (previousAccessApproval) {
-      this.recordAudit("computer.access.approval_closed", {
-        token: previousAccessApproval.token,
-        reason: args.reason ?? "router-close",
-      });
-    }
-    if (this.driver?.close) {
+    if (this.driver?.close && !this.driverCloseComplete) {
       try {
         await this.driver.close();
+        this.driverCloseComplete = true;
       } catch (error) {
         firstError ??= error;
       }
     }
     if (this.ocrStarted) {
-      this.ocrStarted = false;
       try {
         await this.ocr.close();
+        this.ocrStarted = false;
       } catch (error) {
         firstError ??= error;
       }
     }
-    this.ocrStarted = false;
     if (firstError) throw firstError;
   }
 
@@ -902,6 +961,27 @@ export class ComputerUseProviderRouter {
   }
 
   async expireActiveController({ throwOnExpire = false } = {}) {
+    const pending = this.pendingControlGrant;
+    if (pending?.controller?.expiresAtMs && pending.controller.expiresAtMs <= this.clock.now()) {
+      const error = this.invalidateControlGrant(
+        "controller.expired",
+        "controller.expired: The Gateway-managed Computer Use controller lease expired.",
+        {
+          controllerId: pending.controller.controllerId,
+          expiresAt: pending.controller.expiresAt,
+          includeUserOverlay: false,
+        },
+      );
+      this.lastCapture = null;
+      await this.stopControlVisuals();
+      this.recordAudit("computer.controller.expired", {
+        controllerId: pending.controller.controllerId,
+        tier: pending.controller.tier,
+        expiresAt: pending.controller.expiresAt,
+      });
+      if (throwOnExpire) throw error;
+      return true;
+    }
     if (!this.activeController?.expiresAtMs || this.activeController.expiresAtMs > this.clock.now()) return false;
     const previous = this.activeController;
     this.activeController = null;
@@ -955,10 +1035,10 @@ export class ComputerUseProviderRouter {
     };
   }
 
-  async grantAccessController({ tier, agentId, window, leaseTtlMs, approval }) {
+  async grantAccessController({ tier, agentId, window, leaseTtlMs, approval, grant }) {
     const startedAtMs = this.clock.now();
     const expiresAtMs = startedAtMs + leaseTtlMs;
-    this.activeController = {
+    const controller = {
       controllerId: randomUUID(),
       provider: "gateway-managed",
       tier,
@@ -971,20 +1051,11 @@ export class ComputerUseProviderRouter {
       leaseTtlMs,
       includeUserOverlay: false,
     };
+    grant.controller = controller;
     try {
-      await this.driver?.startCursor?.();
-      if (this.overlayRuntime?.start) {
-        this.overlayHandle = await this.overlayRuntime.start({ targetRect: window.bounds ? {
-          windowId: window.windowId,
-          title: window.title,
-          x: window.bounds.x,
-          y: window.bounds.y,
-          width: window.bounds.width,
-          height: window.bounds.height,
-        } : undefined });
-      }
+      await this.startControlVisuals({ grant, tier, window });
+      this.assertControlGrant(grant);
     } catch (error) {
-      this.activeController = null;
       try {
         await this.stopControlVisuals();
       } catch {
@@ -992,16 +1063,17 @@ export class ComputerUseProviderRouter {
       }
       throw error;
     }
+    this.activeController = controller;
     this.recordAudit("computer.access.granted", {
-      controllerId: this.activeController.controllerId,
+      controllerId: controller.controllerId,
       title: window.title,
-      tier: this.activeController.tier,
+      tier: controller.tier,
       approvalStatus: approval.status,
     });
     return {
       status: "granted",
       approval,
-      controller: this.activeController,
+      controller,
       overlay: this.overlayHandle,
       startsDesktopControl: true,
       includeUserOverlay: false,
@@ -1147,30 +1219,108 @@ export class ComputerUseProviderRouter {
     };
   }
 
+  beginControlGrant() {
+    const grant = {
+      generation: ++this.controlGeneration,
+      controller: null,
+      error: null,
+    };
+    this.pendingControlGrant = grant;
+    return grant;
+  }
+
+  finishControlGrant(grant) {
+    if (this.pendingControlGrant === grant) this.pendingControlGrant = null;
+  }
+
+  invalidateControlGrant(code, message, detail) {
+    const grant = this.pendingControlGrant;
+    if (!grant) return null;
+    if (!grant.error) {
+      this.controlGeneration += 1;
+      grant.error = new ComputerUseMcpError(code, message, detail);
+    }
+    return grant.error;
+  }
+
+  assertControlGrant(grant) {
+    if (grant.error) throw grant.error;
+    if (this.pendingControlGrant !== grant || this.controlGeneration !== grant.generation) {
+      throw new ComputerUseMcpError(
+        "controller.cancelled",
+        "The Gateway-managed Computer Use controller request is no longer current.",
+      );
+    }
+  }
+
+  startControlVisuals({ grant, tier, window }) {
+    return this.runControlVisualLifecycle(async () => {
+      this.assertControlGrant(grant);
+      if (tier !== "observe" && this.driver?.startCursor) {
+        this.cursorStartAttempted = true;
+        await this.driver.startCursor();
+        this.cursorActive = true;
+        this.assertControlGrant(grant);
+      }
+      if (this.overlayRuntime?.start) {
+        const handle = await this.overlayRuntime.start({ targetRect: window.bounds ? {
+          windowId: window.windowId,
+          title: window.title,
+          x: window.bounds.x,
+          y: window.bounds.y,
+          width: window.bounds.width,
+          height: window.bounds.height,
+        } : undefined });
+        this.overlayHandle = handle;
+        this.assertControlGrant(grant);
+      }
+    });
+  }
+
   async stopOverlay() {
     if (!this.overlayHandle) return;
     const handle = this.overlayHandle;
-    this.overlayHandle = null;
     if (this.overlayRuntime?.stop) {
       await this.overlayRuntime.stop(handle);
     } else if (handle.stop) {
       await handle.stop();
     }
+    if (this.overlayHandle === handle) this.overlayHandle = null;
   }
 
-  async stopControlVisuals() {
-    let firstError;
+  stopControlVisuals() {
+    return this.runControlVisualLifecycle(async () => {
+      let firstError;
+      try {
+        await this.stopOverlay();
+      } catch (error) {
+        firstError = error;
+      }
+      if (this.cursorStartAttempted || this.cursorActive) {
+        try {
+          await this.driver?.stopCursor?.();
+          this.cursorStartAttempted = false;
+          this.cursorActive = false;
+        } catch (error) {
+          firstError ??= error;
+        }
+      }
+      if (firstError) throw firstError;
+    });
+  }
+
+  async runControlVisualLifecycle(operation) {
+    const previous = this.controlVisualTail;
+    let release;
+    this.controlVisualTail = new Promise((resolve) => {
+      release = resolve;
+    });
+    await previous;
     try {
-      await this.stopOverlay();
-    } catch (error) {
-      firstError = error;
+      return await operation();
+    } finally {
+      release();
     }
-    try {
-      await this.driver?.stopCursor?.();
-    } catch (error) {
-      firstError ??= error;
-    }
-    if (firstError) throw firstError;
   }
 }
 

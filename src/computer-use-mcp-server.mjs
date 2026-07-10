@@ -47,8 +47,13 @@ export async function runComputerUseMcpServer() {
     return callTool(router, name, args);
   });
 
-  const shutdown = createServerShutdown({ router, server });
-  registerServerShutdownHandlers({ shutdown });
+  let unregisterShutdownHandlers = () => {};
+  const shutdown = createServerShutdown({
+    router,
+    server,
+    cleanup: () => unregisterShutdownHandlers(),
+  });
+  unregisterShutdownHandlers = registerServerShutdownHandlers({ shutdown });
   await server.connect(new StdioServerTransport());
 }
 
@@ -137,6 +142,7 @@ function withResultContract(value) {
 export function createServerShutdown({
   router,
   server,
+  cleanup = () => {},
   setExitCode = (code) => {
     process.exitCode = code;
   },
@@ -158,6 +164,11 @@ export function createServerShutdown({
         } catch {
           // Exit after both independent cleanup stages have been attempted.
         }
+        try {
+          await cleanup();
+        } catch {
+          // Handler cleanup must not prevent the process from receiving its exit code.
+        }
         shutdownComplete = true;
         setExitCode(requestedExitCode);
       })();
@@ -173,22 +184,38 @@ export function registerServerShutdownHandlers({
   stdin = process.stdin,
   processTarget = process,
 }) {
-  stdin.on("end", () => {
+  const onEnd = () => {
     void shutdown(0);
-  });
-  stdin.on("close", () => {
+  };
+  const onClose = () => {
     void shutdown(0);
-  });
-  processTarget.on("SIGINT", () => {
+  };
+  const onSigint = () => {
     void shutdown(0);
-  });
-  processTarget.on("SIGTERM", () => {
+  };
+  const onSigterm = () => {
     void shutdown(0);
-  });
-  processTarget.on("uncaughtException", (error) => {
+  };
+  const onUncaughtException = (error) => {
     processTarget.stderr.write(`${error instanceof Error ? error.stack : String(error)}\n`);
     void shutdown(1);
-  });
+  };
+  stdin.on("end", onEnd);
+  stdin.on("close", onClose);
+  processTarget.on("SIGINT", onSigint);
+  processTarget.on("SIGTERM", onSigterm);
+  processTarget.on("uncaughtException", onUncaughtException);
+
+  let registered = true;
+  return function unregister() {
+    if (!registered) return;
+    registered = false;
+    stdin.off("end", onEnd);
+    stdin.off("close", onClose);
+    processTarget.off("SIGINT", onSigint);
+    processTarget.off("SIGTERM", onSigterm);
+    processTarget.off("uncaughtException", onUncaughtException);
+  };
 }
 
 const isDirectEntry = process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url);

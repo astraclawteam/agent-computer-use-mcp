@@ -19,23 +19,38 @@ export class CuaDriverMcpDriver {
     this.sessionStartAttempted = false;
     this.cursorEnabled = false;
     this.cursorEnableAttempted = false;
+    this.ensureStartedPromise = null;
+    this.lifecycleTail = Promise.resolve();
     this.closePromise = null;
   }
 
   async ensureStarted() {
-    if (!this.clientStarted) {
-      this.clientStartAttempted = true;
-      await this.client.start();
-      this.clientStarted = true;
-    }
-    if (!this.sessionStarted) {
-      this.sessionStartAttempted = true;
-      await this.client.callTool("start_session", { session: this.session });
-      this.sessionStarted = true;
+    if (this.clientStarted && this.sessionStarted) return;
+    if (this.ensureStartedPromise) return this.ensureStartedPromise;
+    this.ensureStartedPromise = (async () => {
+      if (!this.clientStarted) {
+        this.clientStartAttempted = true;
+        await this.client.start();
+        this.clientStarted = true;
+      }
+      if (!this.sessionStarted) {
+        this.sessionStartAttempted = true;
+        await this.client.callTool("start_session", { session: this.session });
+        this.sessionStarted = true;
+      }
+    })();
+    try {
+      return await this.ensureStartedPromise;
+    } finally {
+      this.ensureStartedPromise = null;
     }
   }
 
-  async startCursor() {
+  startCursor() {
+    return this.runLifecycle(() => this.startCursorResources());
+  }
+
+  async startCursorResources() {
     await this.ensureStarted();
     if (this.cursorEnabled) return;
     await this.client.callTool("set_agent_cursor_style", DEFAULT_AGENT_CURSOR_STYLE);
@@ -44,7 +59,11 @@ export class CuaDriverMcpDriver {
     this.cursorEnabled = true;
   }
 
-  async stopCursor() {
+  stopCursor() {
+    return this.runLifecycle(() => this.stopCursorResources());
+  }
+
+  async stopCursorResources() {
     if (!this.cursorEnabled && !this.cursorEnableAttempted) return;
     await this.client.callTool("set_agent_cursor_enabled", { enabled: false, cursor_id: "default" });
     this.cursorEnabled = false;
@@ -119,7 +138,7 @@ export class CuaDriverMcpDriver {
 
   async close() {
     if (this.closePromise) return this.closePromise;
-    this.closePromise = this.closeResources();
+    this.closePromise = this.runLifecycle(() => this.closeResources());
     try {
       return await this.closePromise;
     } finally {
@@ -130,7 +149,7 @@ export class CuaDriverMcpDriver {
   async closeResources() {
     let firstError;
     try {
-      await this.stopCursor();
+      await this.stopCursorResources();
     } catch (error) {
       firstError = error;
     }
@@ -161,6 +180,20 @@ export class CuaDriverMcpDriver {
 
     if (firstError) throw firstError;
   }
+
+  async runLifecycle(operation) {
+    const previous = this.lifecycleTail;
+    let release;
+    this.lifecycleTail = new Promise((resolve) => {
+      release = resolve;
+    });
+    await previous;
+    try {
+      return await operation();
+    } finally {
+      release();
+    }
+  }
 }
 
 export class CuaDriverMcpClient {
@@ -174,23 +207,37 @@ export class CuaDriverMcpClient {
     }, {
       capabilities: {},
     });
+    this.transportFactory = options.transportFactory ?? (() => new StdioClientTransport({
+      command: this.driverPath,
+      args: ["mcp"],
+      stderr: "pipe",
+    }));
     this.transport = null;
     this.started = false;
+    this.startPromise = null;
+    this.closePromise = null;
     this.stderr = "";
   }
 
   async start() {
     if (this.started) return;
-    this.transport = new StdioClientTransport({
-      command: this.driverPath,
-      args: ["mcp"],
-      stderr: "pipe",
-    });
-    this.transport.stderr?.on?.("data", (chunk) => {
-      this.stderr += chunk;
-    });
-    await this.client.connect(this.transport);
-    this.started = true;
+    if (this.startPromise) return this.startPromise;
+    if (this.closePromise) await this.closePromise;
+    this.startPromise = (async () => {
+      if (!this.transport) {
+        this.transport = this.transportFactory();
+        this.transport.stderr?.on?.("data", (chunk) => {
+          this.stderr += chunk;
+        });
+      }
+      await this.client.connect(this.transport);
+      this.started = true;
+    })();
+    try {
+      return await this.startPromise;
+    } finally {
+      this.startPromise = null;
+    }
   }
 
   async callTool(name, args) {
@@ -200,10 +247,29 @@ export class CuaDriverMcpClient {
   }
 
   async close() {
-    if (!this.started) return;
-    await this.client.close();
-    this.started = false;
-    this.transport = null;
+    if (this.closePromise) return this.closePromise;
+    this.closePromise = (async () => {
+      if (this.startPromise) {
+        try {
+          await this.startPromise;
+        } catch {
+          // A failed connect still owns a transport that must be closed below.
+        }
+      }
+      if (!this.started && !this.transport) return;
+      if (this.started && this.client.close) {
+        await this.client.close();
+      } else {
+        await this.transport?.close?.();
+      }
+      this.started = false;
+      this.transport = null;
+    })();
+    try {
+      return await this.closePromise;
+    } finally {
+      this.closePromise = null;
+    }
   }
 
   stderrText() {
