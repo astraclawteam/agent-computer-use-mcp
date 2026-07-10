@@ -15,6 +15,12 @@ test("OCR model pack manifest declares PP-OCRv6 small ONNX files", async () => {
   assert.equal(PP_OCRV6_SMALL_MODEL_PACK.format, "onnx");
   assert.equal(PP_OCRV6_SMALL_MODEL_PACK.files.length, 3);
   assert.deepEqual(PP_OCRV6_SMALL_MODEL_PACK.files.map((file) => file.role), ["det", "rec", "dictionary"]);
+  assert.equal(PP_OCRV6_SMALL_MODEL_PACK.version, "pp-ocrv6-small-2026-06");
+  assert.deepEqual(PP_OCRV6_SMALL_MODEL_PACK.files.map(({ role, sizeBytes, sha256 }) => ({ role, sizeBytes, sha256 })), [
+    { role: "det", sizeBytes: 9880512, sha256: "d73e0058b7a8086bbd57f3d10b8bcd4ff95363f67e06e2762b5e814fe9c9410e" },
+    { role: "rec", sizeBytes: 21159378, sha256: "5435fd747c9e0efe15a96d0b378d5bd157e9492ed8fd80edf08f30d02fa24634" },
+    { role: "dictionary", sizeBytes: 93656, sha256: "e796d20aace0691844f37f97a74e287be540d8bee59cc00662e2d6997d86ee3e" },
+  ]);
   assert.equal(PP_OCRV6_SMALL_MODEL_PACK.acquisition, "bundle-or-approved-install-cache");
   assert.equal(PP_OCRV6_SMALL_MODEL_PACK.offlineRequired, false);
 

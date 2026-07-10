@@ -290,7 +290,7 @@ git commit -m "feat: build portable Windows release payload"
 - Produces: `buildWindowsOfflineBundle({ payload, acquiredAssets, outputRoot, generatedAt, candidateTrust }): Promise<OfflineBundleReport>`.
 - Offline output matches `installer/`, `release/`, `assets/blobs/sha256/`, `trust/`, `metadata/`, and `licenses/`.
 
-- [ ] **Step 1: Write failing official model-pack tests**
+- [x] **Step 1: Write failing official model-pack tests**
 
 Parse a minimal official `inference.yml` fixture with `yaml.parse`, extract `PostProcess.character_dict`, and assert:
 
@@ -306,7 +306,7 @@ assert.equal(report.modelFormat, "onnx");
 
 Reject absent `CTCLabelDecode`, an empty dictionary, ONNX size/hash mismatch, duplicate dictionary entries only when the official metadata itself is malformed, and output outside the requested root.
 
-- [ ] **Step 2: Write failing offline-bundle tests**
+- [x] **Step 2: Write failing offline-bundle tests**
 
 Assert deterministic ZIP bytes for two assemblies with the same `generatedAt`, complete required asset IDs, exact content-addressed blob names, candidate trust marked `developmentOnly:true`, and:
 
@@ -319,7 +319,7 @@ assert.equal(report.includeUserOverlay, false);
 
 Assert missing Node, driver, overlay, OCR det/rec/dictionary, ONNX Runtime, installer, or WebView2 blocks assembly instead of degrading.
 
-- [ ] **Step 3: Run both tests and verify RED**
+- [x] **Step 3: Run both tests and verify RED**
 
 Run:
 
@@ -329,7 +329,7 @@ node --test test/ocr-release-model-pack.test.mjs test/windows-offline-bundle.tes
 
 Expected: FAIL because both modules are absent.
 
-- [ ] **Step 4: Implement model and asset assembly**
+- [x] **Step 4: Implement model and asset assembly**
 
 Rename only after verifying official downloaded bytes. Generate `ppocrv6_dict.txt` as one UTF-8 character per line from official metadata. Update `PP_OCRV6_SMALL_MODEL_PACK` from `pinned-by-release` placeholders to the lock version/hash values supplied by assembly.
 
@@ -337,14 +337,13 @@ Create deterministic per-asset ZIP blobs and a development-only ECDSA manifest t
 
 ```text
 cua-driver-windows-x64
-gateway-overlay-windows-x64
 ocr-model-pp-ocrv6-small
 webview2-evergreen-standalone-windows-x64
 ```
 
-Node and production `onnxruntime-node` stay in the immutable release payload and are represented in the release manifest/SBOM rather than duplicated as activated asset views.
+The self-contained overlay, Node, and production `onnxruntime-node` stay in the immutable release payload and are represented in the release manifest/SBOM rather than duplicated as activated asset views.
 
-- [ ] **Step 5: Run focused tests and commit**
+- [x] **Step 5: Run focused tests and commit**
 
 Run:
 
