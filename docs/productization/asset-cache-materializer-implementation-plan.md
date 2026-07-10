@@ -143,7 +143,7 @@ git commit -m "feat: verify signed asset manifests"
 - CLI: `asset-rollback ...`
 - State: `{ schemaVersion:1, currentReleaseId, previousReleaseId, revision, activatedAt, assets:[{ id, version, blobSha256, root, entryPoint }] }`
 
-- [ ] **Step 1: Write failing offline materialization and rollback tests**
+- [x] **Step 1: Write failing offline materialization and rollback tests**
 
 ```js
 test("offline prepare activate and rollback use immutable content-addressed assets", async () => {
@@ -161,13 +161,13 @@ test("offline prepare activate and rollback use immutable content-addressed asse
 
 Add failures for corrupt offline blob, hash collision/version conflict, ZIP traversal, duplicate case-insensitive path, undeclared archive file, expanded-size overflow, raw-file mismatch, and corrupted previous state. Assert active state and immutable directories are unchanged after each failure.
 
-- [ ] **Step 2: Run the focused test and verify RED**
+- [x] **Step 2: Run the focused test and verify RED**
 
 Run: `node --test test/asset-cache-materializer.test.mjs`
 
 Expected: FAIL because asset prepare/activate/status/rollback are absent.
 
-- [ ] **Step 3: Implement cache promotion and safe extraction**
+- [x] **Step 3: Implement cache promotion and safe extraction**
 
 ```csharp
 public async Task<CachedBlob> ImportOfflineAsync(AssetEntry asset, string offlineRoot, CancellationToken cancellationToken)
@@ -182,11 +182,11 @@ public async Task<CachedBlob> ImportOfflineAsync(AssetEntry asset, string offlin
 
 `SafeZipMaterializer` enumerates the archive before extraction, normalizes every path, rejects links/reparse metadata, requires exact manifest membership, maps each archive `path` to its explicit `installPath`, streams each file with size limits, and verifies hashes before transaction promotion.
 
-- [ ] **Step 4: Implement immutable state transitions**
+- [x] **Step 4: Implement immutable state transitions**
 
 Prepare all selected assets in a transaction root, verify preflight entry points, atomically promote version directories, and write a prepared state file. Activate only a complete prepared release. Rollback re-verifies the previous manifest hash and every immutable asset before swapping state.
 
-- [ ] **Step 5: Align the OCR pack with the native sidecar**
+- [x] **Step 5: Align the OCR pack with the native sidecar**
 
 ```js
 export const PP_OCRV6_SMALL_MODEL_PACK = {
@@ -200,13 +200,13 @@ export const PP_OCRV6_SMALL_MODEL_PACK = {
 
 Update tests and doctor repair details to use the actual sidecar filenames. Do not introduce a required `cls.onnx`.
 
-- [ ] **Step 6: Run focused and regression tests**
+- [x] **Step 6: Run focused and regression tests**
 
 Run: `node --test test/asset-cache-materializer.test.mjs test/phase-3-0-ocr-model-pack.test.mjs test/install-cache-doctor.test.mjs test/windows-installer-transaction.test.mjs`
 
 Expected: PASS.
 
-- [ ] **Step 7: Commit Task 2**
+- [x] **Step 7: Commit Task 2**
 
 ```sh
 git add windows-installer src/ocr-model-pack.mjs test/asset-cache-materializer.test.mjs test/phase-3-0-ocr-model-pack.test.mjs test/install-cache-doctor.test.mjs

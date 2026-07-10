@@ -4,7 +4,7 @@ namespace AgentComputerUse.Installer;
 
 internal static class Program
 {
-    private static int Main(string[] args)
+    private static async Task<int> Main(string[] args)
     {
         var operation = args.Length > 0 ? args[0] : "unknown";
         InstallerLayout? layout = null;
@@ -29,6 +29,37 @@ internal static class Program
                     StartsDesktopControl = false,
                     IncludeUserOverlay = false,
                 });
+                return 0;
+            }
+            if (operation.StartsWith("asset-", StringComparison.Ordinal))
+            {
+                var materializer = new SafeZipMaterializer();
+                var assetEngine = new AssetEngine(
+                    layout,
+                    new AssetManifestVerifier(),
+                    new AssetCache(layout),
+                    materializer,
+                    new AssetStateStore(layout, materializer));
+                var operationId = options.GetValueOrDefault("operation-id", $"{operation}-{Guid.NewGuid():N}");
+                var assetResult = operation switch
+                {
+                    "asset-prepare" => await assetEngine.PrepareAsync(
+                        RequireOption(options, "manifest"),
+                        RequireOption(options, "signature"),
+                        RequireOption(options, "trust-keyring"),
+                        RequireOption(options, "offline-root"),
+                        ParseAssetIds(options.GetValueOrDefault("asset-ids", "")),
+                        operationId,
+                        CancellationToken.None),
+                    "asset-activate" => await assetEngine.ActivateAsync(
+                        RequireOption(options, "release-id"),
+                        operationId,
+                        CancellationToken.None),
+                    "asset-status" => assetEngine.Status(operationId),
+                    "asset-rollback" => await assetEngine.RollbackAsync(operationId, CancellationToken.None),
+                    _ => throw new InstallerException("installer.operation_invalid", $"Unsupported operation: {operation}"),
+                };
+                AssetProgressWriter.WriteTerminal(assetResult);
                 return 0;
             }
             var result = operation switch
@@ -83,6 +114,12 @@ internal static class Program
             throw new InstallerException("installer.argument_missing", $"Missing required option: --{name}");
         }
         return value;
+    }
+
+    private static IReadOnlySet<string> ParseAssetIds(string value)
+    {
+        return value.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
     }
 
     private static InstallerResult FailedResult(

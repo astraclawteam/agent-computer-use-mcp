@@ -12,4 +12,7 @@ namespace AgentComputerUse.Installer;
 [JsonSerializable(typeof(AssetSignatureEnvelope))]
 [JsonSerializable(typeof(AssetTrustKeyring))]
 [JsonSerializable(typeof(AssetVerificationResult))]
+[JsonSerializable(typeof(AssetOperationResult))]
+[JsonSerializable(typeof(AssetPreparedState))]
+[JsonSerializable(typeof(AssetActivationState))]
 internal partial class InstallerJsonContext : JsonSerializerContext;

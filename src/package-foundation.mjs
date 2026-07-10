@@ -144,7 +144,7 @@ export function buildOfflineAssetManifest(options = {}) {
         platform: "all",
         targetRoot: "modelRoot/pp-ocrv6-small",
         offlineRequired: false,
-        acquisition: "bundle-or-first-run-cache",
+        acquisition: "bundle-or-approved-install-cache",
         version: "pinned-by-manifest",
       },
       {

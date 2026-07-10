@@ -118,8 +118,66 @@ internal sealed class AssetVerificationResult
     public bool IncludeUserOverlay { get; set; }
 }
 
+internal sealed class AssetOperationResult
+{
+    public string Status { get; set; } = "";
+    public string Operation { get; set; } = "";
+    public string OperationId { get; set; } = "";
+    public string? ReleaseId { get; set; }
+    public string? CurrentReleaseId { get; set; }
+    public string? PreviousReleaseId { get; set; }
+    public long Revision { get; set; }
+    public string? ManifestSha256 { get; set; }
+    public int CacheHitCount { get; set; }
+    public int CacheMissCount { get; set; }
+    public List<MaterializedAsset> Assets { get; set; } = [];
+    public bool StartsDesktopControl { get; set; }
+    public bool IncludeUserOverlay { get; set; }
+}
+
+internal sealed class AssetPreparedState
+{
+    public int SchemaVersion { get; set; } = 1;
+    public string ReleaseId { get; set; } = "";
+    public string ManifestSha256 { get; set; } = "";
+    public string ManifestPath { get; set; } = "";
+    public string SignaturePath { get; set; } = "";
+    public string KeyringPath { get; set; } = "";
+    public string PreparedAt { get; set; } = "";
+    public List<MaterializedAsset> Assets { get; set; } = [];
+}
+
+internal sealed class AssetActivationState
+{
+    public int SchemaVersion { get; set; } = 1;
+    public string? CurrentReleaseId { get; set; }
+    public string? PreviousReleaseId { get; set; }
+    public long Revision { get; set; }
+    public string ActivatedAt { get; set; } = "";
+    public List<MaterializedAsset> Assets { get; set; } = [];
+}
+
+internal sealed class MaterializedAsset
+{
+    public string Id { get; set; } = "";
+    public string Version { get; set; } = "";
+    public string BlobSha256 { get; set; } = "";
+    public string Root { get; set; } = "";
+    public string EntryPoint { get; set; } = "";
+    public List<MaterializedAssetFile> Files { get; set; } = [];
+}
+
+internal sealed class MaterializedAssetFile
+{
+    public string Path { get; set; } = "";
+    public long SizeBytes { get; set; }
+    public string Sha256 { get; set; } = "";
+}
+
 internal sealed record VerifiedAssetManifest(
     AssetManifest Manifest,
     string ManifestSha256,
     string ManifestPath,
     string SignaturePath);
+
+internal sealed record CachedAssetBlob(string Path, bool CacheHit);
