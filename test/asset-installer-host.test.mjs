@@ -14,6 +14,7 @@ test("asset installer executor prepares and activates host-configured assets", a
   const executor = createAssetInstallerExecutor({
     programRoot: "C:\\Program Files\\AgentComputerUse",
     dataRoot: "C:\\Users\\demo\\AppData\\Local\\AgentComputerUse",
+    installerPath: "C:\\Program Files\\AgentComputerUse\\runtime\\windows-installer\\current\\agent-computer-use-installer.exe",
     runInstaller: async (operation, options) => {
       calls.push({ operation, options });
       if (operation === "asset-prepare") {
@@ -39,6 +40,7 @@ test("asset installer executor prepares and activates host-configured assets", a
   assert.deepEqual(calls.map((call) => call.operation), ["asset-prepare", "asset-activate"]);
   assert.deepEqual(calls[0].options.assetIds, ["cua-driver-windows-x64", "ocr-model-pp-ocrv6-small"]);
   assert.equal(calls[0].options.allowNetwork, true);
+  assert.equal(calls[0].options.installerPath, "C:\\Program Files\\AgentComputerUse\\runtime\\windows-installer\\current\\agent-computer-use-installer.exe");
   assert.equal(calls[0].options.signal, controller.signal);
   assert.equal(calls[1].options.releaseId, "assets-v1");
   assert.equal(events.some((event) => event.state === "preparing"), true);
@@ -66,6 +68,7 @@ test("asset delivery paths come only from host environment", () => {
   assert.equal(config.signaturePath, "C:\\ProgramData\\AgentComputerUse\\assets.sig");
   assert.equal(config.keyringPath, "C:\\ProgramData\\AgentComputerUse\\asset-keyring.json");
   assert.equal(config.offlineRoot, "D:\\AgentComputerUseOffline");
+  assert.equal(config.installerPath, "C:\\Users\\demo\\AppData\\Local\\Programs\\AgentComputerUse\\runtime\\windows-installer\\current\\agent-computer-use-installer.exe");
   assert.equal(Object.hasOwn(config, "allowNetwork"), false);
 });
 

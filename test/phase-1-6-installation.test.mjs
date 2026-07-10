@@ -31,6 +31,11 @@ test("Phase 1.6 exposes a stable local module installation manifest", () => {
       AGENT_COMPUTER_USE_CUA_DRIVER: "C:\\tools\\cua-driver.exe",
       AGENT_COMPUTER_USE_ARTIFACT_ROOT: "D:\\agent-artifacts",
       AGENT_COMPUTER_USE_OCR_MODEL_ROOT: "D:\\agent-models",
+      AGENT_COMPUTER_USE_WINDOWS_INSTALLER: "C:\\AgentComputerUse\\installer.exe",
+      AGENT_COMPUTER_USE_ASSET_MANIFEST: "C:\\AgentComputerUse\\asset-manifest.json",
+      AGENT_COMPUTER_USE_ASSET_SIGNATURE: "C:\\AgentComputerUse\\asset-manifest.sig",
+      AGENT_COMPUTER_USE_ASSET_TRUST_KEYRING: "C:\\AgentComputerUse\\asset-keyring.json",
+      AGENT_COMPUTER_USE_OFFLINE_ASSET_ROOT: "D:\\agent-offline",
     },
   });
 
@@ -44,6 +49,11 @@ test("Phase 1.6 exposes a stable local module installation manifest", () => {
   assert.equal(manifest.paths.artifactRoot, "D:\\agent-artifacts");
   assert.equal(manifest.paths.modelRoot, "D:\\agent-models");
   assert.equal(manifest.paths.driverPath, "C:\\tools\\cua-driver.exe");
+  assert.equal(manifest.paths.windowsInstallerPath, "C:\\AgentComputerUse\\installer.exe");
+  assert.equal(manifest.paths.assetManifestPath, "C:\\AgentComputerUse\\asset-manifest.json");
+  assert.equal(manifest.paths.assetSignaturePath, "C:\\AgentComputerUse\\asset-manifest.sig");
+  assert.equal(manifest.paths.assetTrustKeyringPath, "C:\\AgentComputerUse\\asset-keyring.json");
+  assert.equal(manifest.paths.offlineAssetRoot, "D:\\agent-offline");
   assert.equal(manifest.observation.includeUserOverlay, false);
   assert.deepEqual(manifest.envOverrides.required, []);
   assert.deepEqual(manifest.envOverrides.optional, [
@@ -56,6 +66,11 @@ test("Phase 1.6 exposes a stable local module installation manifest", () => {
     "XIAOZHICLAW_OCR_SIDECAR_PATH",
     "AGENT_COMPUTER_USE_ARTIFACT_ROOT",
     "AGENT_COMPUTER_USE_OCR_MODEL_ROOT",
+    "AGENT_COMPUTER_USE_WINDOWS_INSTALLER",
+    "AGENT_COMPUTER_USE_ASSET_MANIFEST",
+    "AGENT_COMPUTER_USE_ASSET_SIGNATURE",
+    "AGENT_COMPUTER_USE_ASSET_TRUST_KEYRING",
+    "AGENT_COMPUTER_USE_OFFLINE_ASSET_ROOT",
     "XIAOZHICLAW_COMPUTER_USE_ARTIFACT_ROOT",
     "XIAOZHICLAW_OCR_MODEL_ROOT",
   ]);
@@ -74,6 +89,9 @@ test("Phase 1.6 builds Codex and Claude Desktop MCP client configs", () => {
   assert.equal(codex.mcpServers["agent-computer-use"].cwd, "F:\\agent-computer-use-mcp");
   assert.equal(codex.mcpServers["agent-computer-use"].env.AGENT_COMPUTER_USE_ARTIFACT_ROOT, manifest.paths.artifactRoot);
   assert.equal(codex.mcpServers["agent-computer-use"].env.XIAOZHICLAW_COMPUTER_USE_ARTIFACT_ROOT, manifest.paths.artifactRoot);
+  assert.equal(codex.mcpServers["agent-computer-use"].env.AGENT_COMPUTER_USE_WINDOWS_INSTALLER, manifest.paths.windowsInstallerPath);
+  assert.equal(codex.mcpServers["agent-computer-use"].env.AGENT_COMPUTER_USE_ASSET_MANIFEST, manifest.paths.assetManifestPath);
+  assert.equal(codex.mcpServers["agent-computer-use"].env.AGENT_COMPUTER_USE_ASSET_TRUST_KEYRING, manifest.paths.assetTrustKeyringPath);
 
   const claude = buildClientMcpConfig({ client: "claude-desktop", manifest });
   assert.deepEqual(claude.mcpServers, codex.mcpServers);

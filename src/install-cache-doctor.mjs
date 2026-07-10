@@ -21,6 +21,7 @@ export async function runInstallCacheDoctor(options = {}) {
   };
 
   const driverHealth = await probes.driverHealth({ env, layout });
+  const driverPath = driverHealth.driverPath ?? layout.driverRoot;
   const overlayPath = layout.overlayRoot;
   const overlayExists = await probes.pathExists(overlayPath);
   const ocrRuntimeHealth = await probes.ocrRuntimeHealth({ env, layout });
@@ -28,13 +29,13 @@ export async function runInstallCacheDoctor(options = {}) {
   const webView2 = await probes.webView2Health({ env, layout, platform });
   const permissions = await probes.permissionsHealth({ env, layout });
   const overlaySignature = await probes.signatureHealth({ id: "gateway-overlay-windows", path: overlayPath });
-  const driverSignature = await probes.signatureHealth({ id: "cua-driver-windows-x64", path: layout.driverRoot });
+  const driverSignature = await probes.signatureHealth({ id: "cua-driver-windows-x64", path: driverPath });
 
   const assets = [
     {
       id: "cua-driver-windows-x64",
       kind: "driver",
-      path: layout.driverRoot,
+      path: driverPath,
       status: driverHealth.status === "healthy" ? "healthy" : "missing",
       health: driverHealth,
       signature: driverSignature,

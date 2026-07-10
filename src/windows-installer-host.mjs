@@ -1,9 +1,10 @@
 import { spawn } from "node:child_process";
 import { open, mkdir, readdir, rm, stat } from "node:fs/promises";
-import { dirname, join, resolve } from "node:path";
+import { dirname, extname, join, resolve } from "node:path";
 
 export const WINDOWS_INSTALLER_PROJECT = resolve("windows-installer/AgentComputerUse.Installer.csproj");
 export const WINDOWS_INSTALLER_DLL = resolve("windows-installer/bin/Release/net10.0/AgentComputerUse.Installer.dll");
+export const WINDOWS_INSTALLER_NATIVE_EXE = resolve("artifacts/windows-installer/win-x64/AgentComputerUse.Installer.exe");
 
 const BUILD_LOCK = resolve("windows-installer/obj/agent-computer-use-installer-build.lock");
 const LOCK_STALE_MS = 120_000;
@@ -51,10 +52,61 @@ export async function ensureWindowsInstallerBuilt(options = {}) {
   }
 }
 
+export async function ensureWindowsInstallerPublished(options = {}) {
+  if (await installerOutputIsCurrent(WINDOWS_INSTALLER_NATIVE_EXE)) {
+    return { status: "ready", published: false, exePath: WINDOWS_INSTALLER_NATIVE_EXE };
+  }
+
+  const timeoutMs = options.timeoutMs ?? 180_000;
+  const startedAt = Date.now();
+  await mkdir(dirname(BUILD_LOCK), { recursive: true });
+  while (true) {
+    const lock = await tryAcquireBuildLock();
+    if (lock) {
+      try {
+        if (await installerOutputIsCurrent(WINDOWS_INSTALLER_NATIVE_EXE)) {
+          return { status: "ready", published: false, exePath: WINDOWS_INSTALLER_NATIVE_EXE };
+        }
+        await mkdir(dirname(WINDOWS_INSTALLER_NATIVE_EXE), { recursive: true });
+        const publish = await runCommand("dotnet", [
+          "publish",
+          WINDOWS_INSTALLER_PROJECT,
+          "--configuration",
+          "Release",
+          "--runtime",
+          "win-x64",
+          "--self-contained",
+          "true",
+          "--output",
+          dirname(WINDOWS_INSTALLER_NATIVE_EXE),
+          "--nologo",
+        ], { env: options.env, signal: options.signal });
+        if (publish.exitCode !== 0) {
+          throw new Error(`installer.publish_failed: ${publish.stderr || publish.stdout}`);
+        }
+        return { status: "ready", published: true, exePath: WINDOWS_INSTALLER_NATIVE_EXE };
+      } finally {
+        await lock.close();
+        await rm(BUILD_LOCK, { force: true });
+      }
+    }
+    if (await lockIsStale()) {
+      await rm(BUILD_LOCK, { force: true });
+      continue;
+    }
+    if (Date.now() - startedAt >= timeoutMs) {
+      throw new Error("installer.publish_lock_timeout: timed out waiting for native installer publish");
+    }
+    await delay(100);
+  }
+}
+
 export async function runWindowsInstaller(operation, options = {}) {
-  const build = await ensureWindowsInstallerBuilt(options);
+  const launch = options.installerPath
+    ? installedHelperLaunch(options.installerPath)
+    : developmentHelperLaunch(await ensureWindowsInstallerBuilt(options));
   const args = [
-    build.dllPath,
+    ...launch.prefixArgs,
     operation,
     "--program-root",
     options.programRoot,
@@ -72,7 +124,7 @@ export async function runWindowsInstaller(operation, options = {}) {
   if (options.allowNetwork === true) args.push("--allow-network", "true");
   const records = [];
   let progressQueue = Promise.resolve();
-  const result = await runCommand("dotnet", args, {
+  const result = await runCommand(launch.command, args, {
     env: options.env,
     signal: options.signal,
     onStdoutLine(line) {
@@ -91,16 +143,31 @@ export async function runWindowsInstaller(operation, options = {}) {
   return { ...result, report };
 }
 
+function installedHelperLaunch(installerPath) {
+  const path = resolve(installerPath);
+  return extname(path).toLowerCase() === ".dll"
+    ? { command: "dotnet", prefixArgs: [path] }
+    : { command: path, prefixArgs: [] };
+}
+
+function developmentHelperLaunch(build) {
+  return { command: "dotnet", prefixArgs: [build.dllPath] };
+}
+
 async function installerBuildIsCurrent() {
-  const dllStat = await stat(WINDOWS_INSTALLER_DLL).catch(() => null);
-  if (!dllStat?.isFile()) return false;
+  return installerOutputIsCurrent(WINDOWS_INSTALLER_DLL);
+}
+
+async function installerOutputIsCurrent(outputPath) {
+  const outputStat = await stat(outputPath).catch(() => null);
+  if (!outputStat?.isFile()) return false;
 
   const sourceRoot = dirname(WINDOWS_INSTALLER_PROJECT);
   const entries = await readdir(sourceRoot, { withFileTypes: true });
   for (const entry of entries) {
     if (!entry.isFile() || (!entry.name.endsWith(".cs") && !entry.name.endsWith(".csproj"))) continue;
     const sourceStat = await stat(join(sourceRoot, entry.name));
-    if (sourceStat.mtimeMs > dllStat.mtimeMs) return false;
+    if (sourceStat.mtimeMs > outputStat.mtimeMs) return false;
   }
   return true;
 }

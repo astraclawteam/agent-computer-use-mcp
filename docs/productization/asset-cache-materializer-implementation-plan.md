@@ -450,9 +450,9 @@ git commit -m "feat: execute approved asset repairs"
 **Interfaces:**
 
 - Script: `npm run phase:7.9`
-- Report: `{ status:"passed", phase:"7.9", manifestVerified, offlineCacheKeyMatchesHttp, resumeUsed, corruptBlobRejected, zipTraversalRejected, activationAtomic, rollbackVerified, mcpRepairVerified, firstEnableDownloadCount:0, startsDesktopControl:false, includeUserOverlay:false }`
+- Report: `{ status:"passed", phase:"7.9", installerKind:"native-aot", manifestVerified, offlineCacheKeyMatchesHttp, resumeUsed, corruptBlobRejected, zipTraversalRejected, activationAtomic, rollbackVerified, mcpRepairVerified, runtimeResolvedActiveDriver, firstEnableDownloadCount:0, startsDesktopControl:false, includeUserOverlay:false }`
 
-- [ ] **Step 1: Write the failing Phase 7.9 contract test**
+- [x] **Step 1: Write the failing Phase 7.9 contract test**
 
 ```js
 test("Phase 7.9 proves real asset acquisition cache activation and rollback", async () => {
@@ -472,21 +472,21 @@ test("Phase 7.9 proves real asset acquisition cache activation and rollback", as
 });
 ```
 
-- [ ] **Step 2: Run the phase test and verify RED**
+- [x] **Step 2: Run the phase test and verify RED**
 
 Run: `node --test test/phase-7-9-asset-cache-materializer.test.mjs`
 
 Expected: FAIL because Phase 7.9 is not registered.
 
-- [ ] **Step 3: Implement the deterministic phase runner**
+- [x] **Step 3: Implement the deterministic phase runner**
 
 Use temporary roots, generated fixture ECDSA keys, a local interrupting HTTP server, real ZIP files, the real NativeAOT helper, and the official MCP SDK. Clean every temporary root and stop every child/server in `finally`. Print exactly one final JSON object to stdout.
 
-- [ ] **Step 4: Register release evidence and update governance**
+- [x] **Step 4: Register release evidence and update governance**
 
 Add `phase:7.9` to alpha commands, required evidence, release metadata, provider health phases, and Windows CI after Phase 7.8. Document the trust distinction between first-party Authenticode and upstream unsigned provenance, operation lifecycle, cache layout, offline flow, and live gate.
 
-- [ ] **Step 5: Run final verification**
+- [x] **Step 5: Run final verification**
 
 Run: `npm run phase:7.9`
 
@@ -516,7 +516,7 @@ Run: `git diff --check`
 
 Expected: every deterministic command exits `0`; the connected-host live gate passes or reports only a transport-level `skipped_environment`; generated assets remain ignored; source/maps remain excluded from npm; no real user install root is modified.
 
-- [ ] **Step 6: Commit Task 6**
+- [x] **Step 6: Commit Task 6**
 
 ```sh
 git add .github AGENTS.md CHANGELOG.md README.md docs/productization package.json src test

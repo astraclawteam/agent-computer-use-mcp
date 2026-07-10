@@ -44,6 +44,8 @@ The Node MCP process owns user approval, operation lifecycle, progress reporting
 
 The asset manifest path, detached signature path, trusted public-key keyring, offline bundle root, program root, and data root are host-owned installation configuration. They are resolved once when the MCP server starts from the installed product layout and `AGENT_COMPUTER_USE_*` environment configuration. They are never accepted in public MCP tool input. An agent may select advertised repair actions and request approved network use, but it cannot replace the manifest, signature, keyring, or filesystem roots. This prevents an agent from introducing its own key and self-signing an untrusted payload.
 
+The installer helper is a signed bootstrap component placed by the product installer at `%LOCALAPPDATA%\Programs\AgentComputerUse\runtime\windows-installer\current\agent-computer-use-installer.exe`, or at the host-fixed `AGENT_COMPUTER_USE_WINDOWS_INSTALLER` path. Production MCP repair invokes that executable directly and never compiles C# source. Building and running the .NET DLL is a source-workspace development fallback only.
+
 Upstream package managers and install scripts are not execution dependencies. They may be used by release engineering to discover source artifacts, but clients consume only a release-pinned signed manifest.
 
 ## Trust Model
@@ -253,6 +255,8 @@ Extraction occurs only under a transaction directory. The implementation verifie
 `asset-prepare` performs manifest verification, acquisition, blob verification, safe materialization, Authenticode policy verification, and preflight entry-point checks. It does not activate assets until all selected required assets are ready.
 
 `asset-activate` atomically switches `asset-state.json`. Existing processes continue using their current files; new daemon sessions resolve paths from the new state. The previous state is retained until the next successful doctor run.
+
+Before a new daemon session executes an active asset, the Node host resolves its entry point from `asset-state.json`, requires the asset root and entry point to remain inside the product assets root, and rechecks every declared file size and SHA-256. Invalid, escaped, missing, or modified active state fails closed and falls through to an explicit repair result rather than executing the path.
 
 `asset-rollback` verifies the previous manifest and every referenced immutable asset before swapping current and previous state. Missing or corrupted previous assets make rollback fail closed.
 

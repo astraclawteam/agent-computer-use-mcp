@@ -18,12 +18,15 @@ export function getAssetDeliveryConfig(options = {}) {
     platform: options.platform ?? process.platform,
     env,
   });
+  const deliveryRoot = join(layout.runtimeRoot, "asset-delivery", "current");
   return compact({
     programRoot: layout.cacheRoot,
     dataRoot: layout.dataRoot,
-    manifestPath: env.AGENT_COMPUTER_USE_ASSET_MANIFEST,
-    signaturePath: env.AGENT_COMPUTER_USE_ASSET_SIGNATURE,
-    keyringPath: env.AGENT_COMPUTER_USE_ASSET_TRUST_KEYRING,
+    installerPath: env.AGENT_COMPUTER_USE_WINDOWS_INSTALLER
+      ?? join(layout.runtimeRoot, "windows-installer", "current", "agent-computer-use-installer.exe"),
+    manifestPath: env.AGENT_COMPUTER_USE_ASSET_MANIFEST ?? join(deliveryRoot, "asset-manifest.json"),
+    signaturePath: env.AGENT_COMPUTER_USE_ASSET_SIGNATURE ?? join(deliveryRoot, "asset-manifest.sig"),
+    keyringPath: env.AGENT_COMPUTER_USE_ASSET_TRUST_KEYRING ?? join(deliveryRoot, "asset-keyring.json"),
     offlineRoot: env.AGENT_COMPUTER_USE_OFFLINE_ASSET_ROOT,
   });
 }
@@ -33,6 +36,7 @@ export function createAssetInstallerExecutor(options = {}) {
   const fixedRoots = {
     programRoot: options.programRoot,
     dataRoot: options.dataRoot,
+    installerPath: options.installerPath,
   };
 
   return async function executeAssetInstall(request, context) {

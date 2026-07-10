@@ -50,6 +50,7 @@ If a host product provides a stricter instruction, follow the stricter rule.
 - Prefer text-first and semantic observations before pixel/coordinate actions.
 - Coordinate/pixel actions must be marked as `pixelLimitedAction=true`.
 - Keep `AGENT_COMPUTER_USE_*` environment variables as the public names. `XIAOZHICLAW_*` aliases are compatibility-only.
+- Asset manifest, signature, trust keyring, offline bundle, program root, and data root are host-owned configuration. Never add them to public MCP tool inputs.
 - Do not commit generated artifacts: `node_modules/`, `.NET bin/obj`, OCR model packs, captures, logs, or temp files.
 - The source workspace is never published to npm. Build, smoke, and pack only `artifacts/npm-release/package` through the protected release scripts.
 - Published npm artifacts must not contain first-party source, tests, C#/Python source, Source Maps, or `sourceMappingURL` comments.
@@ -71,6 +72,7 @@ For MCP protocol or installation changes, also run:
 npm run phase:1.6
 npm run phase:1.7
 npm run phase:1.8
+npm run phase:7.9
 ```
 
 For desktop action or `cua-driver mcp` changes, run when the platform has `cua-driver` configured:
