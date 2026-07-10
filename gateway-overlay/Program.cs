@@ -140,6 +140,17 @@ internal sealed class OverlayForm : Form
         _targetRectTimer.Start();
     }
 
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing)
+        {
+            _animationTimer.Dispose();
+            _targetRectTimer.Dispose();
+        }
+
+        base.Dispose(disposing);
+    }
+
     private void PresentFrame()
     {
         if (!IsHandleCreated || IsDisposed) return;
