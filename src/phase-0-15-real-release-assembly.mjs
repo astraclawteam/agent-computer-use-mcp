@@ -8,6 +8,10 @@ import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js"
 
 import { verifyReleaseBundle } from "./release-bundle.mjs";
 import { verifyReleaseOutputs } from "./release-output-manifest.mjs";
+import {
+  WINDOWS_X64_OFFLINE_MAX_BYTES,
+  assertOfflineBundleSize,
+} from "./release-size-policy.mjs";
 import { PP_OCRV6_SMALL_MODEL_PACK } from "./ocr-model-pack.mjs";
 import { verifyWindowsOfflineBundleContents } from "./windows-offline-bundle.mjs";
 import {
@@ -57,6 +61,11 @@ export async function runRealReleaseAssemblyPhase(options = {}) {
       artifactRoot: assembly.outputRoot,
     });
     const offline = requiredArtifact(assembly, "windows-offline-bundle");
+    const offlineFileSize = (await stat(offline.path)).size;
+    const offlineSize = assertOfflineBundleSize({ target: assembly.target, sizeBytes: offlineFileSize });
+    const offlineBundleSizeVerified = assembly.offlineBundleSizeBytes === offlineSize.sizeBytes
+      && assembly.offlineBundleMaxBytes === offlineSize.maxBytes
+      && offlineSize.maxBytes === WINDOWS_X64_OFFLINE_MAX_BYTES;
     const expandedRoot = join(workRoot, "offline");
     await expandVerifiedZip({ archivePath: offline.path, destinationPath: expandedRoot });
     const releaseVerification = await verifyReleaseBundle({ bundleRoot: join(expandedRoot, "release") });
@@ -122,6 +131,7 @@ export async function runRealReleaseAssemblyPhase(options = {}) {
     const passed = assembly.realAssetBytesVerified === true
       && releaseVerification.status === "ready"
       && offlineBundleVerified
+      && offlineBundleSizeVerified
       && install.report.status === "installed"
       && prepared.report.status === "prepared"
       && activated.report.status === "activated"
@@ -137,6 +147,8 @@ export async function runRealReleaseAssemblyPhase(options = {}) {
       realAssetBytesVerified: assembly.realAssetBytesVerified === true,
       releaseBundleVerified: releaseVerification.status === "ready",
       offlineBundleVerified,
+      offlineBundleSizeBytes: offlineSize.sizeBytes,
+      offlineBundleMaxBytes: offlineSize.maxBytes,
       offlineVerifiedFileCount: offlineContents.fileCount,
       installerAppliedRelease: install.report.status === "installed",
       assetsPreparedAndActivatedOffline: prepared.report.status === "prepared" && activated.report.status === "activated",

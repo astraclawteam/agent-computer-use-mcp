@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { mkdir, mkdtemp, readFile, readdir, rename, rm, stat, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, rename, rm, stat, truncate, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { afterEach, test } from "node:test";
@@ -10,6 +10,7 @@ import {
   promoteReleaseCandidate,
   verifyWindowsReleaseCandidate,
 } from "../src/windows-release-assembly.mjs";
+import { WINDOWS_X64_OFFLINE_MAX_BYTES } from "../src/release-size-policy.mjs";
 import { WINDOWS_X64_RELEASE_TARGET } from "../src/release-target.mjs";
 
 const roots = [];
@@ -38,6 +39,8 @@ test("Windows release assembly executes verified stages and atomically promotes 
   assert.equal(report.installable, true);
   assert.equal(report.distributionStatus, "blocked_unsigned");
   assert.equal(report.assetCount, 6);
+  assert.equal(report.offlineBundleSizeBytes, 11);
+  assert.equal(report.offlineBundleMaxBytes, WINDOWS_X64_OFFLINE_MAX_BYTES);
   assert.equal(report.firstEnableDownloadCount, 0);
   assert.equal(report.startsDesktopControl, false);
   assert.equal(report.includeUserOverlay, false);
@@ -45,6 +48,46 @@ test("Windows release assembly executes verified stages and atomically promotes 
   assert.equal((await stat(report.checksumsPath)).isFile(), true);
   assert.equal((await readFile(report.checksumsPath, "utf8")).includes("\r"), false);
   assert.deepEqual(await stagingEntries(fixture.outputRoot), []);
+});
+
+test("Windows release assembly rejects an oversized offline bundle before promotion", async () => {
+  const fixture = await createFixture();
+  const calls = [];
+
+  await assert.rejects(
+    () => assembleWindowsReleaseCandidate({
+      outputRoot: fixture.outputRoot,
+      cacheRoot: join(fixture.root, "cache"),
+      allowNetwork: false,
+      generatedAt: "2026-07-10T00:00:00.000Z",
+      lock: fixture.lock,
+      identity: fixture.identity,
+      dependencies: fixture.dependencies(calls, {
+        offlineSizeBytes: WINDOWS_X64_OFFLINE_MAX_BYTES + 1,
+      }),
+    }),
+    (error) => error?.code === "release.offline_bundle_too_large",
+  );
+
+  assert.deepEqual(calls, ["acquire", "payload", "sbom", "prepare-assets", "offline-bundle"]);
+  assert.equal(await stat(fixture.outputRoot).catch(() => null), null);
+});
+
+test("Windows release assembly rejects a reported offline size that differs from the file", async () => {
+  const fixture = await createFixture();
+
+  await assert.rejects(
+    () => assembleWindowsReleaseCandidate({
+      outputRoot: fixture.outputRoot,
+      cacheRoot: join(fixture.root, "cache"),
+      allowNetwork: false,
+      generatedAt: "2026-07-10T00:00:00.000Z",
+      lock: fixture.lock,
+      identity: fixture.identity,
+      dependencies: fixture.dependencies([], { reportedOfflineSizeBytes: 12 }),
+    }),
+    (error) => error?.code === "release.offline_bundle_size_mismatch",
+  );
 });
 
 test("Windows release assembly preserves the previous candidate and cleans staging after failure", async () => {
@@ -419,7 +462,18 @@ function fixtureDependencies({ calls, acquired, options }) {
       }
       const fileName = "agent-computer-use-mcp-0.0.1-windows-x64-offline.candidate.zip";
       const outputPath = await writeFixture(join(outputRoot, fileName), "offline-zip");
-      return { status: "ready", target, outputPath, fileName, firstEnableDownloadCount: 0, assetCount: 1, blobCount: 1 };
+      if (options.offlineSizeBytes !== undefined) await truncate(outputPath, options.offlineSizeBytes);
+      const sizeBytes = (await stat(outputPath)).size;
+      return {
+        status: "ready",
+        target,
+        outputPath,
+        fileName,
+        sizeBytes: options.reportedOfflineSizeBytes ?? sizeBytes,
+        firstEnableDownloadCount: 0,
+        assetCount: 1,
+        blobCount: 1,
+      };
     },
     async packProtectedNpmPackage({ releaseRoot }) {
       calls.push("npm-pack");

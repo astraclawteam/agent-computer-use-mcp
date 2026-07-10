@@ -9,7 +9,11 @@ test("Phase 0.15 assembles installs and smokes a real offline Windows release ca
   assert.equal(packageJson.scripts["release:windows:assemble"], "node scripts/build-windows-release-candidate.mjs");
   assert.equal(packageJson.scripts["phase:0.15"], "node src/phase-0-15-real-release-assembly.mjs");
   assert.match(readFileSync("scripts/build-windows-release-candidate.mjs", "utf8"), /artifacts\/windows-release/u);
-  assert.match(readFileSync("src/phase-0-15-real-release-assembly.mjs", "utf8"), /artifacts\/windows-release/u);
+  const phaseSource = readFileSync("src/phase-0-15-real-release-assembly.mjs", "utf8");
+  assert.match(phaseSource, /artifacts\/windows-release/u);
+  assert.match(phaseSource, /WINDOWS_X64_OFFLINE_MAX_BYTES/u);
+  assert.match(phaseSource, /offlineBundleSizeBytes/u);
+  assert.match(phaseSource, /offlineBundleMaxBytes/u);
 
   const { ComputerUseProviderRouter } = await import("../src/computer-use-provider-router.mjs");
   const health = await new ComputerUseProviderRouter().health({ fast: true });
@@ -67,6 +71,8 @@ test("Phase 0.15 assembles installs and smokes a real offline Windows release ca
   assert.equal(report.realAssetBytesVerified, true);
   assert.equal(report.releaseBundleVerified, true);
   assert.equal(report.offlineBundleVerified, true);
+  assert.ok(report.offlineBundleSizeBytes <= report.offlineBundleMaxBytes);
+  assert.equal(report.offlineBundleMaxBytes, 310 * 1024 * 1024);
   assert.ok(report.offlineVerifiedFileCount > 0);
   assert.equal(report.installerAppliedRelease, true);
   assert.equal(report.assetsPreparedAndActivatedOffline, true);

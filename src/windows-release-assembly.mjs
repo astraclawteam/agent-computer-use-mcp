@@ -7,6 +7,7 @@ import { packProtectedNpmPackage } from "../scripts/pack-protected-npm-package.m
 import { acquireReleaseAssets } from "./release-asset-acquirer.mjs";
 import { loadReleaseAssetLock } from "./release-asset-lock.mjs";
 import { verifyReleaseOutputs, writeReleaseOutputManifest } from "./release-output-manifest.mjs";
+import { assertOfflineBundleSize } from "./release-size-policy.mjs";
 import { buildReleaseSbom } from "./release-sbom.mjs";
 import { buildWindowsOfflineBundle, prepareWindowsOfflineAssets } from "./windows-offline-bundle.mjs";
 import { buildWindowsReleasePayload } from "./windows-release-payload.mjs";
@@ -98,6 +99,14 @@ export async function assembleWindowsReleaseCandidate(options = {}) {
       target,
     });
     assertStageTarget(offlineReport, target, "offline bundle");
+    const offlineStat = await stat(offlineReport.outputPath).catch(() => null);
+    if (!offlineStat?.isFile() || offlineReport.sizeBytes !== offlineStat.size) {
+      throw releaseError(
+        "release.offline_bundle_size_mismatch",
+        "Offline bundle report size does not match the assembled file",
+      );
+    }
+    const offlineSize = assertOfflineBundleSize({ target, sizeBytes: offlineStat.size });
     const npmReport = await dependencies.packProtectedNpmPackage({
       packageRoot: join(workRoot, "npm-package"),
       releaseRoot: join(workRoot, "npm-release"),
@@ -158,6 +167,8 @@ export async function assembleWindowsReleaseCandidate(options = {}) {
         distributionStatus: candidate.distributionStatus,
       })),
       assetCount: lock.assets.length,
+      offlineBundleSizeBytes: offlineSize.sizeBytes,
+      offlineBundleMaxBytes: offlineSize.maxBytes,
       realAssetBytesVerified: true,
       firstEnableDownloadCount: offlineReport.firstEnableDownloadCount ?? 0,
       startsDesktopControl: false,
@@ -234,6 +245,12 @@ export async function verifyWindowsReleaseCandidate(options = {}) {
   const target = assertReleaseTarget(options.target ?? manifest.release?.target);
   const expectedCommit = options.expectedCommit ?? process.env.GITHUB_SHA ?? await currentCommit();
   validateIdentity(manifest.release ?? {}, lock, packageJson, expectedCommit, target);
+  const offlineManifestArtifact = (manifest.artifacts ?? [])
+    .find((artifact) => artifact.id === "windows-offline-bundle");
+  const offlineSize = assertOfflineBundleSize({
+    target,
+    sizeBytes: offlineManifestArtifact?.sizeBytes,
+  });
   const artifacts = (manifest.artifacts ?? []).map((entry) => ({
     id: entry.id,
     fileName: entry.fileName,
@@ -279,6 +296,8 @@ export async function verifyWindowsReleaseCandidate(options = {}) {
     checksumsPath,
     artifacts,
     assetCount: lock.assets.length,
+    offlineBundleSizeBytes: offlineSize.sizeBytes,
+    offlineBundleMaxBytes: offlineSize.maxBytes,
     realAssetBytesVerified: true,
     firstEnableDownloadCount: 0,
     startsDesktopControl: false,
