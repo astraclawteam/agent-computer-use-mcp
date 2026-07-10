@@ -3,7 +3,7 @@ import { spawn } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
 
-test("Phase 0.15 assembles installs and smokes a real offline Windows release candidate", { timeout: 300_000 }, async () => {
+test("Phase 0.15 assembles installs and smokes a real offline Windows release candidate", { timeout: 900_000 }, async () => {
   const packageJson = JSON.parse(readFileSync("package.json", "utf8"));
   assert.equal(packageJson.scripts["release:windows:assets"], "node scripts/fetch-windows-release-assets.mjs");
   assert.equal(packageJson.scripts["release:windows:assemble"], "node scripts/build-windows-release-candidate.mjs");
@@ -67,9 +67,12 @@ test("Phase 0.15 assembles installs and smokes a real offline Windows release ca
   assert.equal(report.realAssetBytesVerified, true);
   assert.equal(report.releaseBundleVerified, true);
   assert.equal(report.offlineBundleVerified, true);
+  assert.ok(report.offlineVerifiedFileCount > 0);
   assert.equal(report.installerAppliedRelease, true);
   assert.equal(report.assetsPreparedAndActivatedOffline, true);
   assert.equal(report.standardMcpSmokePassed, true);
+  assert.equal(report.activatedDriverResolvedByMcp, true);
+  assert.equal(report.mcpDeadlineMs, 15_000);
   assert.equal(report.ocrModelPackPresent, true);
   assert.equal(report.webView2InstallerPresent, true);
   assert.equal(report.checksumsVerified, true);

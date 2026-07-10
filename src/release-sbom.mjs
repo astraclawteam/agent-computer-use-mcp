@@ -4,6 +4,7 @@ import { dirname, join, resolve } from "node:path";
 
 const REQUIRED_COMPONENTS = [
   "agent-computer-use-mcp",
+  "agent-computer-use-installer-windows-x64",
   "node-runtime-windows-x64",
   "cua-driver-windows-x64",
   "gateway-overlay-windows-x64",
@@ -33,16 +34,19 @@ export async function buildReleaseSbom({
     components.push(componentFromLockedAsset(asset));
   }
 
-  const overlay = (payloadReport?.files ?? []).find((entry) => (
-    entry.path?.replaceAll("\\", "/") === "helpers/overlay/GatewayComputerUseOverlay.exe"
-  ));
-  if (overlay) {
+  for (const native of [
+    { name: "gateway-overlay-windows-x64", path: "helpers/overlay/GatewayComputerUseOverlay.exe" },
+    { name: "agent-computer-use-installer-windows-x64", path: "bin/AgentComputerUse.Installer.exe" },
+  ]) {
+    const file = (payloadReport?.files ?? []).find((entry) => entry.path?.replaceAll("\\", "/") === native.path);
+    if (!file) continue;
     components.push({
       type: "file",
-      name: "gateway-overlay-windows-x64",
-      version: overlay.sha256.slice(0, 12),
-      "bom-ref": `native:gateway-overlay-windows-x64@sha256:${overlay.sha256}`,
-      hashes: [{ alg: "SHA-256", content: overlay.sha256 }],
+      name: native.name,
+      version: file.sha256.slice(0, 12),
+      "bom-ref": `native:${native.name}@sha256:${file.sha256}`,
+      hashes: [{ alg: "SHA-256", content: file.sha256 }],
+      licenses: [{ license: { id: "MIT" } }],
     });
   }
 

@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { createReadStream } from "node:fs";
-import { copyFile, mkdir, readFile, rename, rm, stat } from "node:fs/promises";
-import { dirname, join, resolve } from "node:path";
+import { copyFile, mkdir, readFile, readdir, rename, rm, stat } from "node:fs/promises";
+import { basename, dirname, join, resolve } from "node:path";
 
 import { packProtectedNpmPackage } from "../scripts/pack-protected-npm-package.mjs";
 import { acquireReleaseAssets } from "./release-asset-acquirer.mjs";
@@ -46,6 +46,7 @@ export async function assembleWindowsReleaseCandidate(options = {}) {
   const packageJson = options.packageJson ?? JSON.parse(await readFile("package.json", "utf8"));
   const identity = options.identity ?? await releaseIdentity(packageJson, lock.platform);
   validateIdentity(identity, lock, packageJson);
+  await assertReplaceableOutputRoot(outputRoot, identity);
 
   const stageRoot = `${outputRoot}.staging-${randomUUID()}`;
   const workRoot = join(stageRoot, ".work");
@@ -62,10 +63,19 @@ export async function assembleWindowsReleaseCandidate(options = {}) {
     });
     await verifyAcquiredAssets(lock, acquiredAssets);
     const acquired = new Map(acquiredAssets.map((asset) => [asset.id, asset]));
+    const prefix = `${identity.packageName}-${identity.version}`;
 
     const payloadReport = await dependencies.buildWindowsReleasePayload({
       outputRoot: join(workRoot, "release"),
       nodeArchivePath: requiredAcquired(acquired, "node-runtime-windows-x64").path,
+      generatedAt,
+    });
+    const sbomFileName = `${prefix}-sbom.cdx.json`;
+    const sbomPath = join(workRoot, "evidence", sbomFileName);
+    await dependencies.buildReleaseSbom({
+      outputPath: sbomPath,
+      lock,
+      payloadReport,
       generatedAt,
     });
     const offlineAssets = await dependencies.prepareWindowsOfflineAssets({
@@ -85,20 +95,11 @@ export async function assembleWindowsReleaseCandidate(options = {}) {
       requiredAssetIds: offlineAssets.requiredAssetIds,
       trust: offlineAssets.trust,
       licenses: offlineAssets.licenses,
+      sbomPath,
     });
     const npmReport = await dependencies.packProtectedNpmPackage({
       packageRoot: join(workRoot, "npm-package"),
       releaseRoot: join(workRoot, "npm-release"),
-    });
-
-    const prefix = `${identity.packageName}-${identity.version}`;
-    const sbomFileName = `${prefix}-sbom.cdx.json`;
-    const sbomPath = join(stageRoot, sbomFileName);
-    await dependencies.buildReleaseSbom({
-      outputPath: sbomPath,
-      lock,
-      payloadReport,
-      generatedAt,
     });
 
     const candidates = [
@@ -137,9 +138,8 @@ export async function assembleWindowsReleaseCandidate(options = {}) {
       throw error;
     }
 
-    await rm(outputRoot, { recursive: true, force: true });
     await mkdir(dirname(outputRoot), { recursive: true });
-    await rename(stageRoot, outputRoot);
+    await promoteReleaseCandidate({ stageRoot, outputRoot });
     return {
       status: "passed",
       platform: "windows-x64",
@@ -166,6 +166,37 @@ export async function assembleWindowsReleaseCandidate(options = {}) {
   }
 }
 
+export async function promoteReleaseCandidate({
+  stageRoot,
+  outputRoot,
+  renameImpl = rename,
+  rmImpl = rm,
+  statImpl = stat,
+} = {}) {
+  const stage = resolve(required(stageRoot, "release.stage_root_missing"));
+  const output = resolve(required(outputRoot, "release.output_root_missing"));
+  const backup = `${output}.previous-${randomUUID()}`;
+  const hasPrevious = (await statImpl(output).catch(() => null))?.isDirectory() === true;
+  if (hasPrevious) await renameImpl(output, backup);
+  try {
+    await renameImpl(stage, output);
+  } catch (cause) {
+    if (hasPrevious) {
+      try {
+        await renameImpl(backup, output);
+      } catch (restoreCause) {
+        const error = releaseError("release.output_restore_failed", "candidate promotion failed and previous output could not be restored");
+        error.cause = cause;
+        error.restoreCause = restoreCause;
+        error.recoveryPath = backup;
+        throw error;
+      }
+    }
+    throw cause;
+  }
+  if (hasPrevious) await rmImpl(backup, { recursive: true, force: true });
+}
+
 export async function verifyWindowsReleaseCandidate(options = {}) {
   const outputRoot = resolve(required(options.outputRoot, "release.output_root_missing"));
   const cacheRoot = resolve(required(options.cacheRoot, "release.cache_root_missing"));
@@ -184,7 +215,8 @@ export async function verifyWindowsReleaseCandidate(options = {}) {
     throw error;
   }
   const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
-  validateIdentity(manifest.release ?? {}, lock, packageJson);
+  const expectedCommit = options.expectedCommit ?? process.env.GITHUB_SHA ?? await currentCommit();
+  validateIdentity(manifest.release ?? {}, lock, packageJson, expectedCommit);
   const artifacts = (manifest.artifacts ?? []).map((entry) => ({
     id: entry.id,
     fileName: entry.fileName,
@@ -193,9 +225,20 @@ export async function verifyWindowsReleaseCandidate(options = {}) {
     distributionStatus: entry.distributionStatus,
   }));
   const byId = new Map(artifacts.map((entry) => [entry.id, entry]));
-  if (byId.size !== artifacts.length || REQUIRED_ARTIFACT_IDS.some((id) => !byId.has(id))
+  if (artifacts.length !== REQUIRED_ARTIFACT_IDS.length || byId.size !== artifacts.length
+    || REQUIRED_ARTIFACT_IDS.some((id) => !byId.has(id))
     || artifacts.some((entry) => entry.distributionStatus !== "blocked_unsigned")) {
     throw releaseError("release.candidate_inventory_invalid", "existing candidate artifact inventory is incomplete or distributable");
+  }
+  const expectedFiles = new Set([
+    ...artifacts.map((entry) => entry.fileName),
+    basename(manifestPath),
+    basename(checksumsPath),
+  ]);
+  const actualEntries = await readdir(outputRoot, { withFileTypes: true });
+  if (actualEntries.length !== expectedFiles.size
+    || actualEntries.some((entry) => !entry.isFile() || !expectedFiles.has(entry.name))) {
+    throw releaseError("release.candidate_inventory_invalid", "candidate directory contains unlisted or non-file entries");
   }
   const acquiredAssets = await dependencies.acquireReleaseAssets({
     lock,
@@ -238,6 +281,28 @@ async function verifyAcquiredAssets(lock, acquiredAssets) {
       || await sha256File(actual.path) !== locked.source.sha256) {
       throw releaseError("release.acquired_asset_mismatch", `acquired bytes do not match lock: ${locked.id}`);
     }
+  }
+}
+
+async function assertReplaceableOutputRoot(outputRoot, identity) {
+  const outputStat = await stat(outputRoot).catch(() => null);
+  if (!outputStat) return;
+  if (!outputStat.isDirectory()) {
+    throw releaseError("release.output_root_unsafe", "release output root exists and is not a directory");
+  }
+  const markerPath = join(
+    outputRoot,
+    `${identity.packageName}-${identity.version}-release-manifest.json`,
+  );
+  let marker;
+  try {
+    marker = JSON.parse(await readFile(markerPath, "utf8"));
+  } catch {
+    throw releaseError("release.output_root_unsafe", "existing output directory is not a release candidate");
+  }
+  if (marker.schemaVersion !== 1 || marker.release?.packageName !== identity.packageName
+    || marker.release?.version !== identity.version || marker.release?.platform !== identity.platform) {
+    throw releaseError("release.output_root_unsafe", "existing output directory has a different release identity");
   }
 }
 
@@ -288,10 +353,11 @@ async function currentCommit() {
   });
 }
 
-function validateIdentity(identity, lock, packageJson) {
+function validateIdentity(identity, lock, packageJson, expectedCommit) {
   if (identity.packageName !== packageJson.name || identity.version !== packageJson.version
     || identity.tag !== `v${packageJson.version}` || identity.platform !== lock.platform
-    || !/^[a-f0-9]{40}$/u.test(identity.commit ?? "")) {
+    || !/^[a-f0-9]{40}$/u.test(identity.commit ?? "")
+    || (expectedCommit !== undefined && identity.commit !== expectedCommit)) {
     throw releaseError("release.identity_invalid", "release identity does not match package and asset lock");
   }
 }

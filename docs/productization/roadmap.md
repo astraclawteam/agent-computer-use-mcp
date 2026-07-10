@@ -69,7 +69,7 @@ agent-computer-use-mcp-X.Y.Z-release-manifest.json
 agent-computer-use-mcp-X.Y.Z-checksums.txt
 ```
 
-The offline ZIP is expected to be about 455 MB for 0.0.1 and includes portable Node.js, the protected MCP runtime, NativeAOT installer, overlay, OCR runtime/model pack, cua-driver, and WebView2 installer. It installs and runs without network access or a machine-wide Node.js installation.
+The offline ZIP is expected to be about 455 MB for 0.0.1 and includes portable Node.js, the protected MCP runtime, NativeAOT installer, overlay, OCR runtime/model pack, cua-driver, WebView2 installer, release manifest, CycloneDX SBOM, and an exact internal checksum inventory. Phase 0.15 installs from bundled bytes with the installer/materializer network policy disabled and without a machine-wide Node.js installation. PR5 must repeat this on a clean runner with operating-system network isolation.
 
 The six externally locked inputs are:
 

@@ -1,5 +1,6 @@
 import { spawn } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
+import { createReadStream } from "node:fs";
 import { copyFile, cp, mkdir, readFile, readdir, rename, rm, stat, writeFile } from "node:fs/promises";
 import { dirname, join, relative, resolve } from "node:path";
 
@@ -42,6 +43,7 @@ export async function prepareWindowsOfflineAssets(options = {}) {
     expected: {
       det: { sizeBytes: det.sizeBytes, sha256: det.sha256 },
       rec: { sizeBytes: rec.sizeBytes, sha256: rec.sha256 },
+      metadata: { sizeBytes: metadata.sizeBytes, sha256: metadata.sha256 },
     },
   });
   const modelArchive = await archiveDirectory({
@@ -182,16 +184,20 @@ export async function buildWindowsOfflineBundle(options = {}) {
       startsDesktopControl: false,
       includeUserOverlay: false,
     });
+    await copyFile(join(payloadBundleRoot, "release-manifest.json"), join(contentRoot, "metadata/release-manifest.json"));
+    await copyFile(options.sbomPath, join(contentRoot, "metadata/sbom.cdx.json"));
     await mkdir(join(contentRoot, "licenses"), { recursive: true });
     await writeJson(join(contentRoot, "licenses/THIRD-PARTY-NOTICES.json"), {
       schemaVersion: 1,
       components: [...(options.licenses ?? [])].sort((left, right) => left.id.localeCompare(right.id, "en")),
     });
+    await writeInternalChecksums(contentRoot);
 
     const entries = await listRelativeFiles(contentRoot);
     const stagedZipPath = join(outputDirectory, fileName);
     await createDeterministicZip({ sourceRoot: contentRoot, outputPath: stagedZipPath, generatedAt });
-    const zipBytes = await readFile(stagedZipPath);
+    const zipStat = await stat(stagedZipPath);
+    const zipSha256 = await sha256File(stagedZipPath);
     await rm(outputRoot, { recursive: true, force: true });
     await mkdir(dirname(outputRoot), { recursive: true });
     await rename(outputDirectory, outputRoot);
@@ -202,8 +208,8 @@ export async function buildWindowsOfflineBundle(options = {}) {
       distributionStatus: "blocked_unsigned",
       outputPath: join(outputRoot, fileName),
       fileName,
-      sizeBytes: zipBytes.length,
-      sha256: sha256(zipBytes),
+      sizeBytes: zipStat.size,
+      sha256: zipSha256,
       entries,
       assetCount: options.assets.length,
       firstEnableDownloadCount: 0,
@@ -213,6 +219,42 @@ export async function buildWindowsOfflineBundle(options = {}) {
   } finally {
     await rm(stageRoot, { recursive: true, force: true });
   }
+}
+
+export async function verifyWindowsOfflineBundleContents(root) {
+  const contentRoot = resolve(required(root, "release.offline_root_missing"));
+  const checksumPath = join(contentRoot, "metadata/checksums.txt");
+  const checksums = new Map();
+  let text;
+  try {
+    text = await readFile(checksumPath, "utf8");
+  } catch {
+    throw releaseError("release.offline_contents_invalid", "Offline bundle checksums are missing");
+  }
+  if (text.includes("\r") || !text.endsWith("\n")) {
+    throw releaseError("release.offline_contents_invalid", "Offline bundle checksums use an invalid format");
+  }
+  for (const line of text.slice(0, -1).split("\n")) {
+    const match = /^([a-f0-9]{64})  ([^\\\r\n]+)$/u.exec(line);
+    const path = match?.[2];
+    if (!path || path.startsWith("/") || path.split("/").some((segment) => segment === "" || segment === "." || segment === "..")
+      || path === "metadata/checksums.txt" || checksums.has(path)) {
+      throw releaseError("release.offline_contents_invalid", "Offline bundle checksums contain an invalid path");
+    }
+    checksums.set(path, match[1]);
+  }
+
+  const actualPaths = (await listRelativeFiles(contentRoot))
+    .filter((path) => path !== "metadata/checksums.txt");
+  if (actualPaths.length !== checksums.size || actualPaths.some((path) => !checksums.has(path))) {
+    throw releaseError("release.offline_contents_invalid", "Offline bundle file inventory does not match checksums");
+  }
+  for (const path of actualPaths) {
+    if (await sha256File(join(contentRoot, ...path.split("/"))) !== checksums.get(path)) {
+      throw releaseError("release.offline_contents_invalid", `Offline bundle file hash does not match: ${path}`);
+    }
+  }
+  return { status: "passed", fileCount: actualPaths.length };
 }
 
 export async function createDeterministicZip({ sourceRoot, outputPath, generatedAt }) {
@@ -232,8 +274,8 @@ export async function createDeterministicZip({ sourceRoot, outputPath, generated
 
 async function archiveDirectory({ id, sourceRoot, outputPath, generatedAt }) {
   await createDeterministicZip({ sourceRoot, outputPath, generatedAt });
-  const bytes = await readFile(outputPath);
-  return { id, path: outputPath, sizeBytes: bytes.length, sha256: sha256(bytes) };
+  const fileStat = await stat(outputPath);
+  return { id, path: outputPath, sizeBytes: fileStat.size, sha256: await sha256File(outputPath) };
 }
 
 function archiveAssetDefinition({
@@ -310,6 +352,14 @@ async function validateInputs(options) {
       throw releaseError("release.offline_bundle_incomplete", "Candidate trust file is missing");
     }
   }
+  const sbomStat = options.sbomPath ? await stat(options.sbomPath).catch(() => null) : null;
+  if (!sbomStat?.isFile()) {
+    throw releaseError("release.offline_bundle_incomplete", "Release SBOM is missing");
+  }
+  const sbom = JSON.parse(await readFile(options.sbomPath, "utf8"));
+  if (sbom.bomFormat !== "CycloneDX") {
+    throw releaseError("release.offline_bundle_incomplete", "Release SBOM is not CycloneDX");
+  }
   const manifest = JSON.parse(await readFile(options.trust.manifestPath, "utf8"));
   if (manifest.developmentOnly !== true) {
     throw releaseError("release.offline_bundle_incomplete", "PR4 candidate trust must be development-only");
@@ -333,6 +383,26 @@ async function listRelativeFiles(root) {
 
 async function writeJson(path, value) {
   await writeFile(path, `${JSON.stringify(value, null, 2)}\n`, "utf8");
+}
+
+async function writeInternalChecksums(contentRoot) {
+  const paths = (await listRelativeFiles(contentRoot))
+    .filter((path) => path !== "metadata/checksums.txt");
+  const lines = [];
+  for (const path of paths) {
+    lines.push(`${await sha256File(join(contentRoot, ...path.split("/")))}  ${path}`);
+  }
+  await writeFile(join(contentRoot, "metadata/checksums.txt"), `${lines.join("\n")}\n`, "utf8");
+}
+
+function sha256File(path) {
+  return new Promise((resolvePromise, reject) => {
+    const hash = createHash("sha256");
+    const stream = createReadStream(path);
+    stream.on("data", (chunk) => hash.update(chunk));
+    stream.on("error", reject);
+    stream.on("end", () => resolvePromise(hash.digest("hex")));
+  });
 }
 
 function runCommand(command, args) {

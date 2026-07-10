@@ -17,15 +17,23 @@ test("release SBOM combines locked native assets with production npm components"
   const root = await fixtureRoot();
   const lock = releaseLock();
   const overlayBytes = Buffer.from("overlay", "utf8");
+  const installerBytes = Buffer.from("installer", "utf8");
   const report = await buildReleaseSbom({
     outputPath: join(root, "sbom.cdx.json"),
     lock,
     payloadReport: {
-      files: [{
-        path: "helpers/overlay/GatewayComputerUseOverlay.exe",
-        bytes: overlayBytes.length,
-        sha256: sha256(overlayBytes),
-      }],
+      files: [
+        {
+          path: "helpers/overlay/GatewayComputerUseOverlay.exe",
+          bytes: overlayBytes.length,
+          sha256: sha256(overlayBytes),
+        },
+        {
+          path: "bin/AgentComputerUse.Installer.exe",
+          bytes: installerBytes.length,
+          sha256: sha256(installerBytes),
+        },
+      ],
     },
     baseSbom: {
       bomFormat: "CycloneDX",
@@ -50,6 +58,7 @@ test("release SBOM combines locked native assets with production npm components"
   ]);
   for (const id of [
     "agent-computer-use-mcp",
+    "agent-computer-use-installer-windows-x64",
     "node-runtime-windows-x64",
     "cua-driver-windows-x64",
     "gateway-overlay-windows-x64",
@@ -92,15 +101,23 @@ test("release SBOM fails closed when a required production component is absent",
 test("release SBOM invokes the installed npm CLI without a shell", async () => {
   const root = await fixtureRoot();
   const overlayBytes = Buffer.from("overlay", "utf8");
+  const installerBytes = Buffer.from("installer", "utf8");
   const report = await buildReleaseSbom({
     outputPath: join(root, "npm-sbom.cdx.json"),
     lock: releaseLock(),
     payloadReport: {
-      files: [{
-        path: "helpers/overlay/GatewayComputerUseOverlay.exe",
-        bytes: overlayBytes.length,
-        sha256: sha256(overlayBytes),
-      }],
+      files: [
+        {
+          path: "helpers/overlay/GatewayComputerUseOverlay.exe",
+          bytes: overlayBytes.length,
+          sha256: sha256(overlayBytes),
+        },
+        {
+          path: "bin/AgentComputerUse.Installer.exe",
+          bytes: installerBytes.length,
+          sha256: sha256(installerBytes),
+        },
+      ],
     },
     projectRoot: resolve("."),
   });

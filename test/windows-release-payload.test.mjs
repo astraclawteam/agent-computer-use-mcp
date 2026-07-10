@@ -61,13 +61,18 @@ test("verified ZIP expansion rejects path traversal before writing", async (t) =
   if (process.platform !== "win32") return t.skip("Windows ZIP expansion requires PowerShell");
   const root = await fixtureRoot();
   const archivePath = join(root, "unsafe.zip");
-  await createZip(archivePath, [{ path: "../escape.txt", contents: "blocked" }]);
+  const destinationPath = join(root, "expanded");
+  await createZip(archivePath, [
+    { path: "safe.txt", contents: "must-not-survive" },
+    { path: "../escape.txt", contents: "blocked" },
+  ]);
 
   await assert.rejects(
-    () => expandVerifiedZip({ archivePath, destinationPath: join(root, "expanded") }),
+    () => expandVerifiedZip({ archivePath, destinationPath }),
     (error) => error?.code === "release.zip_entry_invalid",
   );
   assert.equal(await exists(join(root, "escape.txt")), false);
+  assert.equal(await exists(join(destinationPath, "safe.txt")), false);
 });
 
 async function fixtureRoot() {

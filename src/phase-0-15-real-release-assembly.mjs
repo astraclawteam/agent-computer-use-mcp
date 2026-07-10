@@ -8,6 +8,8 @@ import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js"
 
 import { verifyReleaseBundle } from "./release-bundle.mjs";
 import { verifyReleaseOutputs } from "./release-output-manifest.mjs";
+import { PP_OCRV6_SMALL_MODEL_PACK } from "./ocr-model-pack.mjs";
+import { verifyWindowsOfflineBundleContents } from "./windows-offline-bundle.mjs";
 import {
   assembleWindowsReleaseCandidate,
   verifyWindowsReleaseCandidate,
@@ -17,6 +19,7 @@ import { runWindowsInstaller } from "./windows-installer-host.mjs";
 
 const REQUIRED_SBOM_COMPONENTS = new Set([
   "agent-computer-use-mcp",
+  "agent-computer-use-installer-windows-x64",
   "node-runtime-windows-x64",
   "cua-driver-windows-x64",
   "gateway-overlay-windows-x64",
@@ -25,6 +28,7 @@ const REQUIRED_SBOM_COMPONENTS = new Set([
   "ocr-model-pp-ocrv6-small-rec",
   "webview2-evergreen-standalone-windows-x64",
 ]);
+const MCP_SMOKE_TIMEOUT_MS = 15_000;
 
 export async function runRealReleaseAssemblyPhase(options = {}) {
   const packageJson = JSON.parse(await readFile("package.json", "utf8"));
@@ -49,10 +53,12 @@ export async function runRealReleaseAssemblyPhase(options = {}) {
     const expandedRoot = join(workRoot, "offline");
     await expandVerifiedZip({ archivePath: offline.path, destinationPath: expandedRoot });
     const releaseVerification = await verifyReleaseBundle({ bundleRoot: join(expandedRoot, "release") });
-    const offlineBundleVerified = await requiredOfflineEntriesPresent(expandedRoot);
+    const offlineContents = await verifyWindowsOfflineBundleContents(expandedRoot);
+    const offlineBundleVerified = offlineContents.status === "passed" && await requiredOfflineEntriesPresent(expandedRoot);
 
-    const programRoot = join(workRoot, "program");
-    const dataRoot = join(workRoot, "data");
+    const localAppData = join(workRoot, "local-app-data");
+    const programRoot = join(localAppData, "Programs", "AgentComputerUse");
+    const dataRoot = join(localAppData, "AgentComputerUse");
     const installerPath = join(expandedRoot, "installer", "AgentComputerUse.Installer.exe");
     const install = await runWindowsInstaller("install", {
       installerPath,
@@ -92,14 +98,10 @@ export async function runRealReleaseAssemblyPhase(options = {}) {
 
     const activePayloadRoot = install.report.activePayloadRoot;
     const runtime = JSON.parse(await readFile(join(activePayloadRoot, "runtime-entrypoints.json"), "utf8"));
-    const mcpSmoke = await smokeInstalledMcp({ activePayloadRoot, runtime });
+    const mcpSmoke = await smokeInstalledMcp({ activePayloadRoot, runtime, localAppData });
     const model = activated.report.assets.find((asset) => asset.id === "ocr-model-pp-ocrv6-small");
     const webView = activated.report.assets.find((asset) => asset.id === "webview2-evergreen-standalone-windows-x64");
-    const ocrModelPackPresent = await assetFilesPresent(model, [
-      "PP-OCRv6_det_small.onnx",
-      "PP-OCRv6_rec_small.onnx",
-      "ppocrv6_dict.txt",
-    ]);
+    const ocrModelPackPresent = await assetFilesPresent(model, PP_OCRV6_SMALL_MODEL_PACK.files);
     const webView2InstallerPresent = await assetFilesPresent(webView, ["MicrosoftEdgeWebView2RuntimeInstallerX64.exe"]);
     const sbomVerified = await verifySbom(requiredArtifact(assembly, "release-sbom").path);
 
@@ -122,9 +124,12 @@ export async function runRealReleaseAssemblyPhase(options = {}) {
       realAssetBytesVerified: assembly.realAssetBytesVerified === true,
       releaseBundleVerified: releaseVerification.status === "ready",
       offlineBundleVerified,
+      offlineVerifiedFileCount: offlineContents.fileCount,
       installerAppliedRelease: install.report.status === "installed",
       assetsPreparedAndActivatedOffline: prepared.report.status === "prepared" && activated.report.status === "activated",
       standardMcpSmokePassed: mcpSmoke.status === "passed",
+      activatedDriverResolvedByMcp: mcpSmoke.activatedDriverResolved,
+      mcpDeadlineMs: MCP_SMOKE_TIMEOUT_MS,
       ocrModelPackPresent,
       webView2InstallerPresent,
       checksumsVerified,
@@ -140,7 +145,7 @@ export async function runRealReleaseAssemblyPhase(options = {}) {
   }
 }
 
-async function smokeInstalledMcp({ activePayloadRoot, runtime }) {
+async function smokeInstalledMcp({ activePayloadRoot, runtime, localAppData }) {
   const nodePath = join(activePayloadRoot, ...runtime.mcp.command.split("/"));
   const launcherPath = join(activePayloadRoot, ...runtime.mcp.args[0].split("/"));
   const packageRoot = join(activePayloadRoot, "package");
@@ -155,16 +160,31 @@ async function smokeInstalledMcp({ activePayloadRoot, runtime }) {
     command: nodePath,
     args: [launcherPath],
     cwd: packageRoot,
+    env: childEnvironment({ LOCALAPPDATA: localAppData }),
   });
   try {
-    await client.connect(transport);
-    const tools = await client.listTools();
-    const health = await client.callTool({ name: "computer.health", arguments: { fast: true } });
+    await client.connect(transport, requestOptions());
+    const tools = await client.listTools(undefined, requestOptions());
+    const health = await client.callTool(
+      { name: "computer.health", arguments: { fast: true } },
+      undefined,
+      requestOptions(),
+    );
+    const doctor = await client.callTool(
+      { name: "computer.doctor", arguments: { fast: true } },
+      undefined,
+      requestOptions(),
+    );
+    const activatedDriverResolved = doctor.structuredContent?.installCache?.assets?.some((asset) => (
+      asset.id === "cua-driver-windows-x64" && asset.status === "healthy"
+    )) === true;
     return {
-      status: !health.isError && tools.tools.some((tool) => tool.name === "computer.health") ? "passed" : "failed",
+      status: !health.isError && !doctor.isError && activatedDriverResolved
+        && tools.tools.some((tool) => tool.name === "computer.health") ? "passed" : "failed",
+      activatedDriverResolved,
     };
   } finally {
-    await client.close();
+    await closeMcpClient(client, transport);
   }
 }
 
@@ -179,16 +199,50 @@ async function requiredOfflineEntriesPresent(root) {
     "trust/asset-manifest.sig",
     "trust/keyring.json",
     "metadata/candidate.json",
+    "metadata/release-manifest.json",
+    "metadata/sbom.cdx.json",
+    "metadata/checksums.txt",
     "licenses/THIRD-PARTY-NOTICES.json",
   ];
   return (await Promise.all(paths.map(async (path) => (await stat(join(root, ...path.split("/"))).catch(() => null))?.isFile() === true)))
     .every(Boolean);
 }
 
+function requestOptions() {
+  return { timeout: MCP_SMOKE_TIMEOUT_MS, maxTotalTimeout: MCP_SMOKE_TIMEOUT_MS };
+}
+
+function childEnvironment(overrides) {
+  return Object.fromEntries(
+    Object.entries({ ...process.env, ...overrides }).filter(([, value]) => typeof value === "string"),
+  );
+}
+
+async function closeMcpClient(client, transport) {
+  let timer;
+  try {
+    await Promise.race([
+      client.close(),
+      new Promise((_, reject) => {
+        timer = setTimeout(() => reject(new Error("release.mcp_close_timeout")), MCP_SMOKE_TIMEOUT_MS);
+      }),
+    ]);
+  } catch {
+    await transport.close().catch(() => {});
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 async function assetFilesPresent(asset, expectedNames) {
   if (!asset || !(await stat(asset.entryPoint).catch(() => null))?.isFile()) return false;
-  const names = new Set(asset.files.map((file) => file.path.replaceAll("\\", "/").split("/").at(-1)));
-  if (!expectedNames.every((name) => names.has(name))) return false;
+  const filesByName = new Map(asset.files.map((file) => [file.path.replaceAll("\\", "/").split("/").at(-1), file]));
+  for (const expected of expectedNames) {
+    const definition = typeof expected === "string" ? { path: expected } : expected;
+    const actual = filesByName.get(definition.path);
+    if (!actual || (definition.sizeBytes !== undefined && actual.sizeBytes !== definition.sizeBytes)
+      || (definition.sha256 !== undefined && actual.sha256 !== definition.sha256)) return false;
+  }
   return (await Promise.all(asset.files.map(async (file) => (
     await stat(join(asset.root, ...file.path.replaceAll("\\", "/").split("/"))).catch(() => null)
   )?.isFile() === true)))

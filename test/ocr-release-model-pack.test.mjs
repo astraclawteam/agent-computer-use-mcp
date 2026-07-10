@@ -24,10 +24,11 @@ test("official PP-OCRv6 metadata becomes the exact ONNX sidecar model pack", asy
   const characters = Array.from({ length: 18_708 }, (_, index) => `c${index}`);
   await writeFile(detPath, detBytes);
   await writeFile(recPath, recBytes);
-  await writeFile(metadataPath, stringify({
+  const metadataBytes = Buffer.from(stringify({
     Global: { model_name: "PP-OCRv6_small_rec" },
     PostProcess: { name: "CTCLabelDecode", character_dict: characters },
   }), "utf8");
+  await writeFile(metadataPath, metadataBytes);
 
   const report = await buildPpOcrV6SmallPack({
     detPath,
@@ -37,6 +38,7 @@ test("official PP-OCRv6 metadata becomes the exact ONNX sidecar model pack", asy
     expected: {
       det: identity(detBytes),
       rec: identity(recBytes),
+      metadata: identity(metadataBytes),
     },
   });
 
@@ -65,7 +67,8 @@ test("PP-OCRv6 release pack rejects metadata and ONNX identity mismatches", asyn
   const recBytes = Buffer.from("rec", "utf8");
   await writeFile(detPath, detBytes);
   await writeFile(recPath, recBytes);
-  await writeFile(metadataPath, stringify({ PostProcess: { name: "WrongDecoder", character_dict: ["A"] } }));
+  const invalidMetadata = Buffer.from(stringify({ PostProcess: { name: "WrongDecoder", character_dict: ["A"] } }));
+  await writeFile(metadataPath, invalidMetadata);
 
   await assert.rejects(
     () => buildPpOcrV6SmallPack({
@@ -73,21 +76,33 @@ test("PP-OCRv6 release pack rejects metadata and ONNX identity mismatches", asyn
       recPath,
       metadataPath,
       outputRoot: join(root, "bad-metadata"),
-      expected: { det: identity(detBytes), rec: identity(recBytes) },
+      expected: { det: identity(detBytes), rec: identity(recBytes), metadata: identity(invalidMetadata) },
     }),
     (error) => error?.code === "release.ocr_metadata_invalid",
   );
 
-  await writeFile(metadataPath, stringify({ PostProcess: { name: "CTCLabelDecode", character_dict: ["A"] } }));
+  const validMetadata = Buffer.from(stringify({ PostProcess: { name: "CTCLabelDecode", character_dict: ["A"] } }));
+  await writeFile(metadataPath, validMetadata);
   await assert.rejects(
     () => buildPpOcrV6SmallPack({
       detPath,
       recPath,
       metadataPath,
       outputRoot: join(root, "bad-hash"),
-      expected: { det: { ...identity(detBytes), sha256: "0".repeat(64) }, rec: identity(recBytes) },
+      expected: { det: { ...identity(detBytes), sha256: "0".repeat(64) }, rec: identity(recBytes), metadata: identity(validMetadata) },
     }),
     (error) => error?.code === "release.ocr_model_identity_mismatch",
+  );
+
+  await assert.rejects(
+    () => buildPpOcrV6SmallPack({
+      detPath,
+      recPath,
+      metadataPath,
+      outputRoot: join(root, "bad-metadata-hash"),
+      expected: { det: identity(detBytes), rec: identity(recBytes), metadata: { ...identity(validMetadata), sha256: "f".repeat(64) } },
+    }),
+    (error) => error?.code === "release.ocr_metadata_identity_mismatch",
   );
 });
 

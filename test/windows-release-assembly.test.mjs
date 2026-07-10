@@ -1,12 +1,13 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, rename, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { afterEach, test } from "node:test";
 
 import {
   assembleWindowsReleaseCandidate,
+  promoteReleaseCandidate,
   verifyWindowsReleaseCandidate,
 } from "../src/windows-release-assembly.mjs";
 
@@ -29,7 +30,7 @@ test("Windows release assembly executes verified stages and atomically promotes 
     dependencies: fixture.dependencies(calls),
   });
 
-  assert.deepEqual(calls, ["acquire", "payload", "prepare-assets", "offline-bundle", "npm-pack", "sbom"]);
+  assert.deepEqual(calls, ["acquire", "payload", "sbom", "prepare-assets", "offline-bundle", "npm-pack"]);
   assert.equal(report.status, "passed");
   assert.equal(report.platform, "windows-x64");
   assert.equal(report.installable, true);
@@ -48,6 +49,11 @@ test("Windows release assembly preserves the previous candidate and cleans stagi
   const fixture = await createFixture();
   await mkdir(fixture.outputRoot, { recursive: true });
   await writeFile(join(fixture.outputRoot, "previous.txt"), "previous", "utf8");
+  await writeFile(
+    join(fixture.outputRoot, "agent-computer-use-mcp-0.0.1-release-manifest.json"),
+    JSON.stringify({ schemaVersion: 1, release: fixture.identity, artifacts: [] }),
+    "utf8",
+  );
 
   await assert.rejects(
     () => assembleWindowsReleaseCandidate({
@@ -115,6 +121,7 @@ test("verified Windows candidate can be reopened without rebuilding release stag
     cacheRoot: join(fixture.root, "cache"),
     lock: fixture.lock,
     packageJson: { name: fixture.identity.packageName, version: fixture.identity.version },
+    expectedCommit: fixture.identity.commit,
     dependencies: reopenedDependencies,
   });
 
@@ -122,6 +129,108 @@ test("verified Windows candidate can be reopened without rebuilding release stag
   assert.equal(report.realAssetBytesVerified, true);
   assert.equal(report.artifacts.length, 7);
   assert.deepEqual(calls, ["acquire"]);
+});
+
+test("Windows candidate verification rejects output from a different commit", async () => {
+  const fixture = await createFixture();
+  await assembleWindowsReleaseCandidate({
+    outputRoot: fixture.outputRoot,
+    cacheRoot: join(fixture.root, "cache"),
+    allowNetwork: false,
+    generatedAt: "2026-07-10T00:00:00.000Z",
+    lock: fixture.lock,
+    identity: fixture.identity,
+    dependencies: fixture.dependencies([]),
+  });
+
+  await assert.rejects(
+    () => verifyWindowsReleaseCandidate({
+      outputRoot: fixture.outputRoot,
+      cacheRoot: join(fixture.root, "cache"),
+      lock: fixture.lock,
+      packageJson: { name: fixture.identity.packageName, version: fixture.identity.version },
+      expectedCommit: "b".repeat(40),
+      dependencies: fixture.dependencies([]),
+    }),
+    (error) => error?.code === "release.identity_invalid",
+  );
+});
+
+test("Windows candidate verification rejects files outside the release inventory", async () => {
+  const fixture = await createFixture();
+  await assembleWindowsReleaseCandidate({
+    outputRoot: fixture.outputRoot,
+    cacheRoot: join(fixture.root, "cache"),
+    allowNetwork: false,
+    generatedAt: "2026-07-10T00:00:00.000Z",
+    lock: fixture.lock,
+    identity: fixture.identity,
+    dependencies: fixture.dependencies([]),
+  });
+  await writeFile(join(fixture.outputRoot, "untracked.exe"), "untracked", "utf8");
+
+  await assert.rejects(
+    () => verifyWindowsReleaseCandidate({
+      outputRoot: fixture.outputRoot,
+      cacheRoot: join(fixture.root, "cache"),
+      lock: fixture.lock,
+      packageJson: { name: fixture.identity.packageName, version: fixture.identity.version },
+      expectedCommit: fixture.identity.commit,
+      dependencies: fixture.dependencies([]),
+    }),
+    (error) => error?.code === "release.candidate_inventory_invalid",
+  );
+});
+
+test("Windows release assembly refuses to replace an unrelated output directory", async () => {
+  const fixture = await createFixture();
+  await mkdir(fixture.outputRoot, { recursive: true });
+  const markerPath = join(fixture.outputRoot, "unrelated.txt");
+  await writeFile(markerPath, "keep", "utf8");
+
+  await assert.rejects(
+    () => assembleWindowsReleaseCandidate({
+      outputRoot: fixture.outputRoot,
+      cacheRoot: join(fixture.root, "cache"),
+      allowNetwork: false,
+      generatedAt: "2026-07-10T00:00:00.000Z",
+      lock: fixture.lock,
+      identity: fixture.identity,
+      dependencies: fixture.dependencies([]),
+    }),
+    (error) => error?.code === "release.output_root_unsafe",
+  );
+
+  assert.equal(await readFile(markerPath, "utf8"), "keep");
+});
+
+test("candidate promotion restores the previous output when the final rename fails", async () => {
+  const root = await mkdtemp(join(tmpdir(), "agent-release-promotion-"));
+  roots.push(root);
+  const outputRoot = join(root, "candidate");
+  const stageRoot = join(root, "candidate.staging");
+  await writeFixture(join(outputRoot, "old.txt"), "old");
+  await writeFixture(join(stageRoot, "new.txt"), "new");
+
+  await assert.rejects(
+    () => promoteReleaseCandidate({
+      outputRoot,
+      stageRoot,
+      async renameImpl(source, destination) {
+        if (source === stageRoot && destination === outputRoot) {
+          const error = new Error("simulated promotion failure");
+          error.code = "EACCES";
+          throw error;
+        }
+        await rename(source, destination);
+      },
+    }),
+    (error) => error?.code === "EACCES",
+  );
+
+  assert.equal(await readFile(join(outputRoot, "old.txt"), "utf8"), "old");
+  assert.equal(await readFile(join(stageRoot, "new.txt"), "utf8"), "new");
+  assert.deepEqual((await readdir(root)).filter((entry) => entry.includes(".previous-")), []);
 });
 
 async function createFixture() {

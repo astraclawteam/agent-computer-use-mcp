@@ -53,7 +53,7 @@ Example MCP client config:
 - `npm run phase:0.14`: build, integrity-check, MCP-smoke, and pack the protected npm release.
 - `npm run release:windows:assets`: acquire and hash-verify the six locked Windows x64 release inputs.
 - `npm run release:windows:assemble`: build the real `blocked_unsigned` candidate under `artifacts/windows-release/<version>/`.
-- `npm run phase:0.15`: reverify, install, activate, and standard-MCP-smoke the real candidate with network disabled during installation.
+- `npm run phase:0.15`: reverify the outer and inner release inventories, install and activate from bundled bytes with installer network access disabled, resolve the active cua-driver, and standard-MCP-smoke the real candidate.
 - `npm run release:npm:build`: create release-only staging with bundled, minified, obfuscated runtime files and no Source Maps.
 - `npm run release:npm:smoke`: verify SHA-256 and exercise the protected runtime with the official MCP SDK.
 - `npm run release:npm:pack`: create the publish-ready tarball under ignored `artifacts/npm-release/`.

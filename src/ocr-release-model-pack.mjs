@@ -14,8 +14,9 @@ export async function buildPpOcrV6SmallPack(options = {}) {
   const detPath = resolve(required(options.detPath, "release.ocr_det_missing"));
   const recPath = resolve(required(options.recPath, "release.ocr_rec_missing"));
   const metadataPath = resolve(required(options.metadataPath, "release.ocr_metadata_missing"));
-  await verifyIdentity(detPath, options.expected?.det);
-  await verifyIdentity(recPath, options.expected?.rec);
+  await verifyIdentity(detPath, options.expected?.det, "release.ocr_model_identity_mismatch");
+  await verifyIdentity(recPath, options.expected?.rec, "release.ocr_model_identity_mismatch");
+  await verifyIdentity(metadataPath, options.expected?.metadata, "release.ocr_metadata_identity_mismatch");
 
   let metadata;
   try {
@@ -76,16 +77,16 @@ export async function buildPpOcrV6SmallPack(options = {}) {
   }
 }
 
-async function verifyIdentity(path, expected) {
+async function verifyIdentity(path, expected, code) {
   if (!expected || !Number.isSafeInteger(expected.sizeBytes) || !/^[a-f0-9]{64}$/.test(expected.sha256 ?? "")) {
-    throw releaseError("release.ocr_model_identity_mismatch", "Expected OCR model identity is missing");
+    throw releaseError(code, "Expected OCR input identity is missing");
   }
   const fileStat = await stat(path).catch(() => null);
   if (!fileStat?.isFile() || fileStat.size !== expected.sizeBytes) {
-    throw releaseError("release.ocr_model_identity_mismatch", "OCR model size does not match lock");
+    throw releaseError(code, "OCR input size does not match lock");
   }
   if (sha256(await readFile(path)) !== expected.sha256) {
-    throw releaseError("release.ocr_model_identity_mismatch", "OCR model hash does not match lock");
+    throw releaseError(code, "OCR input hash does not match lock");
   }
 }
 

@@ -18,7 +18,9 @@ if (Test-Path -LiteralPath $destinationFullPath) {
 
 $stream = [IO.File]::OpenRead($archiveFullPath)
 $archive = [IO.Compression.ZipArchive]::new($stream, [IO.Compression.ZipArchiveMode]::Read, $false)
+$succeeded = $false
 try {
+    # Validate the complete central directory before creating any archive entry.
     foreach ($entry in $archive.Entries) {
         $name = $entry.FullName.Replace('\', '/')
         $segments = $name.TrimEnd('/').Split('/')
@@ -41,6 +43,12 @@ try {
         if (-not $target.StartsWith($destinationPrefix, [StringComparison]::OrdinalIgnoreCase)) {
             throw "release.zip_entry_invalid: escape $name"
         }
+    }
+
+    foreach ($entry in $archive.Entries) {
+        $name = $entry.FullName.Replace('\', '/')
+        $target = [IO.Path]::GetFullPath([IO.Path]::Combine($destinationFullPath, $name.Replace('/', [IO.Path]::DirectorySeparatorChar)))
+        $isDirectory = $name.EndsWith('/')
         if ($isDirectory) {
             [IO.Directory]::CreateDirectory($target) | Out-Null
             continue
@@ -57,8 +65,12 @@ try {
             $source.Dispose()
         }
     }
+    $succeeded = $true
 }
 finally {
     $archive.Dispose()
     $stream.Dispose()
+    if (-not $succeeded -and (Test-Path -LiteralPath $destinationFullPath)) {
+        Remove-Item -LiteralPath $destinationFullPath -Recurse -Force
+    }
 }

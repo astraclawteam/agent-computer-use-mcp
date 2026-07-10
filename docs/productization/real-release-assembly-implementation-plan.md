@@ -374,6 +374,7 @@ Required component IDs:
 
 ```text
 agent-computer-use-mcp
+agent-computer-use-installer-windows-x64
 node-runtime-windows-x64
 cua-driver-windows-x64
 gateway-overlay-windows-x64
@@ -482,7 +483,7 @@ Expected: FAIL because orchestration and Phase 0.15 are absent.
 
 - [x] **Step 4: Implement atomic assembly**
 
-Assemble under `<output>.staging-<uuid>`, verify every output, remove any previous candidate output, and atomically rename only after all stages pass. The candidate command uses the real checked-in asset lock and defaults to network acquisition during assembly.
+Assemble under `<output>.staging-<uuid>`, verify every output, move a recognized previous candidate aside, atomically promote only after all stages pass, and restore the previous candidate if promotion fails. Refuse to replace an unrelated directory. The candidate command uses the real checked-in asset lock and defaults to network acquisition during assembly.
 
 The phase gate then creates temporary program/data roots and, with network disabled:
 
@@ -490,9 +491,10 @@ The phase gate then creates temporary program/data roots and, with network disab
 2. prepares and activates all asset views from the offline bundle through the native installer;
 3. launches the installed portable Node plus protected launcher;
 4. connects with the official MCP SDK;
-5. initializes, lists tools, and calls `computer.health({fast:true})`;
-6. confirms active driver, overlay, model pack, WebView2 installer, hashes, and runtime entrypoints resolve inside temporary installed roots;
-7. closes the client and removes all temporary roots.
+5. initializes, lists tools, calls `computer.health({fast:true})`, and uses `computer.doctor({fast:true})` to resolve the activated cua-driver;
+6. verifies the offline ZIP's exact internal file inventory and every SHA-256 from `metadata/checksums.txt`.
+7. confirms active driver, overlay, model pack, WebView2 installer, hashes, and runtime entrypoints resolve inside temporary installed roots;
+8. closes the client and removes all temporary roots.
 
 - [x] **Step 5: Run focused tests and the real candidate gate**
 
@@ -504,7 +506,7 @@ npm run release:windows:assemble
 npm run phase:0.15
 ```
 
-Expected: all commands exit `0`; the real candidate is built from six locked upstream assets; the offline install phase performs no network calls.
+Expected: all commands exit `0`; the real candidate is built from six locked upstream assets; the NativeAOT install and asset-preparation path is invoked with network disabled. PR5 adds clean-runner operating-system network isolation as independent release evidence.
 
 - [x] **Step 6: Commit**
 
@@ -595,7 +597,7 @@ Review must explicitly confirm:
 - real locked bytes were acquired and hashed;
 - official PaddlePaddle PP-OCRv6 small ONNX models, not ppu `.ort` defaults, are in the candidate;
 - the installed MCP process uses portable Node and protected `dist` only;
-- the offline install smoke ran with no network and no preinstalled Node dependency;
+- the offline install smoke used only bundled bytes, set the installer/materializer network policy to disabled, and had no preinstalled Node dependency;
 - candidate Authenticode remains unsigned and distribution-blocked;
 - no development key, generated binary, model, cache, or local path is committed;
 - overlay exclusion remains intact;

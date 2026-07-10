@@ -8,7 +8,9 @@ import { afterEach, test } from "node:test";
 import {
   buildWindowsOfflineBundle,
   prepareWindowsOfflineAssets,
+  verifyWindowsOfflineBundleContents,
 } from "../src/windows-offline-bundle.mjs";
+import { expandVerifiedZip } from "../src/windows-release-payload.mjs";
 
 const roots = [];
 
@@ -46,10 +48,51 @@ test("Windows offline bundle is deterministic complete and distribution-blocked"
   assert.ok(first.entries.includes("trust/asset-manifest.json"));
   assert.ok(first.entries.includes("trust/asset-manifest.sig"));
   assert.ok(first.entries.includes("trust/keyring.json"));
+  assert.ok(first.entries.includes("metadata/release-manifest.json"));
+  assert.ok(first.entries.includes("metadata/sbom.cdx.json"));
+  assert.ok(first.entries.includes("metadata/checksums.txt"));
   for (const asset of fixture.assets) {
     assert.ok(first.entries.includes(`assets/blobs/sha256/${asset.sha256}`));
   }
   assert.equal(JSON.parse(await readFile(fixture.trust.manifestPath, "utf8")).developmentOnly, true);
+  const expanded = join(root, "expanded");
+  await expandVerifiedZip({ archivePath: first.outputPath, destinationPath: expanded });
+  assert.equal(
+    await readFile(join(expanded, "metadata/release-manifest.json"), "utf8"),
+    await readFile(join(fixture.payloadBundleRoot, "release-manifest.json"), "utf8"),
+  );
+  assert.equal(await readFile(join(expanded, "metadata/sbom.cdx.json"), "utf8"), await readFile(fixture.sbomPath, "utf8"));
+  const internalChecksums = await readFile(join(expanded, "metadata/checksums.txt"), "utf8");
+  assert.equal(internalChecksums.includes("\r"), false);
+  assert.match(internalChecksums, /^[a-f0-9]{64}  metadata\/release-manifest\.json$/mu);
+  assert.match(internalChecksums, /^[a-f0-9]{64}  metadata\/sbom\.cdx\.json$/mu);
+  assert.equal((await verifyWindowsOfflineBundleContents(expanded)).status, "passed");
+});
+
+test("Windows offline bundle verification rejects changed and unlisted files", async () => {
+  const root = await fixtureRoot();
+  const fixture = await offlineFixture(root);
+  const bundle = await buildWindowsOfflineBundle({
+    ...fixture,
+    outputRoot: join(root, "verified"),
+    generatedAt: "2026-07-10T00:00:00.000Z",
+  });
+  const expanded = join(root, "expanded-tamper");
+  await expandVerifiedZip({ archivePath: bundle.outputPath, destinationPath: expanded });
+
+  await writeFile(join(expanded, "metadata/candidate.json"), "tampered\n", "utf8");
+  await assert.rejects(
+    () => verifyWindowsOfflineBundleContents(expanded),
+    (error) => error?.code === "release.offline_contents_invalid",
+  );
+
+  const clean = join(root, "expanded-extra");
+  await expandVerifiedZip({ archivePath: bundle.outputPath, destinationPath: clean });
+  await writeFile(join(clean, "unexpected.txt"), "unlisted\n", "utf8");
+  await assert.rejects(
+    () => verifyWindowsOfflineBundleContents(clean),
+    (error) => error?.code === "release.offline_contents_invalid",
+  );
 });
 
 test("Windows offline bundle fails closed when a required runtime or asset is absent", async () => {
@@ -140,6 +183,7 @@ async function offlineFixture(root) {
   const payloadBundleRoot = join(root, "release");
   await restorePayloadFixture(payloadBundleRoot);
   const trustRoot = join(root, "trust-source");
+  const sbomPath = await fixtureFile(root, "evidence/sbom.cdx.json", "{\"bomFormat\":\"CycloneDX\"}\n");
   const trust = {
     manifestPath: await fixtureFile(trustRoot, "asset-manifest.json", JSON.stringify({ developmentOnly: true })),
     signaturePath: await fixtureFile(trustRoot, "asset-manifest.sig", "candidate-signature"),
@@ -159,6 +203,7 @@ async function offlineFixture(root) {
     trust,
     requiredAssetIds: assets.map((asset) => asset.id),
     licenses: [{ id: "fixture", spdx: "MIT", sourceUrl: "https://example.test/license" }],
+    sbomPath,
   };
 }
 

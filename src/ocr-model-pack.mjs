@@ -28,8 +28,8 @@ export const PP_OCRV6_SMALL_MODEL_PACK = {
       role: "dictionary",
       path: "ppocrv6_dict.txt",
       required: true,
-      sizeBytes: 93656,
-      sha256: "e796d20aace0691844f37f97a74e287be540d8bee59cc00662e2d6997d86ee3e",
+      sizeBytes: 74948,
+      sha256: "03dfb9f1cf3043c41cd037f7ecdae8641e82242f789f0739c899e8d666a1f0db",
     },
   ],
 };
