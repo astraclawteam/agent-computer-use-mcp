@@ -42,6 +42,7 @@ internal static class Program
                     assetCache,
                     new AssetDownloader(layout, assetCache, sourcePolicy),
                     materializer,
+                    new AuthenticodeVerifier(),
                     new AssetStateStore(layout, materializer));
                 var operationId = options.GetValueOrDefault("operation-id", $"{operation}-{Guid.NewGuid():N}");
                 var assetResult = operation switch

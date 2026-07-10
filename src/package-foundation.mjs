@@ -73,15 +73,29 @@ export function getVersionPolicy() {
 export function getSigningPolicy() {
   return {
     windowsHelpers: {
-      signingRequired: true,
-      files: [
+      firstPartyAuthenticodeRequired: true,
+      firstPartyFiles: [
         "gateway-overlay",
-        "cua-driver",
+        "windows-installer",
         "future-native-sidecars",
       ],
       certificateSource: "release-secret-or-hardware-backed-code-signing",
       timestampRequired: true,
       verification: "signtool verify /pa",
+      thirdPartyUnsigned: {
+        files: ["cua-driver"],
+        requiredVerification: [
+          "signed-asset-manifest",
+          "upstream-release-sha256",
+          "extracted-file-sha256",
+        ],
+        authenticode: "vendor-unsigned-explicit",
+      },
+      microsoftSystemRuntime: {
+        files: ["webview2-runtime"],
+        publisher: "Microsoft Corporation",
+        authenticodeRequired: true,
+      },
     },
     unsignedDevelopmentBuilds: {
       allowed: true,

@@ -12,7 +12,8 @@ test("signed helper inventory maps signing policy to required release artifacts"
   const inventory = buildSignedHelperInventory({
     releaseArtifacts: [
       signedHelper("gateway-overlay-windows"),
-      signedHelper("cua-driver-windows-x64"),
+      signedHelper("windows-installer-win-x64"),
+      vendorUnsignedAsset("cua-driver-windows-x64"),
     ],
   });
   const validation = validateSignedHelperInventory(inventory);
@@ -21,14 +22,18 @@ test("signed helper inventory maps signing policy to required release artifacts"
   assert.equal(inventory.status, "passed");
   assert.deepEqual(inventory.requiredHelpers.map((helper) => helper.id), [
     "gateway-overlay-windows",
+    "windows-installer-win-x64",
+  ]);
+  assert.deepEqual(inventory.requiredThirdPartyAssets.map((asset) => asset.id), [
     "cua-driver-windows-x64",
   ]);
   assert.deepEqual(inventory.reservedHelpers.map((helper) => helper.id), [
     "future-native-sidecars",
   ]);
-  assert.equal(inventory.signingPolicyWindowsHelperCount, 3);
+  assert.equal(inventory.signingPolicyWindowsHelperCount, 4);
   assert.equal(inventory.signedRequiredHelperCount, 2);
   assert.equal(inventory.timestampedRequiredHelperCount, 2);
+  assert.equal(inventory.verifiedThirdPartyAssetCount, 1);
   assert.equal(inventory.unsignedDistributionBlocked, true);
   assert.equal(validation.status, "passed");
   assert.deepEqual(validation.violations, []);
@@ -43,13 +48,14 @@ test("signed helper inventory fails closed when a required helper is missing sig
   const inventory = buildSignedHelperInventory({
     releaseArtifacts: [
       signedHelper("gateway-overlay-windows"),
+      signedHelper("windows-installer-win-x64"),
     ],
   });
   const validation = validateSignedHelperInventory(inventory);
 
   assert.equal(validation.status, "failed");
   assert.deepEqual(validation.violations.map((violation) => violation.code), [
-    "missing-required-helper-artifact",
+    "missing-required-third-party-artifact",
   ]);
   assert.equal(validation.violations[0].id, "cua-driver-windows-x64");
 });
@@ -72,6 +78,7 @@ test("Phase 0.13 has an executable signed helper inventory smoke script", async 
   assert.equal(report.requiredHelperCount, 2);
   assert.equal(report.signedRequiredHelperCount, 2);
   assert.equal(report.timestampedRequiredHelperCount, 2);
+  assert.equal(report.verifiedThirdPartyAssetCount, 1);
   assert.equal(report.reservedHelperCount, 1);
   assert.equal(report.unsignedDistributionBlocked, true);
   assert.equal(report.startsDesktopControl, false);
@@ -87,6 +94,22 @@ function signedHelper(id) {
       status: "valid",
       verifiedBy: "signtool verify /pa",
       timestamped: true,
+    },
+  };
+}
+
+function vendorUnsignedAsset(id) {
+  const sha256 = "b".repeat(64);
+  return {
+    id,
+    kind: "third-party-windows-asset",
+    sha256,
+    provenance: {
+      status: "valid",
+      manifestSignature: "valid",
+      upstreamSha256: sha256,
+      extractedFilesVerified: true,
+      authenticodeMode: "vendor-unsigned",
     },
   };
 }

@@ -44,12 +44,18 @@ test("package foundation documents version and upgrade policy", () => {
 test("package foundation documents Windows signing policy", () => {
   const policy = getSigningPolicy();
 
-  assert.equal(policy.windowsHelpers.signingRequired, true);
-  assert.deepEqual(policy.windowsHelpers.files, [
+  assert.equal(policy.windowsHelpers.firstPartyAuthenticodeRequired, true);
+  assert.deepEqual(policy.windowsHelpers.firstPartyFiles, [
     "gateway-overlay",
-    "cua-driver",
+    "windows-installer",
     "future-native-sidecars",
   ]);
+  assert.deepEqual(policy.windowsHelpers.thirdPartyUnsigned, {
+    files: ["cua-driver"],
+    requiredVerification: ["signed-asset-manifest", "upstream-release-sha256", "extracted-file-sha256"],
+    authenticode: "vendor-unsigned-explicit",
+  });
+  assert.equal(policy.windowsHelpers.microsoftSystemRuntime.publisher, "Microsoft Corporation");
   assert.equal(policy.unsignedDevelopmentBuilds.allowed, true);
   assert.equal(policy.unsignedDevelopmentBuilds.distribution, "blocked");
 });
@@ -123,7 +129,7 @@ test("package dry-run script emits a JSON report", async () => {
   assert.equal(report.status, "passed");
   assert.equal(report.packageName, "agent-computer-use-mcp");
   assert.equal(report.offlineAssetManifest.assets.length, 5);
-  assert.equal(report.signingPolicy.windowsHelpers.signingRequired, true);
+  assert.equal(report.signingPolicy.windowsHelpers.firstPartyAuthenticodeRequired, true);
   assert.equal(report.packageFilesPolicy.forbiddenPathPrefixes.includes("node_modules/"), true);
 });
 

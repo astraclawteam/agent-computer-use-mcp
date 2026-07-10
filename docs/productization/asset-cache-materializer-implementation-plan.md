@@ -303,7 +303,7 @@ git commit -m "feat: add resumable asset acquisition"
 - Live command: `npm run assets:live:cua-driver`
 - Live result: `{ status:"passed"|"skipped_environment"|"failed", version, archiveSha256, executableSha256, executableVersion, temporaryRootsCleaned, startsDesktopControl:false, includeUserOverlay:false }`
 
-- [ ] **Step 1: Write failing policy tests**
+- [x] **Step 1: Write failing policy tests**
 
 ```js
 test("vendor unsigned cua-driver requires exact upstream release provenance", async () => {
@@ -321,21 +321,21 @@ test("unsigned first-party helper is never distributable", async () => {
 
 On Windows, add a positive Microsoft-signed system-file fixture for publisher/WinTrust verification and a publisher mismatch case. Release-policy tests assert only first-party helpers and Microsoft system installers require Authenticode; third-party unsigned driver requires signed provenance instead.
 
-- [ ] **Step 2: Run the focused test and verify RED**
+- [x] **Step 2: Run the focused test and verify RED**
 
 Run: `node --test test/asset-windows-trust.test.mjs test/package-foundation.test.mjs`
 
 Expected: FAIL because Authenticode and vendor provenance policies are not executable.
 
-- [ ] **Step 3: Implement WinTrust and timestamp inspection**
+- [x] **Step 3: Implement WinTrust and timestamp inspection**
 
 Use `WinVerifyTrust` with `WTD_STATEACTION_VERIFY`, then inspect provider signer state through `WTHelperProvDataFromStateData` and `WTHelperGetProvSignerFromChain`. Copy the signer certificate bytes from `CERT_CONTEXT` into `X509Certificate2`, compare normalized publisher identity, and require at least one counter-signer when `timestampRequired=true`. Always close WinTrust state in `finally`.
 
-- [ ] **Step 4: Implement the real upstream live runner**
+- [x] **Step 4: Implement the real upstream live runner**
 
 The runner builds a development signed manifest around the exact official release values from the spec, downloads into temporary program/data roots, prepares and activates there, executes `cua-driver.exe --version`, validates `cua-driver 0.7.1`, and removes all temporary roots in `finally`. Only transport/DNS/TLS unavailability maps to `skipped_environment`; any trust, hash, archive, or version mismatch is `failed`.
 
-- [ ] **Step 5: Run policy tests and live proof**
+- [x] **Step 5: Run policy tests and live proof**
 
 Run: `node --test test/asset-windows-trust.test.mjs test/cua-driver-live-asset.test.mjs test/package-foundation.test.mjs`
 
@@ -345,7 +345,7 @@ Run: `npm run assets:live:cua-driver`
 
 Expected on a connected Windows host: `status=passed`, archive SHA `00dfa76c...fc5aab`, executable SHA `6ee5565a...54f7`, version `0.7.1`, and temporary roots cleaned.
 
-- [ ] **Step 6: Commit Task 4**
+- [x] **Step 6: Commit Task 4**
 
 ```sh
 git add windows-installer src/package-foundation.mjs src/cua-driver-live-asset.mjs scripts/live-cua-driver-asset.mjs test package.json

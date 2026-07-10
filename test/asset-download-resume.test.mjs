@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { randomBytes } from "node:crypto";
 import { createServer } from "node:http";
 import { mkdtemp, mkdir, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -7,7 +8,7 @@ import { after, before, test } from "node:test";
 
 import { ensureWindowsInstallerBuilt, runWindowsInstaller } from "../src/windows-installer-host.mjs";
 import { createOfflineDriverFixture } from "./helpers/asset-archive.mjs";
-import { createSignedAssetFixture } from "./helpers/asset-fixture.mjs";
+import { createSignedAssetFixture, driverAsset, hash } from "./helpers/asset-fixture.mjs";
 
 const fixtureRoots = [];
 const servers = [];
@@ -24,8 +25,12 @@ after(async () => {
 
 test("asset download resumes an interrupted transfer with Range and ETag", async () => {
   const harness = await createHarness();
-  const source = await createOfflineDriverFixture({ root: harness.root, fixtureId: "resume-source" });
-  const server = await createAssetServer(source.zipBytes, { interruptFirst: true, etag: '"fixture-v1"' });
+  const source = createRawNetworkSource(randomBytes(1024 * 1024));
+  const server = await createAssetServer(source.zipBytes, {
+    interruptFirst: true,
+    etag: '"fixture-v1"',
+    slowBody: true,
+  });
   const fixture = await networkFixture(harness.root, source, server.url, "resume-manifest");
 
   const first = await harness.prepare(fixture, { expectedExitCode: 2, allowNetwork: true });
@@ -112,6 +117,38 @@ async function createHarness() {
   };
 }
 
+function createRawNetworkSource(bytes) {
+  const sha256 = hash(bytes);
+  return {
+    zipBytes: bytes,
+    asset: driverAsset({
+      source: {
+        ...driverAsset().source,
+        fileName: "cua-driver.bin",
+        sizeBytes: bytes.length,
+        sha256,
+      },
+      content: {
+        format: "raw",
+        files: [
+          {
+            path: "cua-driver.bin",
+            installPath: "bin/cua-driver.exe",
+            sizeBytes: bytes.length,
+            sha256,
+            executable: true,
+          },
+        ],
+      },
+      provenance: {
+        ...driverAsset().provenance,
+        assetName: "cua-driver.bin",
+        upstreamSha256: sha256,
+      },
+    }),
+  };
+}
+
 async function networkFixture(root, source, url, fixtureId) {
   const asset = {
     ...source.asset,
@@ -165,7 +202,22 @@ async function createAssetServer(blob, options = {}) {
     };
     if (canResume) headers["Content-Range"] = `bytes ${start}-${blob.length - 1}/${blob.length}`;
     response.writeHead(status, headers);
-    response.end(body);
+    if (options.slowBody) {
+      let offset = 0;
+      const writeNext = () => {
+        if (offset >= body.length) {
+          response.end();
+          return;
+        }
+        const end = Math.min(offset + 64 * 1024, body.length);
+        response.write(body.subarray(offset, end));
+        offset = end;
+        setTimeout(writeNext, 10);
+      };
+      writeNext();
+    } else {
+      response.end(body);
+    }
   });
   await new Promise((resolve, reject) => {
     server.once("error", reject);

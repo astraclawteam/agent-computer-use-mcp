@@ -6,6 +6,7 @@ internal sealed class AssetEngine(
     AssetCache cache,
     AssetDownloader downloader,
     SafeZipMaterializer materializer,
+    AuthenticodeVerifier authenticodeVerifier,
     AssetStateStore stateStore)
 {
     public async Task<AssetOperationResult> PrepareAsync(
@@ -135,6 +136,7 @@ internal sealed class AssetEngine(
         if (Directory.Exists(finalRoot))
         {
             await materializer.VerifyMaterializedAsync(materialized, cancellationToken);
+            VerifyWindowsTrust(asset, finalRoot);
             return materialized;
         }
 
@@ -142,6 +144,7 @@ internal sealed class AssetEngine(
         await materializer.MaterializeAsync(asset, blobPath, stagedRoot, cancellationToken);
         var staged = BuildMaterializedAsset(asset, stagedRoot);
         await materializer.VerifyMaterializedAsync(staged, cancellationToken);
+        VerifyWindowsTrust(asset, stagedRoot);
         Directory.CreateDirectory(Path.GetDirectoryName(finalRoot)!);
         try
         {
@@ -152,6 +155,16 @@ internal sealed class AssetEngine(
             await materializer.VerifyMaterializedAsync(materialized, cancellationToken);
         }
         return materialized;
+    }
+
+    private void VerifyWindowsTrust(AssetEntry asset, string root)
+    {
+        if (string.Equals(asset.Authenticode.Mode, "vendor-unsigned", StringComparison.Ordinal)) return;
+        foreach (var file in asset.Content.Files.Where(file => file.Executable))
+        {
+            var path = Path.Combine(root, file.InstallPath.Replace('/', Path.DirectorySeparatorChar));
+            authenticodeVerifier.Verify(path, asset.Authenticode);
+        }
     }
 
     private (string ManifestPath, string SignaturePath, string KeyringPath) CacheManifestFiles(

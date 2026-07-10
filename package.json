@@ -121,6 +121,7 @@
     "package:dry-run": "node scripts/package-dry-run.mjs",
     "package:foundation": "node scripts/package-foundation-report.mjs",
     "assets:manifest": "node scripts/offline-asset-manifest.mjs",
+    "assets:live:cua-driver": "node scripts/live-cua-driver-asset.mjs",
     "doctor:install-cache": "node scripts/install-cache-doctor.mjs --json",
     "release:readiness": "node src/phase-0-11-release-readiness.mjs",
     "release:artifacts": "node src/phase-0-12-release-artifacts.mjs",
