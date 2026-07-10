@@ -22,6 +22,7 @@ internal static class Program
             ("handles acquisition failures without real native handles", HandlesAcquisitionFailuresWithoutRealNativeHandles),
             ("reports a false presentation operation after ordered cleanup", ReportsFalsePresentationAfterOrderedCleanup),
             ("preserves presentation exceptions across every thrown cleanup operation", PreservesPresentationExceptionsAcrossThrownCleanupOperations),
+            ("deletes a deselected bitmap when memory DC destruction fails", DeletesDeselectedBitmapWhenMemoryDcDestructionFails),
             ("reports false cleanup operations after presentation succeeds", ReportsFalseCleanupOperationsAfterPresentationSucceeds),
         };
 
@@ -138,7 +139,7 @@ internal static class Program
         AssertPresentationSurvivesCleanupFailure(
             "DeleteDC",
             native => native.DeleteDcException = new InvalidOperationException("DeleteDC failure"),
-            ["GetDC", "CreateCompatibleDC", "CreateHbitmap", "SelectBitmap", "UpdateLayeredWindow", "RestoreBitmap", "DeleteDC", "ReleaseDC"]);
+            ["GetDC", "CreateCompatibleDC", "CreateHbitmap", "SelectBitmap", "UpdateLayeredWindow", "RestoreBitmap", "DeleteDC", "DeleteObject", "ReleaseDC"]);
         AssertPresentationSurvivesCleanupFailure(
             "DeleteObject",
             native => native.DeleteObjectException = new InvalidOperationException("DeleteObject failure"),
@@ -160,7 +161,7 @@ internal static class Program
             "DeleteDC",
             native => native.DeleteDcResult = false,
             "DeleteDC failed during cleanup.",
-            ["GetDC", "CreateCompatibleDC", "CreateHbitmap", "SelectBitmap", "UpdateLayeredWindow", "RestoreBitmap", "DeleteDC", "ReleaseDC"]);
+            ["GetDC", "CreateCompatibleDC", "CreateHbitmap", "SelectBitmap", "UpdateLayeredWindow", "RestoreBitmap", "DeleteDC", "DeleteObject", "ReleaseDC"]);
         AssertFalseCleanupFailure(
             "DeleteObject",
             native => native.DeleteObjectResult = false,
@@ -171,6 +172,35 @@ internal static class Program
             native => native.ReleaseDcResult = 0,
             "ReleaseDC failed during cleanup.",
             ["GetDC", "CreateCompatibleDC", "CreateHbitmap", "SelectBitmap", "UpdateLayeredWindow", "RestoreBitmap", "DeleteDC", "DeleteObject", "ReleaseDC"]);
+    }
+
+    private static void DeletesDeselectedBitmapWhenMemoryDcDestructionFails()
+    {
+        var falseDeleteDcNative = new FakeNative { DeleteDcResult = false };
+        var falseDeleteDcFactory = new FakeBitmapFactory(falseDeleteDcNative.Events);
+        var falseDeleteDcThrown = WithFrame(
+            PixelFormat.Format32bppPArgb,
+            (window, frame) => ExpectException<InvalidOperationException>(() => CreatePresenter(falseDeleteDcNative, falseDeleteDcFactory).Present(window, frame, Point.Empty)));
+
+        Require(falseDeleteDcThrown.Message == "DeleteDC failed during cleanup.", "DeleteDC failure must remain the first cleanup error.");
+        RequireEvents(falseDeleteDcNative.Events, "GetDC", "CreateCompatibleDC", "CreateHbitmap", "SelectBitmap", "UpdateLayeredWindow", "RestoreBitmap", "DeleteDC", "DeleteObject", "ReleaseDC");
+        Require(falseDeleteDcNative.DeleteObjectBeforeMemoryDcWasGone, "The case must retain a live memory DC after DeleteDC fails.");
+        Require(!falseDeleteDcNative.DeleteObjectBeforeBitmapWasDeselected, "A restored HBITMAP must be deleted even when the memory DC remains live.");
+
+        var presentationFailure = new InvalidOperationException("presentation failure");
+        var thrownDeleteDcNative = new FakeNative {
+            UpdateLayeredWindowException = presentationFailure,
+            DeleteDcException = new InvalidOperationException("DeleteDC failure"),
+        };
+        var thrownDeleteDcFactory = new FakeBitmapFactory(thrownDeleteDcNative.Events);
+        var thrown = WithFrame(
+            PixelFormat.Format32bppPArgb,
+            (window, frame) => ExpectException<InvalidOperationException>(() => CreatePresenter(thrownDeleteDcNative, thrownDeleteDcFactory).Present(window, frame, Point.Empty)));
+
+        Require(ReferenceEquals(presentationFailure, thrown), "DeleteDC exceptions must not mask the original presentation exception.");
+        RequireEvents(thrownDeleteDcNative.Events, "GetDC", "CreateCompatibleDC", "CreateHbitmap", "SelectBitmap", "UpdateLayeredWindow", "RestoreBitmap", "DeleteDC", "DeleteObject", "ReleaseDC");
+        Require(thrownDeleteDcNative.DeleteObjectBeforeMemoryDcWasGone, "The case must retain a live memory DC after DeleteDC throws.");
+        Require(!thrownDeleteDcNative.DeleteObjectBeforeBitmapWasDeselected, "A restored HBITMAP must be deleted after DeleteDC throws.");
     }
 
     private static void AssertPresentationSurvivesCleanupFailure(
@@ -188,7 +218,7 @@ internal static class Program
 
         Require(ReferenceEquals(presentationFailure, thrown), $"{cleanupOperation} cleanup must not mask the presentation exception.");
         RequireEvents(native.Events, expectedEvents);
-        Require(!native.DeleteObjectBeforeMemoryDcWasGone, $"{cleanupOperation} must not delete an HBITMAP while its memory DC is live.");
+        Require(!native.DeleteObjectBeforeBitmapWasDeselected, $"{cleanupOperation} must not delete an HBITMAP before it is deselected.");
     }
 
     private static void AssertFalseCleanupFailure(
@@ -206,7 +236,7 @@ internal static class Program
 
         Require(thrown.Message == expectedMessage, $"{cleanupOperation} must be reported when presentation succeeds.");
         RequireEvents(native.Events, expectedEvents);
-        Require(!native.DeleteObjectBeforeMemoryDcWasGone, $"{cleanupOperation} must not delete an HBITMAP while its memory DC is live.");
+        Require(!native.DeleteObjectBeforeBitmapWasDeselected, $"{cleanupOperation} must not delete an HBITMAP before it is deselected.");
     }
 
     private static LayeredWindowPresenter CreatePresenter(FakeNative native, FakeBitmapFactory bitmapFactory)
@@ -298,6 +328,7 @@ internal static class Program
         public Exception? ReleaseDcException { get; set; }
         public IntPtr LastWindowHandle { get; private set; }
         public bool DeleteObjectBeforeMemoryDcWasGone { get; private set; }
+        public bool DeleteObjectBeforeBitmapWasDeselected { get; private set; }
 
         public IntPtr GetDC()
         {
@@ -325,14 +356,15 @@ internal static class Program
         {
             if (!_bitmapSelected)
             {
-                _bitmapSelected = true;
                 Events.Add("SelectBitmap");
                 if (InitialSelectException is not null) throw InitialSelectException;
+                if (InitialSelectResult != IntPtr.Zero && InitialSelectResult != new IntPtr(-1)) _bitmapSelected = true;
                 return InitialSelectResult;
             }
 
             Events.Add("RestoreBitmap");
             if (RestoreException is not null) throw RestoreException;
+            if (RestoreResult == FakeBitmapHandle) _bitmapSelected = false;
             return RestoreResult;
         }
 
@@ -340,6 +372,7 @@ internal static class Program
         {
             Events.Add("DeleteObject");
             DeleteObjectBeforeMemoryDcWasGone |= _memoryDcLive;
+            DeleteObjectBeforeBitmapWasDeselected |= _memoryDcLive && _bitmapSelected;
             if (DeleteObjectException is not null) throw DeleteObjectException;
             return DeleteObjectResult;
         }

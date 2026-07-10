@@ -77,6 +77,10 @@ test("Desktop gateway overlay freezes the layered native rendering contract", as
   assert.match(presenter, /DeleteDC/);
   assert.match(presenter, /ReleaseDC/);
   assert.match(presenter, /throw new Win32Exception/);
+  assert.match(presenter, /DllImport\("gdi32\.dll", EntryPoint = "CreateCompatibleDC"\)/);
+  assert.match(presenter, /DllImport\("gdi32\.dll", EntryPoint = "SelectObject"\)/);
+  assert.match(presenter, /DllImport\("gdi32\.dll", EntryPoint = "DeleteObject"\)/);
+  assert.match(presenter, /DllImport\("gdi32\.dll", EntryPoint = "DeleteDC"\)/);
   assert.match(program, /AGENT_COMPUTER_USE_OVERLAY_TARGET_RECT_FILE/);
   assert.match(program, /SyncTargetRect/);
   assert.match(program, /RaiseTargetWindowNoActivate/);
@@ -88,10 +92,11 @@ test("Desktop gateway overlay freezes the layered native rendering contract", as
 test("Layered presenter behavior harness exercises cleanup through Present", async () => {
   const { stdout } = await execFileAsync(
     "dotnet",
-    ["run", "--project", "gateway-overlay-tests/GatewayComputerUseOverlay.Tests.csproj", "--no-restore"],
+    ["run", "--project", "gateway-overlay-tests/GatewayComputerUseOverlay.Tests.csproj"],
     { cwd: fileURLToPath(new URL("..", import.meta.url)), windowsHide: true },
   );
 
   assert.match(stdout, /PASS: preserves presentation exceptions across every thrown cleanup operation/);
+  assert.match(stdout, /PASS: deletes a deselected bitmap when memory DC destruction fails/);
   assert.match(stdout, /PASS: reports false cleanup operations after presentation succeeds/);
 });

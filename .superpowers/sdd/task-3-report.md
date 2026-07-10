@@ -194,3 +194,59 @@ Results:
 ## Important Review Fix Concerns
 
 None.
+
+## Final Task 3 Review RED Evidence
+
+Command:
+
+```powershell
+node --test test/gateway-run.test.mjs
+```
+
+Result: `pass 3`, `fail 1`. The new source contract failed because the
+`CreateCompatibleDCNative` import did not declare
+`EntryPoint = "CreateCompatibleDC"`; the other GDI imports had the same
+managed-name/export mismatch.
+
+Command:
+
+```powershell
+dotnet run --project gateway-overlay-tests/GatewayComputerUseOverlay.Tests.csproj
+```
+
+Result: exit code `1`. The new deselection regression expected `DeleteObject`
+after a successful restore and false `DeleteDC`, but the old cleanup sequence
+ended at `ReleaseDC`. This proved the HBITMAP leaked when it had already been
+deselected but DC destruction failed.
+
+## Final Task 3 Review GREEN Evidence
+
+Commands:
+
+```powershell
+dotnet build gateway-overlay/GatewayComputerUseOverlay.csproj --nologo
+dotnet run --project gateway-overlay-tests/GatewayComputerUseOverlay.Tests.csproj
+node --test test/gateway-run.test.mjs test/gateway-overlay-snapshot.test.mjs
+git diff --check
+```
+
+Results:
+
+- The overlay build completed with `0` warnings and `0` errors.
+- The standalone behavior harness passed all six groups. Its new case proves a
+  successfully deselected HBITMAP is deleted after both a false and a thrown
+  `DeleteDC`, while the thrown path preserves the original presentation
+  exception and continues cleanup.
+- The focused Node suites passed: `pass 5`, `fail 0`. The Node harness now
+  runs `dotnet run` without `--no-restore`, so a clean checkout can restore
+  the test project rather than depending on ignored `obj` output.
+- `git diff --check` completed without output.
+
+## Final Task 3 Review Notes
+
+- The four managed `*Native` GDI declarations now map explicitly to the
+  `CreateCompatibleDC`, `SelectObject`, `DeleteObject`, and `DeleteDC`
+  exports.
+- Cleanup tracks successful bitmap deselection independently from successful
+  memory-DC destruction. It skips `DeleteObject` only when both mechanisms
+  fail to establish that deletion is safe.

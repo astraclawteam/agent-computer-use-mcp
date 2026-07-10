@@ -127,6 +127,7 @@ internal sealed class LayeredWindowPresenter
         IntPtr previousBitmap)
     {
         Exception? cleanupException = null;
+        var bitmapDeselected = memoryDc == IntPtr.Zero;
         var memoryDcDeleted = memoryDc == IntPtr.Zero;
 
         if (memoryDc != IntPtr.Zero && previousBitmap != IntPtr.Zero && previousBitmap != HgdError)
@@ -137,6 +138,10 @@ internal sealed class LayeredWindowPresenter
                 if (restoredBitmap != bitmap)
                 {
                     cleanupException ??= new InvalidOperationException("SelectObject failed while restoring the previous bitmap.");
+                }
+                else
+                {
+                    bitmapDeselected = true;
                 }
             }
             catch (Exception exception)
@@ -164,7 +169,7 @@ internal sealed class LayeredWindowPresenter
             }
         }
 
-        if (memoryDcDeleted && bitmap != IntPtr.Zero)
+        if ((bitmapDeselected || memoryDcDeleted) && bitmap != IntPtr.Zero)
         {
             try
             {
@@ -253,17 +258,17 @@ internal sealed class LayeredWindowPresenter
         [DllImport("user32.dll")]
         private static extern int ReleaseDC(IntPtr hWnd, IntPtr hDc);
 
-        [DllImport("gdi32.dll")]
+        [DllImport("gdi32.dll", EntryPoint = "CreateCompatibleDC")]
         private static extern IntPtr CreateCompatibleDCNative(IntPtr hDc);
 
-        [DllImport("gdi32.dll")]
+        [DllImport("gdi32.dll", EntryPoint = "SelectObject")]
         private static extern IntPtr SelectObjectNative(IntPtr hDc, IntPtr hGdiObj);
 
-        [DllImport("gdi32.dll")]
+        [DllImport("gdi32.dll", EntryPoint = "DeleteObject")]
         [return: MarshalAs(UnmanagedType.Bool)]
         private static extern bool DeleteObjectNative(IntPtr hObject);
 
-        [DllImport("gdi32.dll")]
+        [DllImport("gdi32.dll", EntryPoint = "DeleteDC")]
         [return: MarshalAs(UnmanagedType.Bool)]
         private static extern bool DeleteDCNative(IntPtr hDc);
 
