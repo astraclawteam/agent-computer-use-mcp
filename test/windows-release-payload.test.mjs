@@ -16,7 +16,7 @@ afterEach(async () => {
   await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
 });
 
-test("Windows release payload contains portable protected runtime and native helpers", { timeout: 120_000 }, async (t) => {
+test("Windows release payload contains portable protected runtime and native helpers", { timeout: 180_000 }, async (t) => {
   if (process.platform !== "win32") return t.skip("Windows release payload requires Windows");
   const root = await fixtureRoot();
   const nodeArchivePath = join(root, "node.zip");

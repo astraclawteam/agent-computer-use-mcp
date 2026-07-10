@@ -27,7 +27,8 @@ const REQUIRED_SBOM_COMPONENTS = new Set([
 ]);
 
 export async function runRealReleaseAssemblyPhase(options = {}) {
-  const candidateRoot = resolve(options.candidateRoot ?? "artifacts/release/windows-x64-candidate");
+  const packageJson = JSON.parse(await readFile("package.json", "utf8"));
+  const candidateRoot = resolve(options.candidateRoot ?? join("artifacts/windows-release", packageJson.version));
   const cacheRoot = resolve(options.cacheRoot ?? "artifacts/release-cache");
   const candidateExists = (await stat(candidateRoot).catch(() => null))?.isDirectory() === true;
   const assembly = candidateExists

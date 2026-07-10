@@ -21,6 +21,8 @@ All notable changes to `agent-computer-use-mcp` are tracked here.
 - Hash-verified active asset resolution connects activated cua-driver state to runtime and doctor paths.
 - Phase 7.9 end-to-end trusted asset delivery release gate with zero first-enable downloads and overlay-free execution.
 - Protected npm release staging with esbuild minification, final-pass JavaScript obfuscation, SHA-256 launcher verification, standard MCP smoke, and zero-source/zero-Source-Map tarball gates.
+- Real Windows x64 candidate assembly from six locked upstream assets with portable Node.js, protected MCP runtime, NativeAOT installer/overlay, PP-OCRv6 small ONNX model pack, WebView2 offline installer, CycloneDX SBOM, release manifest, and checksums.
+- Phase 0.15 offline installation proof activates cua-driver, OCR, and WebView2 assets and starts the installed standard MCP server without network or a machine-wide Node.js runtime; all PR4 outputs remain `blocked_unsigned` until PR5 production signing.
 - Commercial policy-deny proof for password, payment, credential, and private surfaces.
 - Computer control approval state machine for approve, deny, cancel, revoke, and timeout flows.
 - MCP approval compatibility proof for pending approval schemas, duplicate-pending rejection, and disconnect cleanup.

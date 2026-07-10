@@ -8,6 +8,8 @@ test("Phase 0.15 assembles installs and smokes a real offline Windows release ca
   assert.equal(packageJson.scripts["release:windows:assets"], "node scripts/fetch-windows-release-assets.mjs");
   assert.equal(packageJson.scripts["release:windows:assemble"], "node scripts/build-windows-release-candidate.mjs");
   assert.equal(packageJson.scripts["phase:0.15"], "node src/phase-0-15-real-release-assembly.mjs");
+  assert.match(readFileSync("scripts/build-windows-release-candidate.mjs", "utf8"), /artifacts\/windows-release/u);
+  assert.match(readFileSync("src/phase-0-15-real-release-assembly.mjs", "utf8"), /artifacts\/windows-release/u);
 
   const { ComputerUseProviderRouter } = await import("../src/computer-use-provider-router.mjs");
   const health = await new ComputerUseProviderRouter().health({ fast: true });
@@ -19,6 +21,42 @@ test("Phase 0.15 assembles installs and smokes a real offline Windows release ca
   const gate = buildReleaseReadinessGate({ packageJson });
   assert.ok(gate.commands.some((item) => item.command === "npm run phase:0.15"));
   assert.ok(gate.evidence.some((item) => item.id === "real-release-assembly" && item.command === "npm run phase:0.15"));
+
+  const ci = readFileSync(".github/workflows/ci.yml", "utf8");
+  assert.match(ci, /run: npm run phase:7\.9[\s\S]*run: npm run phase:0\.15/u);
+  const releaseDocs = [
+    "docs/productization/roadmap.md",
+    "docs/productization/release-gates.md",
+    "docs/productization/README.md",
+    "README.md",
+    "CONTRIBUTING.md",
+    "CHANGELOG.md",
+  ].map((path) => readFileSync(path, "utf8")).join("\n");
+  assert.match(releaseDocs, /artifacts\/windows-release\/<version>\//u);
+  for (const fileName of [
+    "agent-computer-use-mcp-X.Y.Z-windows-x64-installer.candidate.exe",
+    "agent-computer-use-mcp-X.Y.Z-windows-x64-offline.candidate.zip",
+    "agent-computer-use-mcp-X.Y.Z.tgz",
+    "agent-computer-use-mcp-X.Y.Z-sbom.cdx.json",
+    "agent-computer-use-mcp-X.Y.Z-asset-manifest.candidate.json",
+    "agent-computer-use-mcp-X.Y.Z-asset-manifest.candidate.sig",
+    "agent-computer-use-mcp-X.Y.Z-asset-keyring.candidate.json",
+    "agent-computer-use-mcp-X.Y.Z-release-manifest.json",
+    "agent-computer-use-mcp-X.Y.Z-checksums.txt",
+  ]) {
+    assert.equal(releaseDocs.includes(fileName), true, fileName);
+  }
+  for (const assetId of [
+    "node-runtime-windows-x64",
+    "cua-driver-windows-x64",
+    "ocr-model-pp-ocrv6-small-det",
+    "ocr-model-pp-ocrv6-small-rec",
+    "ocr-model-pp-ocrv6-small-rec-metadata",
+    "webview2-evergreen-standalone-windows-x64",
+  ]) {
+    assert.equal(releaseDocs.includes(assetId), true, assetId);
+  }
+  assert.match(releaseDocs, /blocked_unsigned[\s\S]*PR5/u);
 
   const result = await runNode(["src/phase-0-15-real-release-assembly.mjs"]);
   assert.equal(result.exitCode, 0, result.stderr || result.stdout);

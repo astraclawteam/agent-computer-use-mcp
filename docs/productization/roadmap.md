@@ -12,6 +12,7 @@ This roadmap turns the current MVP into a commercial local MCP module. It is wri
 - OCR sidecar has an MVP path, but model pack management and production scheduling are not complete.
 - Phase 7.0-7.7 are plan/proof gates. Phase 7.8 validates local release transactions. Phase 7.9 validates signed asset manifests, offline/network cache identity, resumable acquisition, safe materialization, atomic activation/rollback, and approval-gated MCP repair through real temporary roots.
 - Phase 0.14 builds a release-only npm staging package, verifies runtime integrity, runs the official MCP SDK smoke, and packs a tarball with zero first-party source and zero Source Maps.
+- Phase 0.15 assembles a real Windows x64 candidate from six locked upstream assets, installs it offline through the NativeAOT installer, and smokes the installed protected MCP with the bundled Node.js runtime.
 
 ## Execution Layers
 
@@ -51,6 +52,35 @@ Acceptance:
 - The publish-ready npm tarball contains only runtime `dist`, metadata, licenses, and approved runtime assets; source and `*.map` entries fail the release gate.
 - `npm run phase:0.14` records root publish blocking, integrity verification, MCP smoke, protected runtime count, tarball SHA-256, and source/Source Map counts.
 - A clean Windows VM can install, run `computer.health({fast:true})`, and produce a clear degraded state when optional assets are missing.
+
+### PR4 Real Windows Candidate
+
+PR4 writes one versioned candidate directory at `artifacts/windows-release/<version>/`. For `X.Y.Z`, the complete inventory is:
+
+```text
+agent-computer-use-mcp-X.Y.Z-windows-x64-installer.candidate.exe
+agent-computer-use-mcp-X.Y.Z-windows-x64-offline.candidate.zip
+agent-computer-use-mcp-X.Y.Z.tgz
+agent-computer-use-mcp-X.Y.Z-sbom.cdx.json
+agent-computer-use-mcp-X.Y.Z-asset-manifest.candidate.json
+agent-computer-use-mcp-X.Y.Z-asset-manifest.candidate.sig
+agent-computer-use-mcp-X.Y.Z-asset-keyring.candidate.json
+agent-computer-use-mcp-X.Y.Z-release-manifest.json
+agent-computer-use-mcp-X.Y.Z-checksums.txt
+```
+
+The offline ZIP is expected to be about 455 MB for 0.0.1 and includes portable Node.js, the protected MCP runtime, NativeAOT installer, overlay, OCR runtime/model pack, cua-driver, and WebView2 installer. It installs and runs without network access or a machine-wide Node.js installation.
+
+The six externally locked inputs are:
+
+- `node-runtime-windows-x64`
+- `cua-driver-windows-x64`
+- `ocr-model-pp-ocrv6-small-det`
+- `ocr-model-pp-ocrv6-small-rec`
+- `ocr-model-pp-ocrv6-small-rec-metadata`
+- `webview2-evergreen-standalone-windows-x64`
+
+Every PR4 output is `blocked_unsigned`. The candidate asset signature is development-only and the first-party PE files are not production-signed. PR5 must rebuild or promote through production Authenticode and production asset-manifest signing, then independently verify signatures before any GitHub Release or public distribution.
 
 Non-goals:
 

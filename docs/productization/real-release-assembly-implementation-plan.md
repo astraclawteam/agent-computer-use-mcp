@@ -530,11 +530,11 @@ git commit -m "feat: prove real Windows release assembly"
 - CI invokes `npm run phase:0.15` on `windows-latest` after Phase 7.9.
 - Roadmap records PR4 as real candidate assembly, not formal distribution.
 
-- [ ] **Step 1: Add failing governance assertions**
+- [x] **Step 1: Add failing governance assertions**
 
 Assert Phase 0.15 is required release evidence, CI runs it, docs name every candidate artifact, and docs state that unsigned PR4 outputs are distribution-blocked until PR5.
 
-- [ ] **Step 2: Run and verify RED**
+- [x] **Step 2: Run and verify RED**
 
 Run:
 
@@ -544,7 +544,7 @@ node --test test/phase-0-11-release-readiness.test.mjs test/phase-0-15-real-rele
 
 Expected: FAIL because CI and release documentation do not reference Phase 0.15.
 
-- [ ] **Step 3: Update CI and documentation**
+- [x] **Step 3: Update CI and documentation**
 
 Add a Windows CI step:
 
@@ -555,7 +555,7 @@ Add a Windows CI step:
 
 Document artifact locations under `artifacts/windows-release/<version>/`, the six locked external assets, expected candidate size, offline/no-Node behavior, and the `blocked_unsigned` boundary before PR5.
 
-- [ ] **Step 4: Run full verification**
+- [x] **Step 4: Run full verification**
 
 Run:
 
@@ -572,7 +572,7 @@ git status --short
 
 Expected: all tests and phases pass; production dependency audit reports zero vulnerabilities; only intended tracked files are modified; generated artifacts stay ignored.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```powershell
 git add .github/workflows/ci.yml docs/productization/roadmap.md docs/productization/release-gates.md docs/productization/README.md README.md CONTRIBUTING.md CHANGELOG.md test/phase-0-11-release-readiness.test.mjs test/phase-0-15-real-release-assembly.test.mjs

@@ -78,3 +78,15 @@ npm run phase:0.14
 ```
 
 The generated tarball must contain only protected `dist` runtime files and approved metadata. Source trees, tests, C#/Python source, and Source Maps block release.
+
+## Windows Candidate Assembly
+
+Changes to release assets, installer behavior, protected runtime, OCR model packaging, or offline delivery must run:
+
+```sh
+npm run release:windows:assets
+npm run release:windows:assemble
+npm run phase:0.15
+```
+
+Generated candidates stay ignored under `artifacts/windows-release/<version>/`. They are `blocked_unsigned` CI evidence and must never be uploaded or published. Only PR5's protected production-signing workflow may turn a verified candidate into distributable GitHub Release assets.
