@@ -157,9 +157,7 @@ internal sealed partial class AssetManifestVerifier
         foreach (var value in asset.Source.Urls)
         {
             if (!Uri.TryCreate(value, UriKind.Absolute, out var uri)
-                || !string.Equals(uri.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase)
-                || !string.IsNullOrEmpty(uri.UserInfo)
-                || !string.IsNullOrEmpty(uri.Fragment))
+                || !AssetSourcePolicy.AllowsManifestUri(uri, developmentOnly))
             {
                 throw new InstallerException("asset.source_forbidden", $"Asset source URL is forbidden: {asset.Id}");
             }

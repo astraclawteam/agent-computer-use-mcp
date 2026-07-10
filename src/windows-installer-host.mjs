@@ -70,7 +70,7 @@ export async function runWindowsInstaller(operation, options = {}) {
   if (options.releaseId) args.push("--release-id", options.releaseId);
   if (options.operationId) args.push("--operation-id", options.operationId);
   if (options.allowNetwork === true) args.push("--allow-network", "true");
-  const result = await runCommand("dotnet", args);
+  const result = await runCommand("dotnet", args, options.env);
   let report;
   try {
     report = JSON.parse(result.stdout);
@@ -110,10 +110,11 @@ async function lockIsStale() {
   return Boolean(lockStat && Date.now() - lockStat.mtimeMs > LOCK_STALE_MS);
 }
 
-function runCommand(command, args) {
+function runCommand(command, args, envOverrides = {}) {
   return new Promise((resolvePromise, reject) => {
     const child = spawn(command, args, {
       cwd: process.cwd(),
+      env: { ...process.env, ...envOverrides },
       stdio: ["ignore", "pipe", "pipe"],
       windowsHide: true,
     });

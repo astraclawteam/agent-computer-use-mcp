@@ -34,10 +34,13 @@ internal static class Program
             if (operation.StartsWith("asset-", StringComparison.Ordinal))
             {
                 var materializer = new SafeZipMaterializer();
+                var assetCache = new AssetCache(layout);
+                var sourcePolicy = new AssetSourcePolicy();
                 var assetEngine = new AssetEngine(
                     layout,
                     new AssetManifestVerifier(),
-                    new AssetCache(layout),
+                    assetCache,
+                    new AssetDownloader(layout, assetCache, sourcePolicy),
                     materializer,
                     new AssetStateStore(layout, materializer));
                 var operationId = options.GetValueOrDefault("operation-id", $"{operation}-{Guid.NewGuid():N}");
@@ -47,9 +50,10 @@ internal static class Program
                         RequireOption(options, "manifest"),
                         RequireOption(options, "signature"),
                         RequireOption(options, "trust-keyring"),
-                        RequireOption(options, "offline-root"),
+                        options.GetValueOrDefault("offline-root", ""),
                         ParseAssetIds(options.GetValueOrDefault("asset-ids", "")),
                         operationId,
+                        string.Equals(options.GetValueOrDefault("allow-network"), "true", StringComparison.Ordinal),
                         CancellationToken.None),
                     "asset-activate" => await assetEngine.ActivateAsync(
                         RequireOption(options, "release-id"),

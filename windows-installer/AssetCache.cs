@@ -4,6 +4,60 @@ namespace AgentComputerUse.Installer;
 
 internal sealed class AssetCache(InstallerLayout layout)
 {
+    public bool OfflineBlobExists(AssetEntry asset, string? offlineRoot)
+    {
+        if (string.IsNullOrWhiteSpace(offlineRoot)) return false;
+        var path = Path.Combine(Path.GetFullPath(offlineRoot), "blobs", "sha256", asset.Source.Sha256);
+        return File.Exists(path);
+    }
+
+    public async Task<CachedAssetBlob?> TryGetCachedAsync(AssetEntry asset, CancellationToken cancellationToken)
+    {
+        var path = layout.GetAssetBlobPath(asset.Source.Sha256);
+        if (!File.Exists(path)) return null;
+        await VerifyFileAsync(
+            path,
+            asset.Source.SizeBytes,
+            asset.Source.Sha256,
+            "asset.download_size_mismatch",
+            "asset.download_hash_mismatch",
+            cancellationToken);
+        return new CachedAssetBlob(path, CacheHit: true);
+    }
+
+    public async Task<CachedAssetBlob> PromoteDownloadedAsync(
+        AssetEntry asset,
+        string verifiedPartialPath,
+        bool resumeUsed,
+        CancellationToken cancellationToken)
+    {
+        await VerifyFileAsync(
+            verifiedPartialPath,
+            asset.Source.SizeBytes,
+            asset.Source.Sha256,
+            "asset.download_size_mismatch",
+            "asset.download_hash_mismatch",
+            cancellationToken);
+        var cachePath = layout.GetAssetBlobPath(asset.Source.Sha256);
+        Directory.CreateDirectory(Path.GetDirectoryName(cachePath)!);
+        try
+        {
+            File.Move(verifiedPartialPath, cachePath);
+        }
+        catch (IOException) when (File.Exists(cachePath))
+        {
+            File.Delete(verifiedPartialPath);
+            await VerifyFileAsync(
+                cachePath,
+                asset.Source.SizeBytes,
+                asset.Source.Sha256,
+                "asset.download_size_mismatch",
+                "asset.download_hash_mismatch",
+                cancellationToken);
+        }
+        return new CachedAssetBlob(cachePath, CacheHit: false, ResumeUsed: resumeUsed);
+    }
+
     public async Task<CachedAssetBlob> ImportOfflineAsync(
         AssetEntry asset,
         string offlineRoot,

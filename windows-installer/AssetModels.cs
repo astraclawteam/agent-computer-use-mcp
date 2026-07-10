@@ -130,6 +130,7 @@ internal sealed class AssetOperationResult
     public string? ManifestSha256 { get; set; }
     public int CacheHitCount { get; set; }
     public int CacheMissCount { get; set; }
+    public bool ResumeUsed { get; set; }
     public List<MaterializedAsset> Assets { get; set; } = [];
     public bool StartsDesktopControl { get; set; }
     public bool IncludeUserOverlay { get; set; }
@@ -174,10 +175,21 @@ internal sealed class MaterializedAssetFile
     public string Sha256 { get; set; } = "";
 }
 
+internal sealed class AssetResumeMetadata
+{
+    public int SchemaVersion { get; set; } = 1;
+    public string SourceUrl { get; set; } = "";
+    public string ExpectedSha256 { get; set; } = "";
+    public long ExpectedSizeBytes { get; set; }
+    public string? ETag { get; set; }
+    public string? LastModified { get; set; }
+    public long DownloadedBytes { get; set; }
+}
+
 internal sealed record VerifiedAssetManifest(
     AssetManifest Manifest,
     string ManifestSha256,
     string ManifestPath,
     string SignaturePath);
 
-internal sealed record CachedAssetBlob(string Path, bool CacheHit);
+internal sealed record CachedAssetBlob(string Path, bool CacheHit, bool ResumeUsed = false);

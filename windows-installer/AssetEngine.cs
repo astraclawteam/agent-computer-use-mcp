@@ -4,6 +4,7 @@ internal sealed class AssetEngine(
     InstallerLayout layout,
     AssetManifestVerifier manifestVerifier,
     AssetCache cache,
+    AssetDownloader downloader,
     SafeZipMaterializer materializer,
     AssetStateStore stateStore)
 {
@@ -14,6 +15,7 @@ internal sealed class AssetEngine(
         string offlineRoot,
         IReadOnlySet<string> selectedIds,
         string operationId,
+        bool allowNetwork,
         CancellationToken cancellationToken)
     {
         layout.Initialize();
@@ -30,15 +32,29 @@ internal sealed class AssetEngine(
         var preparedAssets = new List<MaterializedAsset>();
         var cacheHitCount = 0;
         var cacheMissCount = 0;
+        var resumeUsed = false;
         Directory.CreateDirectory(transactionRoot);
         try
         {
             foreach (var asset in selected)
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                var blob = await cache.ImportOfflineAsync(asset, offlineRoot, transactionRoot, cancellationToken);
+                CachedAssetBlob blob;
+                if (cache.OfflineBlobExists(asset, offlineRoot))
+                {
+                    blob = await cache.ImportOfflineAsync(asset, offlineRoot, transactionRoot, cancellationToken);
+                }
+                else if (allowNetwork)
+                {
+                    blob = await downloader.DownloadAsync(verified.Manifest, asset, cancellationToken);
+                }
+                else
+                {
+                    throw new InstallerException("asset.offline_blob_missing", $"Offline blob is missing: {asset.Id}");
+                }
                 if (blob.CacheHit) cacheHitCount += 1;
                 else cacheMissCount += 1;
+                resumeUsed |= blob.ResumeUsed;
                 preparedAssets.Add(await MaterializeAssetAsync(asset, blob.Path, transactionRoot, cancellationToken));
             }
 
@@ -54,7 +70,7 @@ internal sealed class AssetEngine(
                 Assets = preparedAssets,
             };
             stateStore.WritePrepared(prepared);
-            return BuildResult("prepared", "asset-prepare", operationId, prepared, stateStore.ReadActive(), cacheHitCount, cacheMissCount);
+            return BuildResult("prepared", "asset-prepare", operationId, prepared, stateStore.ReadActive(), cacheHitCount, cacheMissCount, resumeUsed);
         }
         finally
         {
@@ -67,7 +83,7 @@ internal sealed class AssetEngine(
         layout.Initialize();
         var state = await stateStore.ActivateAsync(releaseId, cancellationToken);
         var prepared = stateStore.ReadPrepared(releaseId);
-        return BuildResult("activated", "asset-activate", operationId, prepared, state, 0, 0);
+        return BuildResult("activated", "asset-activate", operationId, prepared, state, 0, 0, false);
     }
 
     public AssetOperationResult Status(string operationId)
@@ -93,7 +109,7 @@ internal sealed class AssetEngine(
         layout.Initialize();
         var state = await stateStore.RollbackAsync(cancellationToken);
         var prepared = stateStore.ReadPrepared(state.CurrentReleaseId!);
-        return BuildResult("rolled_back", "asset-rollback", operationId, prepared, state, 0, 0);
+        return BuildResult("rolled_back", "asset-rollback", operationId, prepared, state, 0, 0, false);
     }
 
     private async Task<MaterializedAsset> MaterializeAssetAsync(
@@ -192,7 +208,8 @@ internal sealed class AssetEngine(
         AssetPreparedState prepared,
         AssetActivationState active,
         int cacheHitCount,
-        int cacheMissCount)
+        int cacheMissCount,
+        bool resumeUsed)
     {
         return new AssetOperationResult
         {
@@ -206,6 +223,7 @@ internal sealed class AssetEngine(
             ManifestSha256 = prepared.ManifestSha256,
             CacheHitCount = cacheHitCount,
             CacheMissCount = cacheMissCount,
+            ResumeUsed = resumeUsed,
             Assets = operation == "asset-prepare" ? prepared.Assets : active.Assets,
             StartsDesktopControl = false,
             IncludeUserOverlay = false,

@@ -15,4 +15,5 @@ namespace AgentComputerUse.Installer;
 [JsonSerializable(typeof(AssetOperationResult))]
 [JsonSerializable(typeof(AssetPreparedState))]
 [JsonSerializable(typeof(AssetActivationState))]
+[JsonSerializable(typeof(AssetResumeMetadata))]
 internal partial class InstallerJsonContext : JsonSerializerContext;

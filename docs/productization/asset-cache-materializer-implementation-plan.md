@@ -230,7 +230,7 @@ git commit -m "feat: materialize immutable offline assets"
 - Resume metadata: `{ schemaVersion:1, sourceUrl, expectedSha256, expectedSizeBytes, etag, lastModified, downloadedBytes }`
 - Production network policy: HTTPS, maximum five redirects, no downgrade, no credentials, no private/loopback/link-local destination, bounded size and timeouts.
 
-- [ ] **Step 1: Write a failing real HTTP resume test**
+- [x] **Step 1: Write a failing real HTTP resume test**
 
 ```js
 test("asset download resumes an interrupted transfer with Range and ETag", async () => {
@@ -246,13 +246,13 @@ test("asset download resumes an interrupted transfer with Range and ETag", async
 
 Add tests for network disabled, offline-first cache hit, changed ETag restart, ignored Range restart, redirect downgrade rejection, oversize response, wrong hash, idle timeout, and cancellation preserving only valid partial metadata.
 
-- [ ] **Step 2: Run the focused test and verify RED**
+- [x] **Step 2: Run the focused test and verify RED**
 
 Run: `node --test test/asset-download-resume.test.mjs`
 
 Expected: FAIL because network acquisition is not implemented.
 
-- [ ] **Step 3: Implement bounded resumable streaming**
+- [x] **Step 3: Implement bounded resumable streaming**
 
 ```csharp
 using var request = new HttpRequestMessage(HttpMethod.Get, sourceUri);
@@ -270,13 +270,13 @@ await VerifyAndPromoteAsync(partialPath, asset, cancellationToken);
 
 Resolve and validate every redirect target. Use separate connect, idle, and total cancellation tokens. Persist resume metadata atomically after each bounded progress interval.
 
-- [ ] **Step 4: Run focused and offline regression tests**
+- [x] **Step 4: Run focused and offline regression tests**
 
 Run: `node --test test/asset-download-resume.test.mjs test/asset-cache-materializer.test.mjs`
 
 Expected: PASS without external network access.
 
-- [ ] **Step 5: Commit Task 3**
+- [x] **Step 5: Commit Task 3**
 
 ```sh
 git add windows-installer test/asset-download-resume.test.mjs
