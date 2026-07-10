@@ -62,7 +62,7 @@
 - Produces: `validateReleaseAssetLock(lock): { status, violations, assets }`.
 - `ReleaseAssetLock.assets[]` has `{ id, version, source, sha256, sizeBytes, license, install }`.
 
-- [ ] **Step 1: Add the build-only YAML dependency**
+- [x] **Step 1: Add the build-only YAML dependency**
 
 Run:
 
@@ -72,7 +72,7 @@ npm install --save-dev --save-exact yaml@2.9.0
 
 Expected: `yaml` appears only in `devDependencies`; protected npm package dependencies remain unchanged.
 
-- [ ] **Step 2: Write failing lock validation tests**
+- [x] **Step 2: Write failing lock validation tests**
 
 Create tests that assert the checked-in lock contains exactly these pinned sources:
 
@@ -89,7 +89,7 @@ const expected = new Map([
 
 Also assert rejection of duplicate IDs, non-HTTPS URLs, credential-bearing URLs, malformed SHA-256, zero sizes, missing SPDX/license evidence, unsupported platform, and a floating revision without exact hash and version.
 
-- [ ] **Step 3: Run the test and verify RED**
+- [x] **Step 3: Run the test and verify RED**
 
 Run:
 
@@ -99,7 +99,7 @@ node --test test/release-asset-lock.test.mjs
 
 Expected: FAIL because `release/windows-x64-assets.lock.json` and `src/release-asset-lock.mjs` do not exist.
 
-- [ ] **Step 4: Add the exact lock and validator**
+- [x] **Step 4: Add the exact lock and validator**
 
 The lock uses schema version `1`, platform `windows-x64`, the exact values above, and these sources:
 
@@ -114,7 +114,7 @@ https://go.microsoft.com/fwlink/?linkid=2124701
 
 `validateReleaseAssetLock` normalizes no values. It returns violations and `loadReleaseAssetLock` throws `release.asset_lock_invalid` when any violation exists.
 
-- [ ] **Step 5: Run focused tests and commit**
+- [x] **Step 5: Run focused tests and commit**
 
 Run:
 
@@ -601,4 +601,3 @@ Review must explicitly confirm:
 - no development key, generated binary, model, cache, or local path is committed;
 - overlay exclusion remains intact;
 - PR5 remains responsible for production signing, draft GitHub Release, npm OIDC/provenance, and post-publish smoke.
-
