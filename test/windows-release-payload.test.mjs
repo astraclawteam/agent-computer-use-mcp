@@ -9,6 +9,8 @@ import {
   buildWindowsReleasePayload,
   expandVerifiedZip,
 } from "../src/windows-release-payload.mjs";
+import { WINDOWS_X64_ONNX_REQUIRED_FILES } from "../src/release-runtime-selector.mjs";
+import { WINDOWS_X64_RELEASE_TARGET } from "../src/release-target.mjs";
 
 const roots = [];
 
@@ -35,6 +37,10 @@ test("Windows release payload contains portable protected runtime and native hel
 
   assert.equal(report.status, "ready");
   assert.equal(report.distributionStatus, "blocked_unsigned");
+  assert.deepEqual(report.target, WINDOWS_X64_RELEASE_TARGET);
+  assert.equal(report.runtimeSelection.packageVersion, "1.27.0");
+  assert.deepEqual(report.runtimeSelection.retainedNativeFiles, WINDOWS_X64_ONNX_REQUIRED_FILES);
+  assert.ok(report.runtimeSelection.removedNativeBytes > 0);
   assert.equal(report.sourceEntryCount, 0);
   assert.equal(report.sourceMapCount, 0);
   assert.equal(await exists(join(report.bundleRoot, "payload/runtime/node/node.exe")), true);
@@ -55,6 +61,12 @@ test("Windows release payload contains portable protected runtime and native hel
   assert.equal(JSON.stringify(descriptor).includes(resolve(".")), false);
   assert.equal(report.files.some((file) => file.path.endsWith(".pdb")), false);
   assert.equal(report.files.some((file) => file.path.includes("node_modules/yaml/")), false);
+  assert.equal(report.files.some((file) => /onnxruntime-node\/bin\/napi-v6\/(?:darwin|linux)\//u.test(file.path)), false);
+  assert.equal(report.files.some((file) => file.path.includes("onnxruntime-node/bin/napi-v6/win32/arm64/")), false);
+  assert.equal(report.files.some((file) => file.path.endsWith(
+    "onnxruntime-node/bin/napi-v6/win32/x64/onnxruntime_binding.node",
+  )), true);
+  assert.deepEqual(descriptor.target, WINDOWS_X64_RELEASE_TARGET);
 });
 
 test("verified ZIP expansion rejects path traversal before writing", async (t) => {
