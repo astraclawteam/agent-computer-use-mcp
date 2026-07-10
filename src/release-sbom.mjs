@@ -2,6 +2,8 @@ import { spawn } from "node:child_process";
 import { mkdir, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 
+import { WINDOWS_X64_RELEASE_TARGET, assertReleaseTarget } from "./release-target.mjs";
+
 const REQUIRED_COMPONENTS = [
   "agent-computer-use-mcp",
   "agent-computer-use-installer-windows-x64",
@@ -21,7 +23,9 @@ export async function buildReleaseSbom({
   baseSbom,
   generatedAt = new Date().toISOString(),
   projectRoot = resolve("."),
+  target: requestedTarget = WINDOWS_X64_RELEASE_TARGET,
 } = {}) {
+  const target = assertReleaseTarget(requestedTarget);
   const source = baseSbom ?? await createNpmSbom(projectRoot);
   if (source?.bomFormat !== "CycloneDX" || !source?.metadata?.component) {
     throw releaseError("release.sbom_invalid_base", "npm SBOM is not a CycloneDX application document");
@@ -67,6 +71,11 @@ export async function buildReleaseSbom({
     metadata: {
       timestamp: generatedAt,
       component: rootComponent,
+      properties: [
+        ...(source.metadata.properties ?? [])
+          .filter((property) => property?.name !== "agent-computer-use.releaseTarget"),
+        { name: "agent-computer-use.releaseTarget", value: target.id },
+      ],
     },
     components: unique.sort((left, right) => left["bom-ref"].localeCompare(right["bom-ref"], "en")),
   };
@@ -79,6 +88,7 @@ export async function buildReleaseSbom({
   await writeFile(outputPath, serialized, "utf8");
   return {
     status: "passed",
+    target,
     format: "CycloneDX",
     outputPath: resolve(outputPath),
     componentCount: sbom.components.length + 1,

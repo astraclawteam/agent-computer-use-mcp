@@ -6,6 +6,7 @@ import { join, resolve } from "node:path";
 import { afterEach, test } from "node:test";
 
 import { buildReleaseSbom } from "../src/release-sbom.mjs";
+import { WINDOWS_X64_RELEASE_TARGET } from "../src/release-target.mjs";
 
 const roots = [];
 
@@ -21,6 +22,7 @@ test("release SBOM combines locked native assets with production npm components"
   const report = await buildReleaseSbom({
     outputPath: join(root, "sbom.cdx.json"),
     lock,
+    target: WINDOWS_X64_RELEASE_TARGET,
     payloadReport: {
       files: [
         {
@@ -52,6 +54,11 @@ test("release SBOM combines locked native assets with production npm components"
   assert.equal(report.status, "passed");
   assert.equal(report.format, "CycloneDX");
   const sbom = JSON.parse(await readFile(report.outputPath, "utf8"));
+  assert.deepEqual(report.target, WINDOWS_X64_RELEASE_TARGET);
+  assert.deepEqual(sbom.metadata.properties, [{
+    name: "agent-computer-use.releaseTarget",
+    value: "windows-x64",
+  }]);
   const componentIds = new Set([
     sbom.metadata.component.name,
     ...sbom.components.map((component) => component.name),

@@ -10,6 +10,7 @@ import {
   promoteReleaseCandidate,
   verifyWindowsReleaseCandidate,
 } from "../src/windows-release-assembly.mjs";
+import { WINDOWS_X64_RELEASE_TARGET } from "../src/release-target.mjs";
 
 const roots = [];
 
@@ -33,6 +34,7 @@ test("Windows release assembly executes verified stages and atomically promotes 
   assert.deepEqual(calls, ["acquire", "payload", "sbom", "prepare-assets", "offline-bundle", "npm-pack"]);
   assert.equal(report.status, "passed");
   assert.equal(report.platform, "windows-x64");
+  assert.deepEqual(report.target, WINDOWS_X64_RELEASE_TARGET);
   assert.equal(report.installable, true);
   assert.equal(report.distributionStatus, "blocked_unsigned");
   assert.equal(report.assetCount, 6);
@@ -127,6 +129,7 @@ test("verified Windows candidate can be reopened without rebuilding release stag
 
   assert.equal(report.status, "passed");
   assert.equal(report.realAssetBytesVerified, true);
+  assert.deepEqual(report.target, WINDOWS_X64_RELEASE_TARGET);
   assert.equal(report.artifacts.length, 7);
   assert.deepEqual(calls, ["acquire"]);
 });
@@ -353,6 +356,7 @@ async function createFixture() {
     commit: "a".repeat(40),
     channel: "preview",
     platform: "windows-x64",
+    target: WINDOWS_X64_RELEASE_TARGET,
   };
   return {
     root,
@@ -372,8 +376,9 @@ function fixtureDependencies({ calls, acquired, options }) {
       calls.push("acquire");
       return acquired();
     },
-    async buildWindowsReleasePayload({ outputRoot }) {
+    async buildWindowsReleasePayload({ outputRoot, target }) {
       calls.push("payload");
+      assert.deepEqual(target, WINDOWS_X64_RELEASE_TARGET);
       const installerPath = join(outputRoot, "payload/bin/AgentComputerUse.Installer.exe");
       const overlayPath = join(outputRoot, "payload/helpers/overlay/GatewayComputerUseOverlay.exe");
       await writeFixture(installerPath, "installer");
@@ -381,13 +386,15 @@ function fixtureDependencies({ calls, acquired, options }) {
       await writeFixture(join(outputRoot, "release-manifest.json"), "{}");
       return {
         status: "ready",
+        target,
         bundleRoot: outputRoot,
         installerPath,
         files: [{ path: "helpers/overlay/GatewayComputerUseOverlay.exe", bytes: 7, sha256: sha256("overlay") }],
       };
     },
-    async prepareWindowsOfflineAssets({ outputRoot }) {
+    async prepareWindowsOfflineAssets({ outputRoot, target }) {
       calls.push("prepare-assets");
+      assert.deepEqual(target, WINDOWS_X64_RELEASE_TARGET);
       const trustRoot = join(outputRoot, "trust");
       const manifestPath = await writeFixture(join(trustRoot, "asset-manifest.json"), "{}");
       const signaturePath = await writeFixture(join(trustRoot, "asset-manifest.sig"), "signature");
@@ -395,14 +402,16 @@ function fixtureDependencies({ calls, acquired, options }) {
       const assets = [{ id: "offline", path: await writeFixture(join(outputRoot, "offline.bin"), "offline"), sizeBytes: 7, sha256: sha256("offline") }];
       return {
         status: "ready",
+        target,
         assets,
         trust: { manifestPath, signaturePath, keyringPath },
         requiredAssetIds: ["offline"],
         licenses: [],
       };
     },
-    async buildWindowsOfflineBundle({ outputRoot }) {
+    async buildWindowsOfflineBundle({ outputRoot, target }) {
       calls.push("offline-bundle");
+      assert.deepEqual(target, WINDOWS_X64_RELEASE_TARGET);
       if (options.failStage === "offline-bundle") {
         const error = new Error("fixture.offline_failed");
         error.code = "fixture.offline_failed";
@@ -410,15 +419,16 @@ function fixtureDependencies({ calls, acquired, options }) {
       }
       const fileName = "agent-computer-use-mcp-0.0.1-windows-x64-offline.candidate.zip";
       const outputPath = await writeFixture(join(outputRoot, fileName), "offline-zip");
-      return { status: "ready", outputPath, fileName, firstEnableDownloadCount: 0 };
+      return { status: "ready", target, outputPath, fileName, firstEnableDownloadCount: 0, assetCount: 1, blobCount: 1 };
     },
     async packProtectedNpmPackage({ releaseRoot }) {
       calls.push("npm-pack");
       const filename = "agent-computer-use-mcp-0.0.1.tgz";
       return { status: "passed", filename, tarballPath: await writeFixture(join(releaseRoot, filename), "npm") };
     },
-    async buildReleaseSbom({ outputPath }) {
+    async buildReleaseSbom({ outputPath, target }) {
       calls.push("sbom");
+      assert.deepEqual(target, WINDOWS_X64_RELEASE_TARGET);
       await writeFixture(outputPath, JSON.stringify({ bomFormat: "CycloneDX" }));
       return { status: "passed", outputPath };
     },
