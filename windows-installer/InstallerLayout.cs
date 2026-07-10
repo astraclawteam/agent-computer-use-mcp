@@ -12,6 +12,10 @@ internal sealed class InstallerLayout
         TransactionsRoot = Path.Combine(ProgramRoot, "transactions");
         CacheAssetsRoot = Path.Combine(ProgramRoot, "cache", "assets");
         CacheDownloadsRoot = Path.Combine(ProgramRoot, "cache", "downloads");
+        CacheManifestsRoot = Path.Combine(ProgramRoot, "cache", "manifests");
+        AssetsRoot = Path.Combine(ProgramRoot, "assets");
+        PreparedAssetsRoot = Path.Combine(StateRoot, "prepared-assets");
+        AssetStatePath = Path.Combine(StateRoot, "asset-state.json");
     }
 
     public string ProgramRoot { get; }
@@ -22,6 +26,10 @@ internal sealed class InstallerLayout
     public string TransactionsRoot { get; }
     public string CacheAssetsRoot { get; }
     public string CacheDownloadsRoot { get; }
+    public string CacheManifestsRoot { get; }
+    public string AssetsRoot { get; }
+    public string PreparedAssetsRoot { get; }
+    public string AssetStatePath { get; }
 
     public void Initialize()
     {
@@ -32,6 +40,9 @@ internal sealed class InstallerLayout
             TransactionsRoot,
             CacheAssetsRoot,
             CacheDownloadsRoot,
+            CacheManifestsRoot,
+            AssetsRoot,
+            PreparedAssetsRoot,
             Path.Combine(DataRoot, "artifacts"),
             Path.Combine(DataRoot, "logs"),
             Path.Combine(DataRoot, "traces"),
@@ -44,6 +55,25 @@ internal sealed class InstallerLayout
     }
 
     public string GetReleaseRoot(string version) => Path.Combine(ReleasesRoot, version);
+
+    public string GetAssetBlobPath(string sha256) => Path.Combine(
+        CacheAssetsRoot,
+        "sha256",
+        sha256[..2],
+        sha256,
+        "blob");
+
+    public string GetAssetVersionRoot(string id, string version, string sha256) => Path.Combine(
+        AssetsRoot,
+        id,
+        version,
+        sha256);
+
+    public string GetPreparedAssetStatePath(string releaseId) => Path.Combine(
+        PreparedAssetsRoot,
+        $"{releaseId}.json");
+
+    public string GetCachedManifestRoot(string releaseId) => Path.Combine(CacheManifestsRoot, releaseId);
 
     public string CreateTransactionRoot() => Path.Combine(TransactionsRoot, Guid.NewGuid().ToString("N"));
 

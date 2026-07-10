@@ -70,6 +70,7 @@ npm run phase:7.5
 npm run phase:7.6
 npm run phase:7.7
 npm run phase:7.8
+npm run phase:7.9
 npm run phase:1.4
 npm run package:foundation
 npm run package:dry-run
@@ -132,6 +133,7 @@ Required evidence:
 - `npm run phase:7.6` verifies repair entrypoints are product-safe, approval-gated, and directly renderable by host install UI.
 - `npm run phase:7.7` verifies a clean Windows install reports degraded readiness with exact plan-only repair actions and catalog entries.
 - `npm run phase:7.8` executes real local install, upgrade, corruption rejection, and rollback transactions without network or desktop control.
+- `npm run phase:7.9` executes signed manifest verification, offline and resumable HTTP acquisition, safe materialization, atomic asset activation/rollback, and approval-gated standard MCP repair.
 - No generated build output or model packs in Git.
 - `computer.health({fast:true})` is ready or structured degraded.
 - User overlay is excluded from observations.

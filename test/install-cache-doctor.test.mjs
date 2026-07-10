@@ -8,12 +8,13 @@ import {
 } from "../src/install-cache-doctor.mjs";
 
 test("install cache doctor reports all product assets healthy when present", async () => {
+  const activeDriverPath = "C:\\Users\\demo\\AppData\\Local\\Programs\\AgentComputerUse\\assets\\cua-driver-windows-x64\\0.7.1\\hash\\bin\\cua-driver.exe";
   const doctor = await runInstallCacheDoctor({
     platform: "win32",
     env: { LOCALAPPDATA: "C:\\Users\\demo\\AppData\\Local" },
     probes: {
       pathExists: async () => true,
-      driverHealth: async () => ({ status: "healthy", version: "cua-driver 1.2.3" }),
+      driverHealth: async () => ({ status: "healthy", version: "cua-driver 1.2.3", driverPath: activeDriverPath }),
       webView2Health: async () => ({ status: "healthy", version: "123.0.0" }),
       ocrRuntimeHealth: async () => ({ status: "healthy", runtime: "onnxruntime-node" }),
       permissionsHealth: async () => ({ status: "healthy" }),
@@ -31,6 +32,7 @@ test("install cache doctor reports all product assets healthy when present", asy
     ["webview2-runtime", "healthy"],
   ]);
   assert.equal(doctor.permissions.status, "healthy");
+  assert.equal(doctor.assets[0].path, activeDriverPath);
   assert.deepEqual(doctor.repairPlan.actions, []);
 });
 
@@ -38,9 +40,9 @@ test("install cache doctor reports degraded state and repair actions for missing
   const missing = new Set([
     "C:\\Users\\demo\\AppData\\Local\\Programs\\AgentComputerUse\\cua-driver",
     "C:\\Users\\demo\\AppData\\Local\\Programs\\AgentComputerUse\\overlay",
-    "C:\\Users\\demo\\AppData\\Local\\AgentComputerUse\\models\\pp-ocrv6-small\\det.onnx",
-    "C:\\Users\\demo\\AppData\\Local\\AgentComputerUse\\models\\pp-ocrv6-small\\rec.onnx",
-    "C:\\Users\\demo\\AppData\\Local\\AgentComputerUse\\models\\pp-ocrv6-small\\cls.onnx",
+    "C:\\Users\\demo\\AppData\\Local\\AgentComputerUse\\models\\pp-ocrv6-small\\PP-OCRv6_det_small.onnx",
+    "C:\\Users\\demo\\AppData\\Local\\AgentComputerUse\\models\\pp-ocrv6-small\\PP-OCRv6_rec_small.onnx",
+    "C:\\Users\\demo\\AppData\\Local\\AgentComputerUse\\models\\pp-ocrv6-small\\ppocrv6_dict.txt",
   ]);
   const doctor = await runInstallCacheDoctor({
     platform: "win32",
@@ -60,7 +62,7 @@ test("install cache doctor reports degraded state and repair actions for missing
   assert.equal(doctor.assets.find((asset) => asset.id === "ocr-model-pp-ocrv6-small").status, "missing");
   assert.deepEqual(
     doctor.assets.find((asset) => asset.id === "ocr-model-pp-ocrv6-small").health.missingFiles.map((file) => file.role),
-    ["det", "rec", "cls"],
+    ["det", "rec", "dictionary"],
   );
   assert.equal(doctor.permissions.status, "degraded");
   assert.deepEqual(doctor.repairPlan.actions.map((action) => action.id), [

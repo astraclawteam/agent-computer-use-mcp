@@ -103,9 +103,9 @@ test("install cache doctor exposes repair entrypoints without desktop control", 
   const missing = new Set([
     "C:\\Users\\demo\\AppData\\Local\\Programs\\AgentComputerUse\\cua-driver",
     "C:\\Users\\demo\\AppData\\Local\\Programs\\AgentComputerUse\\overlay",
-    "C:\\Users\\demo\\AppData\\Local\\AgentComputerUse\\models\\pp-ocrv6-small\\det.onnx",
-    "C:\\Users\\demo\\AppData\\Local\\AgentComputerUse\\models\\pp-ocrv6-small\\rec.onnx",
-    "C:\\Users\\demo\\AppData\\Local\\AgentComputerUse\\models\\pp-ocrv6-small\\cls.onnx",
+    "C:\\Users\\demo\\AppData\\Local\\AgentComputerUse\\models\\pp-ocrv6-small\\PP-OCRv6_det_small.onnx",
+    "C:\\Users\\demo\\AppData\\Local\\AgentComputerUse\\models\\pp-ocrv6-small\\PP-OCRv6_rec_small.onnx",
+    "C:\\Users\\demo\\AppData\\Local\\AgentComputerUse\\models\\pp-ocrv6-small\\ppocrv6_dict.txt",
   ]);
 
   const doctor = await runInstallCacheDoctor({

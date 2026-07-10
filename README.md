@@ -104,6 +104,7 @@ Example MCP client config:
 - `npm run phase:7.6`: verify repair entrypoints are product-safe, approval-gated, and directly renderable by host install UI.
 - `npm run phase:7.7`: verify a clean Windows install reports degraded readiness with exact plan-only repair actions and catalog entries.
 - `npm run phase:7.8`: execute a real local Windows install, upgrade, corruption rejection, and rollback transaction.
+- `npm run phase:7.9`: prove signed asset verification, offline/HTTP cache identity, resume, safe extraction, activation/rollback, and approved standard MCP repair.
 - `npm run installer:build`: build the headless .NET 10 installer transaction engine.
 - `npm run installer:publish:win-x64`: publish the ignored NativeAOT Windows x64 installer artifact for signing and release assembly.
 - `npm run phase:1.4`: run the real `cua-driver mcp` desktop action lifecycle smoke.
@@ -125,6 +126,11 @@ Preferred public environment variables:
 - `AGENT_COMPUTER_USE_OCR_MODEL_DIR`
 - `AGENT_COMPUTER_USE_OVERLAY_DISABLED`
 - `AGENT_COMPUTER_USE_OVERLAY_TARGET_RECT_FILE`
+- `AGENT_COMPUTER_USE_ASSET_MANIFEST`
+- `AGENT_COMPUTER_USE_ASSET_SIGNATURE`
+- `AGENT_COMPUTER_USE_ASSET_TRUST_KEYRING`
+- `AGENT_COMPUTER_USE_OFFLINE_ASSET_ROOT`
+- `AGENT_COMPUTER_USE_WINDOWS_INSTALLER`
 
 Legacy `XIAOZHICLAW_*` variables are still accepted for compatibility with the original Gateway prototype.
 
@@ -144,6 +150,6 @@ Commercial-readiness planning lives in:
 
 New productization work should use the GitHub issue templates for productization phases and app smokes.
 
-The native installer consumes a prebuilt local release bundle, verifies every payload file by SHA-256, stages an immutable version, and atomically updates `state/install-state.json`. It never downloads assets or starts Computer Use; asset acquisition and user-facing installer UI are separate product layers.
+The native installer consumes release bundles and signed asset manifests, verifies every payload by hash and Windows trust policy, stages immutable versions, and atomically activates or rolls back state. Asset acquisition is offline-first and uses the network only after explicit repair approval; it never starts Computer Use or includes the overlay in observations.
 
 The repository root is intentionally non-publishable. npm distribution is built from a separate staging package containing only protected `dist` runtime files, release integrity metadata, and license/readme/changelog files. The gate rejects source trees, C#/Python source, tests, Source Maps, and unbundled first-party imports. Because this repository is open source, obfuscation is defense in depth rather than a secrecy boundary.

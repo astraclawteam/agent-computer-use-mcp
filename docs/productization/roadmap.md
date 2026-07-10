@@ -10,14 +10,14 @@ This roadmap turns the current MVP into a commercial local MCP module. It is wri
 - `cua-driver mcp` is the current desktop action backend.
 - Gateway-managed overlay, target-window frame, and branded cursor are validated.
 - OCR sidecar has an MVP path, but model pack management and production scheduling are not complete.
-- Phase 7.0-7.7 are plan/proof gates. Phase 7.8 is the first real filesystem execution gate: a local release bundle is installed, upgraded, rejected on corruption, and rolled back through the native transaction engine.
+- Phase 7.0-7.7 are plan/proof gates. Phase 7.8 validates local release transactions. Phase 7.9 validates signed asset manifests, offline/network cache identity, resumable acquisition, safe materialization, atomic activation/rollback, and approval-gated MCP repair through real temporary roots.
 - Phase 0.14 builds a release-only npm staging package, verifies runtime integrity, runs the official MCP SDK smoke, and packs a tarball with zero first-party source and zero Source Maps.
 
 ## Execution Layers
 
 - **Proof layer:** validates contracts, safety invariants, manifests, and repair plans without changing the machine.
 - **Transaction layer:** `windows-installer` is the only writer of immutable release directories and `state/install-state.json`.
-- **Acquisition layer:** the next productization PR will download or materialize signed assets into the local bundle/cache before invoking the transaction layer.
+- **Acquisition layer:** the NativeAOT asset materializer verifies a signed manifest, prefers offline blobs, optionally resumes approved HTTPS acquisition, and promotes content-addressed immutable assets before activation.
 - **Host layer:** the MCP daemon and Gateway consume the active release; they do not rewrite installation state themselves.
 
 ## Phase P0: Package Foundation
@@ -47,6 +47,7 @@ Acceptance:
 - `npm run doctor:install-cache` emits a plan-only readiness report for driver, overlay, OCR runtime/model, WebView2, and permissions without starting desktop control.
 - `npm run phase:1.6` emits install paths using `AGENT_COMPUTER_USE_*`.
 - `npm run phase:7.8` performs install, upgrade, corruption rejection, and rollback against real temporary filesystem roots.
+- `npm run phase:7.9` proves trusted offline/HTTP acquisition, cache identity, corruption/traversal rejection, atomic activation/rollback, and standard MCP repair without first-enable downloads.
 - The publish-ready npm tarball contains only runtime `dist`, metadata, licenses, and approved runtime assets; source and `*.map` entries fail the release gate.
 - `npm run phase:0.14` records root publish blocking, integrity verification, MCP smoke, protected runtime count, tarball SHA-256, and source/Source Map counts.
 - A clean Windows VM can install, run `computer.health({fast:true})`, and produce a clear degraded state when optional assets are missing.

@@ -9,11 +9,24 @@ const releaseArtifacts = [
     signature: { status: "valid", verifiedBy: "signtool verify /pa", timestamped: true },
   },
   {
-    id: "cua-driver-windows-x64",
+    id: "windows-installer-win-x64",
     kind: "windows-helper",
-    path: "cua-driver/cua-driver.exe",
+    path: "windows-installer/AgentComputerUse.Installer.exe",
     sha256: "b".repeat(64),
     signature: { status: "valid", verifiedBy: "signtool verify /pa", timestamped: true },
+  },
+  {
+    id: "cua-driver-windows-x64",
+    kind: "third-party-windows-asset",
+    path: "cua-driver-rs-0.7.1-windows-x86_64.zip",
+    sha256: "c".repeat(64),
+    provenance: {
+      status: "valid",
+      manifestSignature: "valid",
+      upstreamSha256: "c".repeat(64),
+      extractedFilesVerified: true,
+      authenticodeMode: "vendor-unsigned",
+    },
   },
 ];
 
@@ -28,6 +41,7 @@ process.stdout.write(`${JSON.stringify({
   requiredHelperCount: validation.requiredHelperCount,
   signedRequiredHelperCount: validation.signedRequiredHelperCount,
   timestampedRequiredHelperCount: validation.timestampedRequiredHelperCount,
+  verifiedThirdPartyAssetCount: validation.verifiedThirdPartyAssetCount,
   reservedHelperCount: validation.reservedHelperCount,
   verificationCommand: inventory.verificationCommand,
   unsignedDistributionBlocked: inventory.unsignedDistributionBlocked,

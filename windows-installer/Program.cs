@@ -4,15 +4,75 @@ namespace AgentComputerUse.Installer;
 
 internal static class Program
 {
-    private static int Main(string[] args)
+    private static async Task<int> Main(string[] args)
     {
         var operation = args.Length > 0 ? args[0] : "unknown";
         InstallerLayout? layout = null;
+        AssetProgressWriter? assetProgress = null;
         try
         {
             var options = ParseOptions(args.Skip(1).ToArray());
             layout = InstallerLayout.FromOptions(options);
             var engine = new InstallerEngine(layout, new ReleaseVerifier());
+            if (operation == "asset-verify-manifest")
+            {
+                var verified = new AssetManifestVerifier().Verify(
+                    RequireOption(options, "manifest"),
+                    RequireOption(options, "signature"),
+                    RequireOption(options, "trust-keyring"));
+                WriteResult(new AssetVerificationResult
+                {
+                    Status = "verified",
+                    Operation = operation,
+                    ReleaseId = verified.Manifest.ReleaseId,
+                    ManifestSha256 = verified.ManifestSha256,
+                    AssetCount = verified.Manifest.Assets.Count,
+                    StartsDesktopControl = false,
+                    IncludeUserOverlay = false,
+                });
+                return 0;
+            }
+            if (operation.StartsWith("asset-", StringComparison.Ordinal))
+            {
+                var materializer = new SafeZipMaterializer();
+                var assetCache = new AssetCache(layout);
+                var sourcePolicy = new AssetSourcePolicy();
+                var assetEngine = new AssetEngine(
+                    layout,
+                    new AssetManifestVerifier(),
+                    assetCache,
+                    new AssetDownloader(layout, assetCache, sourcePolicy),
+                    materializer,
+                    new AuthenticodeVerifier(),
+                    new AssetStateStore(layout, materializer));
+                var operationId = options.GetValueOrDefault("operation-id", $"{operation}-{Guid.NewGuid():N}");
+                assetProgress = new AssetProgressWriter(operation, operationId);
+                assetProgress.WriteProgress("accepted", 0);
+                var assetResult = operation switch
+                {
+                    "asset-prepare" => await assetEngine.PrepareAsync(
+                        RequireOption(options, "manifest"),
+                        RequireOption(options, "signature"),
+                        RequireOption(options, "trust-keyring"),
+                        options.GetValueOrDefault("offline-root", ""),
+                        ParseAssetIds(options.GetValueOrDefault("asset-ids", "")),
+                        operationId,
+                        string.Equals(options.GetValueOrDefault("allow-network"), "true", StringComparison.Ordinal),
+                        assetProgress,
+                        CancellationToken.None),
+                    "asset-activate" => await ActivateAsync(
+                        assetProgress,
+                        assetEngine,
+                        RequireOption(options, "release-id"),
+                        operationId,
+                        CancellationToken.None),
+                    "asset-status" => assetEngine.Status(operationId),
+                    "asset-rollback" => await assetEngine.RollbackAsync(operationId, CancellationToken.None),
+                    _ => throw new InstallerException("installer.operation_invalid", $"Unsupported operation: {operation}"),
+                };
+                assetProgress.WriteTerminal(assetResult);
+                return 0;
+            }
             var result = operation switch
             {
                 "install" or "upgrade" => engine.Apply(operation, RequireOption(options, "bundle")),
@@ -25,14 +85,35 @@ internal static class Program
         }
         catch (InstallerException error)
         {
+            if (assetProgress is not null)
+            {
+                assetProgress.WriteFailure(error.Code, error.Message);
+                return 2;
+            }
             WriteResult(FailedResult(operation, layout, error.Code, error.Message));
             return 2;
         }
         catch (Exception error)
         {
+            if (assetProgress is not null)
+            {
+                assetProgress.WriteFailure("installer.internal_error", error.Message);
+                return 2;
+            }
             WriteResult(FailedResult(operation, layout, "installer.internal_error", error.Message));
             return 2;
         }
+    }
+
+    private static async Task<AssetOperationResult> ActivateAsync(
+        AssetProgressWriter progress,
+        AssetEngine engine,
+        string releaseId,
+        string operationId,
+        CancellationToken cancellationToken)
+    {
+        progress.WriteProgress("activating", 50);
+        return await engine.ActivateAsync(releaseId, operationId, cancellationToken);
     }
 
     private static Dictionary<string, string> ParseOptions(string[] args)
@@ -67,6 +148,12 @@ internal static class Program
         return value;
     }
 
+    private static IReadOnlySet<string> ParseAssetIds(string value)
+    {
+        return value.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+    }
+
     private static InstallerResult FailedResult(
         string operation,
         InstallerLayout? layout,
@@ -88,5 +175,10 @@ internal static class Program
     private static void WriteResult(InstallerResult result)
     {
         Console.Out.WriteLine(JsonSerializer.Serialize(result, InstallerJsonContext.Default.InstallerResult));
+    }
+
+    private static void WriteResult(AssetVerificationResult result)
+    {
+        Console.Out.WriteLine(JsonSerializer.Serialize(result, InstallerJsonContext.Default.AssetVerificationResult));
     }
 }

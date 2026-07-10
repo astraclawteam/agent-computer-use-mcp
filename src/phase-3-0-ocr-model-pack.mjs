@@ -12,7 +12,7 @@ try {
     .map((file) => file.role);
   const passed = PP_OCRV6_SMALL_MODEL_PACK.id === "ocr-model-pp-ocrv6-small"
     && PP_OCRV6_SMALL_MODEL_PACK.format === "onnx"
-    && requiredRoles.join(",") === "det,rec,cls"
+    && requiredRoles.join(",") === "det,rec,dictionary"
     && health.startsDesktopControl === false
     && health.includeUserOverlay === false;
 

@@ -3,13 +3,16 @@ import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
 import { COMPUTER_USE_MCP_TOOLS, MCP_RESULT_SCHEMA_VERSION } from "./computer-use-mcp-tools.mjs";
+import { createAssetRepairRuntime } from "./asset-installer-host.mjs";
 import { serializeToolError } from "./computer-use-errors.mjs";
 import { getComputerUseInstallation } from "./computer-use-installation.mjs";
 import { ComputerUseProviderRouter } from "./computer-use-provider-router.mjs";
 import { CuaDriverMcpDriver } from "./cua-driver-mcp-driver.mjs";
 import { startGatewayManagedOverlay, stopGatewayManagedOverlay } from "./gateway-overlay-session.mjs";
 
+const assetRepairRuntime = createAssetRepairRuntime();
 const router = new ComputerUseProviderRouter({
+  ...assetRepairRuntime,
   driver: new CuaDriverMcpDriver(),
   overlayRuntime: {
     start: (args) => startGatewayManagedOverlay(args),

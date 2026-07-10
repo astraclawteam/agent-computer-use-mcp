@@ -14,8 +14,8 @@ test("OCR model pack manifest declares PP-OCRv6 small ONNX files", async () => {
   assert.equal(PP_OCRV6_SMALL_MODEL_PACK.variant, "small");
   assert.equal(PP_OCRV6_SMALL_MODEL_PACK.format, "onnx");
   assert.equal(PP_OCRV6_SMALL_MODEL_PACK.files.length, 3);
-  assert.deepEqual(PP_OCRV6_SMALL_MODEL_PACK.files.map((file) => file.role), ["det", "rec", "cls"]);
-  assert.equal(PP_OCRV6_SMALL_MODEL_PACK.acquisition, "bundle-or-first-run-cache");
+  assert.deepEqual(PP_OCRV6_SMALL_MODEL_PACK.files.map((file) => file.role), ["det", "rec", "dictionary"]);
+  assert.equal(PP_OCRV6_SMALL_MODEL_PACK.acquisition, "bundle-or-approved-install-cache");
   assert.equal(PP_OCRV6_SMALL_MODEL_PACK.offlineRequired, false);
 
   const resolved = resolveOcrModelPack({
@@ -23,9 +23,9 @@ test("OCR model pack manifest declares PP-OCRv6 small ONNX files", async () => {
   });
   assert.equal(resolved.root, "C:\\Users\\demo\\AppData\\Local\\AgentComputerUse\\models\\pp-ocrv6-small");
   assert.deepEqual(resolved.files.map((file) => file.path), [
-    "C:\\Users\\demo\\AppData\\Local\\AgentComputerUse\\models\\pp-ocrv6-small\\det.onnx",
-    "C:\\Users\\demo\\AppData\\Local\\AgentComputerUse\\models\\pp-ocrv6-small\\rec.onnx",
-    "C:\\Users\\demo\\AppData\\Local\\AgentComputerUse\\models\\pp-ocrv6-small\\cls.onnx",
+    "C:\\Users\\demo\\AppData\\Local\\AgentComputerUse\\models\\pp-ocrv6-small\\PP-OCRv6_det_small.onnx",
+    "C:\\Users\\demo\\AppData\\Local\\AgentComputerUse\\models\\pp-ocrv6-small\\PP-OCRv6_rec_small.onnx",
+    "C:\\Users\\demo\\AppData\\Local\\AgentComputerUse\\models\\pp-ocrv6-small\\ppocrv6_dict.txt",
   ]);
 });
 
@@ -52,7 +52,7 @@ test("OCR model pack doctor reports missing required model files", async () => {
   assert.equal(health.status, "missing");
   assert.equal(health.id, "ocr-model-pp-ocrv6-small");
   assert.deepEqual(health.presentFiles.map((file) => file.role), ["det"]);
-  assert.deepEqual(health.missingFiles.map((file) => file.role), ["rec", "cls"]);
+  assert.deepEqual(health.missingFiles.map((file) => file.role), ["rec", "dictionary"]);
   assert.equal(health.includeUserOverlay, false);
   assert.equal(health.startsDesktopControl, false);
 });
@@ -60,9 +60,9 @@ test("OCR model pack doctor reports missing required model files", async () => {
 test("install cache doctor uses OCR model pack file-level health", async () => {
   const { runInstallCacheDoctor } = await import("../src/install-cache-doctor.mjs");
   const present = new Set([
-    "C:\\Users\\demo\\AppData\\Local\\AgentComputerUse\\models\\pp-ocrv6-small\\det.onnx",
-    "C:\\Users\\demo\\AppData\\Local\\AgentComputerUse\\models\\pp-ocrv6-small\\rec.onnx",
-    "C:\\Users\\demo\\AppData\\Local\\AgentComputerUse\\models\\pp-ocrv6-small\\cls.onnx",
+    "C:\\Users\\demo\\AppData\\Local\\AgentComputerUse\\models\\pp-ocrv6-small\\PP-OCRv6_det_small.onnx",
+    "C:\\Users\\demo\\AppData\\Local\\AgentComputerUse\\models\\pp-ocrv6-small\\PP-OCRv6_rec_small.onnx",
+    "C:\\Users\\demo\\AppData\\Local\\AgentComputerUse\\models\\pp-ocrv6-small\\ppocrv6_dict.txt",
   ]);
   const doctor = await runInstallCacheDoctor({
     platform: "win32",
@@ -101,7 +101,7 @@ test("Phase 3.0 has an executable OCR model pack manager smoke script", async ()
   assert.equal(report.phase, "3.0");
   assert.equal(report.benchmark, "ocr-model-pack-manager");
   assert.equal(report.modelPackId, "ocr-model-pp-ocrv6-small");
-  assert.deepEqual(report.requiredRoles, ["det", "rec", "cls"]);
+  assert.deepEqual(report.requiredRoles, ["det", "rec", "dictionary"]);
   assert.equal(report.planOnly, true);
   assert.equal(report.includeUserOverlay, false);
 });

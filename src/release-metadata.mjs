@@ -75,6 +75,11 @@ export function buildReleaseMetadata(options = {}) {
         required: true,
       },
       {
+        name: "trusted-asset-cache-materializer",
+        command: "npm run phase:7.9",
+        required: true,
+      },
+      {
         name: "policy-deny-proof",
         command: "npm run phase:1.11",
         required: true,

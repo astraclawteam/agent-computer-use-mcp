@@ -1,10 +1,11 @@
 import { spawn } from "node:child_process";
+import { resolveActiveAssetEntryPoint } from "./active-asset-state.mjs";
 
 const DRIVER_BINARY = "cua-driver";
 const DEFAULT_TIMEOUT_MS = 5000;
 const MAX_DETAIL_LENGTH = 2000;
 
-export function resolveCuaDriverCandidate(env = process.env) {
+export function resolveCuaDriverCandidate(env = process.env, options = {}) {
   for (const key of [
     "AGENT_COMPUTER_USE_CUA_DRIVER",
     "AGENT_COMPUTER_USE_CUA_DRIVER_PATH",
@@ -15,7 +16,13 @@ export function resolveCuaDriverCandidate(env = process.env) {
     const value = env[key]?.trim();
     if (value) return value;
   }
-  return null;
+  const resolveActiveAsset = options.resolveActiveAsset ?? resolveActiveAssetEntryPoint;
+  return resolveActiveAsset("cua-driver-windows-x64", {
+    env,
+    platform: options.platform,
+    programRoot: options.programRoot,
+    statePath: options.statePath,
+  });
 }
 
 export async function checkCuaDriverHealth(options = {}) {

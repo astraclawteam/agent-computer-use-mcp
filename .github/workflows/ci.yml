@@ -48,3 +48,6 @@ jobs:
 
       - name: Verify transactional Windows installer
         run: npm run phase:7.8
+
+      - name: Verify trusted asset delivery
+        run: npm run phase:7.9

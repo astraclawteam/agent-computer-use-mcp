@@ -13,7 +13,7 @@ This review records the public `computer.*` MCP contract that requires human PR 
 | --- | --- | --- | --- | --- | --- |
 | computer.health | reviewed | compatible | overlay-free | reviewed | Read-only health report; must not start desktop control. |
 | computer.doctor | reviewed | compatible | overlay-free | reviewed | Read-only diagnostics; repair actions remain plan-only. |
-| computer.repair | reviewed | compatible | overlay-free | reviewed | Approval-gated repair plan; no implicit download or desktop control. |
+| computer.repair | reviewed | compatible | overlay-free | reviewed | Defaults to plan-only; optional start/status/cancel lifecycle is approval-bound. Agent input cannot replace host manifest, signature, keyring, offline root, program root, or data root. |
 | computer.installation | reviewed | compatible | overlay-free | reviewed | Read-only install manifest and client config templates. |
 | computer.request_access | reviewed | compatible | overlay-free | reviewed | May start desktop control only after policy and approval requirements. |
 | computer.approve | reviewed | compatible | overlay-free | reviewed | Approval transition may start user-only overlay after explicit approval. |

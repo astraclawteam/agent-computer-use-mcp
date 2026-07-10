@@ -84,6 +84,9 @@ test("native installer initializes stable roots and rollback fails closed withou
     join(harness.programRoot, "state"),
     join(harness.programRoot, "cache/assets"),
     join(harness.programRoot, "cache/downloads"),
+    join(harness.programRoot, "cache/manifests"),
+    join(harness.programRoot, "assets"),
+    join(harness.programRoot, "state/prepared-assets"),
     join(harness.programRoot, "transactions"),
     join(harness.dataRoot, "artifacts"),
     join(harness.dataRoot, "logs"),
@@ -94,10 +97,13 @@ test("native installer initializes stable roots and rollback fails closed withou
     assert.equal((await stat(path)).isDirectory(), true);
   }
   assert.deepEqual(await readdir(join(harness.programRoot, "releases")), ["0.0.1"]);
-  assert.deepEqual(await readdir(join(harness.programRoot, "state")), ["install-state.json"]);
+  assert.deepEqual(await readdir(join(harness.programRoot, "state")), ["install-state.json", "prepared-assets"]);
   for (const path of [
     join(harness.programRoot, "cache/assets"),
     join(harness.programRoot, "cache/downloads"),
+    join(harness.programRoot, "cache/manifests"),
+    join(harness.programRoot, "assets"),
+    join(harness.programRoot, "state/prepared-assets"),
     join(harness.programRoot, "transactions"),
     join(harness.dataRoot, "artifacts"),
     join(harness.dataRoot, "logs"),
