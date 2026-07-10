@@ -10,6 +10,7 @@ Read these files in order:
 6. `asset-cache-materializer-spec.md`
 7. `asset-cache-materializer-implementation-plan.md`
 8. `real-release-pipeline-spec.md`
+9. `real-release-assembly-implementation-plan.md`
 
 The roadmap defines phases P0-P7. The release gates define alpha, beta, and commercial readiness. The app smoke matrix tracks real local software coverage. The implementation plans record the real Windows transaction engine, protected npm distribution, trusted asset acquisition/cache pipeline, and ordered follow-on PRs. The real release pipeline specification defines the tag-driven GitHub Release and public npm distribution contract.
 
