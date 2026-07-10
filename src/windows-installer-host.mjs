@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { open, mkdir, readdir, rm, stat } from "node:fs/promises";
+import { open, mkdir, readFile, readdir, rm, stat } from "node:fs/promises";
 import { dirname, extname, join, resolve } from "node:path";
 
 export const WINDOWS_INSTALLER_PROJECT = resolve("windows-installer/AgentComputerUse.Installer.csproj");
@@ -7,14 +7,18 @@ export const WINDOWS_INSTALLER_DLL = resolve("windows-installer/bin/Release/net1
 export const WINDOWS_INSTALLER_NATIVE_EXE = resolve("artifacts/windows-installer/win-x64/AgentComputerUse.Installer.exe");
 
 const BUILD_LOCK = resolve("windows-installer/obj/agent-computer-use-installer-build.lock");
-const LOCK_STALE_MS = 120_000;
+export const INSTALLER_BUILD_LOCK_POLICY = Object.freeze({
+  buildWaitMs: 300_000,
+  publishWaitMs: 600_000,
+  orphanGraceMs: 10_000,
+});
 
 export async function ensureWindowsInstallerBuilt(options = {}) {
   if (await installerBuildIsCurrent()) {
     return { status: "ready", built: false, dllPath: WINDOWS_INSTALLER_DLL };
   }
 
-  const timeoutMs = options.timeoutMs ?? 60_000;
+  const timeoutMs = options.timeoutMs ?? INSTALLER_BUILD_LOCK_POLICY.buildWaitMs;
   const startedAt = Date.now();
   await mkdir(dirname(BUILD_LOCK), { recursive: true });
   while (true) {
@@ -41,7 +45,7 @@ export async function ensureWindowsInstallerBuilt(options = {}) {
       }
     }
 
-    if (await lockIsStale()) {
+    if (await installerBuildLockIsStale(BUILD_LOCK)) {
       await rm(BUILD_LOCK, { force: true });
       continue;
     }
@@ -57,7 +61,7 @@ export async function ensureWindowsInstallerPublished(options = {}) {
     return { status: "ready", published: false, exePath: WINDOWS_INSTALLER_NATIVE_EXE };
   }
 
-  const timeoutMs = options.timeoutMs ?? 180_000;
+  const timeoutMs = options.timeoutMs ?? INSTALLER_BUILD_LOCK_POLICY.publishWaitMs;
   const startedAt = Date.now();
   await mkdir(dirname(BUILD_LOCK), { recursive: true });
   while (true) {
@@ -90,7 +94,7 @@ export async function ensureWindowsInstallerPublished(options = {}) {
         await rm(BUILD_LOCK, { force: true });
       }
     }
-    if (await lockIsStale()) {
+    if (await installerBuildLockIsStale(BUILD_LOCK)) {
       await rm(BUILD_LOCK, { force: true });
       continue;
     }
@@ -183,9 +187,26 @@ async function tryAcquireBuildLock() {
   }
 }
 
-async function lockIsStale() {
-  const lockStat = await stat(BUILD_LOCK).catch(() => null);
-  return Boolean(lockStat && Date.now() - lockStat.mtimeMs > LOCK_STALE_MS);
+export async function installerBuildLockIsStale(lockPath = BUILD_LOCK, options = {}) {
+  const lockStat = await stat(lockPath).catch(() => null);
+  if (!lockStat) return false;
+  const nowMs = (options.now ?? (() => new Date()))().getTime();
+  const orphanGraceMs = options.orphanGraceMs ?? INSTALLER_BUILD_LOCK_POLICY.orphanGraceMs;
+  if (nowMs - lockStat.mtimeMs <= orphanGraceMs) return false;
+
+  const ownerText = (await readFile(lockPath, "utf8").catch(() => "")).trim();
+  const ownerPid = /^[1-9][0-9]*$/u.test(ownerText) ? Number(ownerText) : null;
+  const processAlive = options.processAlive ?? processIsAlive;
+  return !Number.isSafeInteger(ownerPid) || !processAlive(ownerPid);
+}
+
+function processIsAlive(pid) {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return error?.code === "EPERM";
+  }
 }
 
 function runCommand(command, args, options = {}) {

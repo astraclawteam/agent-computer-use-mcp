@@ -23,6 +23,7 @@ All notable changes to `agent-computer-use-mcp` are tracked here.
 - Protected npm release staging with esbuild minification, final-pass JavaScript obfuscation, SHA-256 launcher verification, standard MCP smoke, and zero-source/zero-Source-Map tarball gates.
 - Real Windows x64 candidate assembly from six locked upstream assets with portable Node.js, protected MCP runtime, NativeAOT installer/overlay, PP-OCRv6 small ONNX model pack, WebView2 offline installer, CycloneDX SBOM, release manifest, and checksums.
 - Phase 0.15 offline installation proof verifies the ZIP's exact internal checksums, activates cua-driver, OCR, and WebView2 assets with installer network access disabled, resolves cua-driver through the installed MCP doctor, and starts the server without a machine-wide Node.js runtime; all PR4 outputs remain `blocked_unsigned` until PR5 production signing and clean-runner network isolation.
+- PID-aware NativeAOT installer build locking prevents slow cold-runner publishes from being mistaken for stale locks and gives concurrent build/publish waiters commercial CI time budgets.
 - Commercial policy-deny proof for password, payment, credential, and private surfaces.
 - Computer control approval state machine for approve, deny, cancel, revoke, and timeout flows.
 - MCP approval compatibility proof for pending approval schemas, duplicate-pending rejection, and disconnect cleanup.
