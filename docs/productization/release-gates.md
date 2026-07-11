@@ -229,6 +229,9 @@ Required evidence:
 - MCP approval compatibility proof from `npm run phase:5.5`.
 - Concurrency, multi-client stress, and disconnect test reports from `npm run phase:5.0`, `npm run phase:5.6`, and `npm run phase:5.2`.
 - Human review of public MCP contract changes from `npm run phase:5.7`.
+- Sanitized real-app provider evidence from `npm run phase:6.2`; declaration-only rows do not satisfy this gate.
+- Runtime soak evidence from `npm run phase:8.0`, including zero request failures, overlay leaks, desktop-control starts, and orphan processes.
+- A successful formal tag run of `.github/workflows/release.yml` with production Authenticode, production asset trust, npm provenance, post-publish install smoke, and a published GitHub Release.
 
 ## Blockers
 
@@ -242,3 +245,5 @@ Any of these block release:
 - CI required checks are bypassed for non-admin merges.
 - A publish-ready npm artifact contains first-party source, tests, C# source, Source Maps, or unobfuscated runtime entrypoints.
 - A PR4 `blocked_unsigned` candidate or development-only asset signature is uploaded to a GitHub Release, npm, or another distribution channel before PR5 production signing.
+- A real-app result contains an absolute local path, screenshot, OCR text, document contents, guessed coordinates, or user overlay pixels.
+- A runtime soak exceeds configured RSS/handle growth, reports any request failure, or leaves a child PID alive after shutdown.

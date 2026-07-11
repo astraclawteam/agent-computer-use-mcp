@@ -301,7 +301,7 @@ These must be configured before the first real tag can succeed:
 
 - npm ownership of `agent-computer-use-mcp` and a trusted publisher bound to `astraclawteam/agent-computer-use-mcp`, `release.yml`, and the `release` environment;
 - a protected GitHub `release` environment with required reviewer approval;
-- a production public-trust Authenticode PFX, password, expected publisher subject, and RFC 3161 timestamp URL in the protected `release` environment;
+- an Azure Artifact Signing account with a PublicTrust certificate profile, GitHub OIDC federation, Certificate Profile Signer role, expected publisher subject, and RFC 3161 timestamp service;
 - a production ECDSA asset-manifest signing key and corresponding public keyring;
 - protected release tags or an equivalent organization policy controlling `v*` creation.
 

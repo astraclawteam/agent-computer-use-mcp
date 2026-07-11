@@ -28,7 +28,10 @@ All notable changes to `agent-computer-use-mcp` are tracked here.
 - Authenticode verification supplies WinTrust with an open read handle and retries only transient `CRYPT_E_FILE_ERROR` results, preserving offline publisher/timestamp enforcement on clean Windows runners.
 - Platform release contract keeps one protected npm package and enables Windows x64 only for GitHub Release; macOS and Linux remain blocked pending real native validation.
 - Windows x64 assembly prunes foreign ONNX Runtime native targets, materializes offline assets once by content hash, records runtime/size evidence, and enforces a 310 MiB offline ZIP gate.
-- The commercial desktop overlay now draws the closed 8-16px brand river and target frame natively, without WebView2 or HTML assets in the release runtime.
+- The commercial desktop overlay now draws the closed 24-48px breathing brand river and target frame natively, without WebView2 or HTML assets in the release runtime.
+- Tag-only formal release workflow performs public-trust Azure Artifact Signing, production ECDSA asset-manifest signing, draft-first GitHub Release assembly, npm OIDC provenance publishing, post-publish install/MCP smoke, and final release publication.
+- Runtime soak gate records concurrent standard MCP calls, injected reconnects, p95 latency, RSS/handle growth, overlay exclusion, desktop-control isolation, and orphan-process cleanup; CI runs a short gate and nightly runs two hours.
+- Real app smoke runner records sanitized executable hashes and live provider evidence for Notepad, WinForms, Edge, VS Code, and a fail-closed canvas fixture; unavailable Qt, WPF, Office, and CAD labs remain explicitly blocked.
 - Commercial policy-deny proof for password, payment, credential, and private surfaces.
 - Computer control approval state machine for approve, deny, cancel, revoke, and timeout flows.
 - MCP approval compatibility proof for pending approval schemas, duplicate-pending rejection, and disconnect cleanup.

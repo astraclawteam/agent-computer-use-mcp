@@ -49,6 +49,7 @@ export const ALPHA_RELEASE_COMMANDS = [
   "npm run phase:5.7",
   "npm run phase:6.0",
   "npm run phase:6.1",
+  "npm run phase:6.2",
   "npm run phase:7.0",
   "npm run phase:7.1",
   "npm run phase:7.2",
@@ -59,6 +60,7 @@ export const ALPHA_RELEASE_COMMANDS = [
   "npm run phase:7.7",
   "npm run phase:7.8",
   "npm run phase:7.9",
+  "npm run phase:8.0",
   "npm run phase:1.4",
   "npm run package:foundation",
   "npm run package:dry-run",
@@ -128,6 +130,7 @@ export const REQUIRED_RELEASE_EVIDENCE = [
   ["public-mcp-contract-review", "npm run phase:5.7"],
   ["app-smoke-matrix", "npm run phase:6.0"],
   ["app-smoke-coverage", "npm run phase:6.1"],
+  ["real-app-perception-smoke", "npm run phase:6.2"],
   ["first-run-readiness", "npm run phase:7.0"],
   ["offline-bundle-readiness", "npm run phase:7.1"],
   ["repair-progress-plan", "npm run phase:7.2"],
@@ -138,6 +141,7 @@ export const REQUIRED_RELEASE_EVIDENCE = [
   ["clean-install-degraded-proof", "npm run phase:7.7"],
   ["windows-installer-transaction", "npm run phase:7.8"],
   ["trusted-asset-cache-materializer", "npm run phase:7.9"],
+  ["runtime-soak", "npm run phase:8.0"],
 ];
 
 export function buildReleaseReadinessGate(options = {}) {

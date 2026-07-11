@@ -121,6 +121,7 @@ export class ComputerUseProviderRouter {
         "5.7": "public-mcp-contract-review",
         "6.0": "app-smoke-matrix-contract",
         "6.1": "app-smoke-coverage-gate",
+        "6.2": "real-app-perception-smoke",
         "7.0": "first-run-readiness",
         "7.1": "offline-bundle-readiness",
         "7.2": "repair-progress-plan",
@@ -131,6 +132,7 @@ export class ComputerUseProviderRouter {
         "7.7": "clean-install-degraded-proof",
         "7.8": "windows-installer-transaction",
         "7.9": "trusted-asset-cache-materializer",
+        "8.0": "runtime-soak",
       },
       providers: {
         windowCapture: process.platform === "win32" ? "PrintWindow" : "unsupported",

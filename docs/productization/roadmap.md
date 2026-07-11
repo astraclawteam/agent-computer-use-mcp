@@ -14,6 +14,8 @@ This roadmap turns the current MVP into a commercial local MCP module. It is wri
 - Phase 0.14 builds a release-only npm staging package, verifies runtime integrity, runs the official MCP SDK smoke, and packs a tarball with zero first-party source and zero Source Maps.
 - Phase 0.15 assembles a real Windows x64 candidate from five locked upstream assets, installs it offline through the NativeAOT installer, and smokes the installed protected MCP with the bundled Node.js runtime.
 - Distribution keeps one protected npm package while GitHub Release assets are platform-specific. Windows x64 only is enabled now; macOS and Linux remain blocked until real native validation is complete.
+- `.github/workflows/release.yml` implements the tag-only draft-first production path. It cannot succeed until Azure Artifact Signing OIDC, the public-trust certificate profile, npm trusted publishing, and the production asset-manifest key are configured.
+- Phase 8.0 supplies short and scheduled runtime soak evidence. Phase 6.2 supplies sanitized real-app evidence and keeps unavailable app labs blocked rather than promoting declarations.
 
 ## Execution Layers
 
@@ -81,6 +83,12 @@ The five externally locked inputs are:
 - `ocr-model-pp-ocrv6-small-rec-metadata`
 
 Every PR4 output is `blocked_unsigned`. The candidate asset signature is development-only and the first-party PE files are not production-signed. PR5 must rebuild or promote through production Authenticode and production asset-manifest signing, then independently verify signatures before any GitHub Release or public distribution.
+
+### PR5-PR7 Closure
+
+- **PR5:** `v*` tags on `main` run identity validation, rebuild PR4, sign exactly the first-party installer/overlay PE files with Azure Artifact Signing PublicTrust plus RFC 3161 timestamps, replace development asset trust with an external P-256 production key, create a draft GitHub Release, publish only the protected npm staging directory with provenance, run registry/install/MCP smoke, and then publish the GitHub Release.
+- **PR6:** `phase:8.0` drives standard MCP clients for a configurable duration and records request failures, reconnects, concurrency, p95, RSS/handle deltas, overlay leakage, accidental desktop control, and orphan processes. CI runs 60 seconds; the scheduled Windows job runs two hours.
+- **PR7:** `phase:6.2` launches safe local fixtures through cua-driver while the production overlay is visible to the user, records only sanitized JSON, and requires executable SHA-256 plus runtime provider evidence. This machine currently validates Notepad, Native Lab, Edge, and VS Code; Qt, WPF, Office, and CAD-like labs remain blocked until their public fixtures are installed on the dedicated app-lab runner.
 
 Non-goals:
 
