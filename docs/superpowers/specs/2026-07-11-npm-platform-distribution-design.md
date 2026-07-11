@@ -289,6 +289,14 @@ Signing dependency, or installer smoke in the release graph.
 The Gitee repository is a read-only regional mirror intended to improve access
 to the complete ZIP from networks where GitHub downloads are unreliable.
 
+The selected production mirror is:
+
+```text
+GITEE_OWNER=huizhou-shunshi-intelligent
+GITEE_REPO=agent-computer-integration-mcp
+SSH URL=git@gitee.com:huizhou-shunshi-intelligent/agent-computer-integration-mcp.git
+```
+
 Gitee's repository mirror feature synchronizes branches, tags, and commits but
 does not define release-attachment synchronization. The release workflow
 therefore performs explicit release API operations after the GitHub Release is
@@ -329,8 +337,8 @@ GitHub release environment variable: GITEE_REPO
 
 One-time operator setup:
 
-1. Create a public Gitee repository for the mirror. The recommended repository
-   path is `<GITEE_OWNER>/agent-computer-use-mcp`.
+1. Create the public Gitee repository
+   `huizhou-shunshi-intelligent/agent-computer-integration-mcp`.
 2. Leave release construction to GitHub Actions. Do not create independent
    Gitee-only tags or upload locally rebuilt artifacts.
 3. In GitHub repository settings, open `Environments`, create or reuse the
