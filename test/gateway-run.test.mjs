@@ -57,7 +57,8 @@ test("Desktop gateway overlay freezes the layered native rendering contract", as
   assert.doesNotMatch(program, /WebView2/);
   assert.match(renderer, /PixelFormat\.Format32bppPArgb/);
   assert.match(renderer, /graphics\.Clear\(Color\.Transparent\)/);
-  assert.match(renderer, /WithAlpha\(OverlayTheme\.Clay, state\.FillAlpha\)/);
+  assert.match(renderer, /WithAlpha\(OverlayTheme\.RiverFill, state\.FillAlpha\)/);
+  assert.equal((renderer.match(/graphics\.FillPath/g) ?? []).length, 1);
   assert.match(renderer, /Math\.Clamp\(state\.BaseThickness \+ localWave \* 6, 24, 48\)/);
   assert.doesNotMatch(renderer, /LinearGradientBrush/);
   assert.match(renderer, /DrawInnerRim/);
@@ -69,6 +70,11 @@ test("Desktop gateway overlay freezes the layered native rendering contract", as
   assert.match(displaySelector, /EnumDisplayDevices/);
   assert.match(displaySelector, /DISPLAY_DEVICE_MIRRORING_DRIVER/);
   assert.match(displaySelector, /DISPLAY_DEVICE_REMOTE/);
+  assert.match(displaySelector, /DISPLAY_DEVICE_RDPUDD\s*=\s*0x01000000/);
+  assert.match(displaySelector, /EnumDisplayDevices\(null, adapterIndex, ref device, 0\)/);
+  assert.match(displaySelector, /CharSet\s*=\s*CharSet\.Unicode/);
+  assert.match(displaySelector, /MarshalAs\(UnmanagedType\.ByValTStr, SizeConst = 32\)/);
+  assert.match(displaySelector, /MarshalAs\(UnmanagedType\.ByValTStr, SizeConst = 128\)/);
   assert.match(program, /AGENT_COMPUTER_USE_OVERLAY_ALLOW_VIRTUAL_DISPLAYS/);
   assert.doesNotMatch(displaySelector, /System\.Management/);
   assert.doesNotMatch(project, /System\.Management/);
@@ -96,9 +102,13 @@ test("Desktop gateway overlay freezes the layered native rendering contract", as
   assert.match(program, /AGENT_COMPUTER_USE_OVERLAY_TARGET_RECT_FILE/);
   assert.match(program, /SyncTargetRect/);
   assert.match(program, /RaiseTargetWindowNoActivate/);
+  assert.match(program, /OverlayTargetGeometry\.ToOverlayRelativeRect\(Bounds, targetBounds\)/);
   assert.match(program, /SWP_NOACTIVATE/);
   assert.match(program, /HWND_NOTOPMOST/);
   assert.match(renderer, /DrawTargetFrame/);
+  const firstPresent = program.indexOf("PresentFrame();", program.indexOf("protected override void OnShown"));
+  const readinessWrite = program.indexOf("OverlayReadinessMarker.WriteFromEnvironment();");
+  assert.ok(firstPresent >= 0 && readinessWrite > firstPresent, "readiness must be written after the first frame presents");
 });
 
 test("Layered presenter behavior harness exercises cleanup through Present", async () => {
@@ -113,5 +123,9 @@ test("Layered presenter behavior harness exercises cleanup through Present", asy
   assert.match(stdout, /PASS: reports false cleanup operations after presentation succeeds/);
   assert.match(stdout, /PASS: excludes virtual display adapter families by default/);
   assert.match(stdout, /PASS: prefers the foreground physical display/);
+  assert.match(stdout, /PASS: enumerates adapters by index and maps screen device names/);
+  assert.match(stdout, /PASS: excludes RDPUDD adapters by state flag/);
+  assert.match(stdout, /PASS: maps targets into selected display coordinates/);
+  assert.match(stdout, /PASS: renders exact river alpha at breath endpoints/);
   assert.match(stdout, /PASS: renders symmetric luminance on all four edges/);
 });

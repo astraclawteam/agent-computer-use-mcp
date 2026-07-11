@@ -9,6 +9,7 @@ internal static class OverlayTheme
     public static readonly Color Clay = Color.FromArgb(217, 119, 87);
     public static readonly Color ClayDeep = Color.FromArgb(184, 89, 59);
     public static readonly Color ClaySoft = Color.FromArgb(247, 210, 195);
+    public static readonly Color RiverFill = MixFamilyColor(Clay, ClayDeep, ClaySoft);
 
     public const double MinWaveThickness = 24;
     public const double MaxWaveThickness = 48;
@@ -40,4 +41,10 @@ internal static class OverlayTheme
         var fillAlpha = MinFillAlpha + (MaxFillAlpha - MinFillAlpha) * breath;
         return new OverlayFrameState(breath, baseThickness, fillAlpha);
     }
+
+    private static Color MixFamilyColor(Color clay, Color deep, Color soft)
+        => Color.FromArgb(
+            (int)Math.Round(clay.R * 0.72 + deep.R * 0.16 + soft.R * 0.12),
+            (int)Math.Round(clay.G * 0.72 + deep.G * 0.16 + soft.G * 0.12),
+            (int)Math.Round(clay.B * 0.72 + deep.B * 0.16 + soft.B * 0.12));
 }

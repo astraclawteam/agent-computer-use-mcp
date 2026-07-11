@@ -23,7 +23,11 @@ internal static class Program
             ("falls back to the primary physical display", FallsBackToPrimaryPhysicalDisplay),
             ("allows a foreground virtual display only with host opt-in", AllowsForegroundVirtualDisplayWithHostOptIn),
             ("returns no display when only excluded adapters are available", ReturnsNoDisplayWhenOnlyExcludedAdaptersAreAvailable),
+            ("enumerates adapters by index and maps screen device names", EnumeratesAdaptersByIndexAndMapsScreenDeviceNames),
+            ("excludes RDPUDD adapters by state flag", ExcludesRdpUddAdaptersByStateFlag),
+            ("maps targets into selected display coordinates", MapsTargetsIntoSelectedDisplayCoordinates),
             ("uses the approved visibility envelope", UsesApprovedVisibilityEnvelope),
+            ("renders exact river alpha at breath endpoints", RendersExactRiverAlphaAtBreathEndpoints),
             ("renders symmetric luminance on all four edges", RendersSymmetricLuminanceOnAllFourEdges),
             ("renders a closed river through all four corners", RendersClosedRiverThroughAllFourCorners),
             ("rejects non-premultiplied frames before native acquisition", RejectsNonPremultipliedFramesBeforeNativeAcquisition),
@@ -119,6 +123,72 @@ internal static class Program
         Require(selected is null, "Selection must fail closed when no physical display is available.");
     }
 
+    private static void EnumeratesAdaptersByIndexAndMapsScreenDeviceNames()
+    {
+        var probedIndexes = new List<uint>();
+        var adapters = OverlayDisplaySelector.EnumerateAdapters(index =>
+        {
+            probedIndexes.Add(index);
+            return index switch {
+                0 => new OverlayDisplayAdapter("\\\\.\\DISPLAY1", "Physical One", 1, "PCI\\ONE", "Key One"),
+                1 => new OverlayDisplayAdapter("\\\\.\\DISPLAY2", "Physical Two", 1, "PCI\\TWO", "Key Two"),
+                _ => null,
+            };
+        });
+        var screens = new[] {
+            new OverlayScreenDescriptor("\\\\.\\DISPLAY2", new Rectangle(-1600, 0, 1600, 900), false),
+            new OverlayScreenDescriptor("\\\\.\\DISPLAY1", new Rectangle(0, 0, 1920, 1080), true),
+        };
+
+        var candidates = OverlayDisplaySelector.MapScreensToAdapters(screens, adapters, "\\\\.\\DISPLAY2");
+
+        Require(probedIndexes.SequenceEqual([0u, 1u, 2u]), "Adapter probing must start at zero and increment until enumeration ends.");
+        Require(candidates.Count == 2, "Every matched screen must produce one candidate.");
+        Require(candidates[0].DeviceName == "\\\\.\\DISPLAY2", "Candidates must retain Screen.DeviceName ordering.");
+        Require(candidates[0].DeviceString == "Physical Two", "Adapter metadata must map by returned adapter DeviceName.");
+        Require(candidates[0].IsForeground, "Foreground matching must use Screen.DeviceName.");
+        Require(candidates[1].IsPrimary, "Primary state must come from the mapped screen.");
+    }
+
+    private static void ExcludesRdpUddAdaptersByStateFlag()
+    {
+        var physical = Candidate("physical", new Rectangle(0, 0, 1920, 1080));
+        var rdpUdd = Candidate(
+            "rdpudd",
+            new Rectangle(1920, 0, 1920, 1080),
+            isPrimary: true,
+            isForeground: true,
+            isRdpUdd: true,
+            deviceString: "Generic Display Adapter");
+
+        var selected = OverlayDisplaySelector.Select([rdpUdd, physical], allowVirtualDisplays: false);
+
+        Require(selected?.DeviceName == physical.DeviceName, "DISPLAY_DEVICE_RDPUDD must be excluded without host opt-in.");
+    }
+
+    private static void MapsTargetsIntoSelectedDisplayCoordinates()
+    {
+        var positive = OverlayTargetGeometry.ToOverlayRelativeRect(
+            new Rectangle(1920, 200, 1600, 900),
+            new RectangleF(2000, 260, 800, 500));
+        Require(positive == new RectangleF(80, 60, 800, 500), "Positive display origins must be subtracted from target coordinates.");
+
+        var negative = OverlayTargetGeometry.ToOverlayRelativeRect(
+            new Rectangle(-1600, -200, 1600, 900),
+            new RectangleF(-1500, -120, 600, 400));
+        Require(negative == new RectangleF(100, 80, 600, 400), "Negative display origins must be subtracted from target coordinates.");
+
+        var partial = OverlayTargetGeometry.ToOverlayRelativeRect(
+            new Rectangle(-1600, 0, 1600, 900),
+            new RectangleF(-1700, 100, 250, 300));
+        Require(partial == new RectangleF(0, 100, 150, 300), "Partially visible targets must be clipped to selected display bounds.");
+
+        var outside = OverlayTargetGeometry.ToOverlayRelativeRect(
+            new Rectangle(1920, 0, 1600, 900),
+            new RectangleF(100, 100, 500, 400));
+        Require(outside is null, "Targets outside the selected display must not render a frame.");
+    }
+
     private static void UsesApprovedVisibilityEnvelope()
     {
         var minimum = OverlayTheme.AtPhase(0);
@@ -128,6 +198,23 @@ internal static class Program
         Require(maximum.BaseThickness == 42, "Maximum base thickness must be 42px.");
         Require(minimum.FillAlpha == 0.24, "Minimum fill alpha must be 0.24.");
         Require(maximum.FillAlpha == 0.50, "Maximum fill alpha must be 0.50.");
+    }
+
+    private static void RendersExactRiverAlphaAtBreathEndpoints()
+    {
+        foreach (var (phase, expectedAlpha) in new[] { (0d, 61), (0.5d, 128) })
+        {
+            using var frame = OverlayRenderer.Render(new Size(320, 200), phase, null);
+            var cleanEdgeSamples = new[] {
+                frame.GetPixel(frame.Width / 2, 5),
+                frame.GetPixel(frame.Width - 6, frame.Height / 2),
+                frame.GetPixel(frame.Width / 2, frame.Height - 6),
+                frame.GetPixel(5, frame.Height / 2),
+            };
+            Require(
+                cleanEdgeSamples.All(color => color.A == expectedAlpha),
+                $"Phase {phase} clean edge alpha must be exactly {expectedAlpha}, got [{string.Join(", ", cleanEdgeSamples.Select(color => color.A))}].");
+        }
     }
 
     private static void RendersSymmetricLuminanceOnAllFourEdges()
@@ -151,10 +238,11 @@ internal static class Program
         bool isActive = true,
         bool isMirroring = false,
         bool isRemote = false,
+        bool isRdpUdd = false,
         string deviceString = "Physical Display Adapter",
         string deviceId = "PCI\\DISPLAY\\0000",
         string deviceKey = "Physical Display Driver")
-        => new(bounds, isPrimary, isForeground, isActive, isMirroring, isRemote, deviceName, deviceString, deviceId, deviceKey);
+        => new(bounds, isPrimary, isForeground, isActive, isMirroring, isRemote, isRdpUdd, deviceName, deviceString, deviceId, deviceKey);
 
     private static void RendersClosedRiverThroughAllFourCorners()
     {

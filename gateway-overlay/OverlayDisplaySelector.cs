@@ -11,15 +11,29 @@ internal readonly record struct OverlayDisplayCandidate(
     bool IsActive,
     bool IsMirroring,
     bool IsRemote,
+    bool IsRdpUdd,
     string DeviceName,
     string DeviceString,
     string DeviceId,
     string DeviceKey);
 
+internal readonly record struct OverlayDisplayAdapter(
+    string DeviceName,
+    string DeviceString,
+    uint StateFlags,
+    string DeviceId,
+    string DeviceKey);
+
+internal readonly record struct OverlayScreenDescriptor(
+    string DeviceName,
+    Rectangle Bounds,
+    bool IsPrimary);
+
 internal static class OverlayDisplaySelector
 {
     private const uint DISPLAY_DEVICE_ACTIVE = 0x00000001;
     private const uint DISPLAY_DEVICE_MIRRORING_DRIVER = 0x00000008;
+    private const uint DISPLAY_DEVICE_RDPUDD = 0x01000000;
     private const uint DISPLAY_DEVICE_REMOTE = 0x04000000;
 
     public static OverlayDisplayCandidate? Select(
@@ -59,7 +73,7 @@ internal static class OverlayDisplaySelector
 
     private static bool IsExcludedAdapter(OverlayDisplayCandidate candidate)
     {
-        if (candidate.IsMirroring || candidate.IsRemote)
+        if (candidate.IsMirroring || candidate.IsRemote || candidate.IsRdpUdd)
         {
             return true;
         }
@@ -90,24 +104,69 @@ internal static class OverlayDisplaySelector
         var foregroundDeviceName = foregroundWindow == IntPtr.Zero
             ? null
             : Screen.FromHandle(foregroundWindow).DeviceName;
-
-        return Screen.AllScreens.Select(screen =>
+        var adapters = EnumerateAdapters(adapterIndex =>
         {
             var device = DisplayDevice.Create();
-            var probed = NativeMethods.EnumDisplayDevices(screen.DeviceName, 0, ref device, 0);
-            var flags = probed ? device.StateFlags : DISPLAY_DEVICE_ACTIVE;
-            return new OverlayDisplayCandidate(
+            if (!NativeMethods.EnumDisplayDevices(null, adapterIndex, ref device, 0)) return null;
+            return new OverlayDisplayAdapter(
+                device.DeviceName,
+                device.DeviceString,
+                device.StateFlags,
+                device.DeviceId,
+                device.DeviceKey);
+        });
+        var screens = Screen.AllScreens
+            .Select(screen => new OverlayScreenDescriptor(screen.DeviceName, screen.Bounds, screen.Primary))
+            .ToArray();
+        return MapScreensToAdapters(screens, adapters, foregroundDeviceName);
+    }
+
+    public static IReadOnlyList<OverlayDisplayAdapter> EnumerateAdapters(
+        Func<uint, OverlayDisplayAdapter?> probe)
+    {
+        var adapters = new List<OverlayDisplayAdapter>();
+        for (uint adapterIndex = 0; ; adapterIndex++)
+        {
+            var adapter = probe(adapterIndex);
+            if (adapter is null) break;
+            adapters.Add(adapter.Value);
+        }
+
+        return adapters;
+    }
+
+    public static IReadOnlyList<OverlayDisplayCandidate> MapScreensToAdapters(
+        IEnumerable<OverlayScreenDescriptor> screens,
+        IEnumerable<OverlayDisplayAdapter> adapters,
+        string? foregroundDeviceName)
+    {
+        var adaptersByName = new Dictionary<string, OverlayDisplayAdapter>(StringComparer.OrdinalIgnoreCase);
+        foreach (var adapter in adapters)
+        {
+            adaptersByName.TryAdd(adapter.DeviceName, adapter);
+        }
+
+        var candidates = new List<OverlayDisplayCandidate>();
+        foreach (var screen in screens)
+        {
+            if (!adaptersByName.TryGetValue(screen.DeviceName, out var adapter)) continue;
+
+            var flags = adapter.StateFlags;
+            candidates.Add(new OverlayDisplayCandidate(
                 screen.Bounds,
-                screen.Primary,
+                screen.IsPrimary,
                 string.Equals(screen.DeviceName, foregroundDeviceName, StringComparison.OrdinalIgnoreCase),
                 (flags & DISPLAY_DEVICE_ACTIVE) != 0,
                 (flags & DISPLAY_DEVICE_MIRRORING_DRIVER) != 0,
                 (flags & DISPLAY_DEVICE_REMOTE) != 0,
+                (flags & DISPLAY_DEVICE_RDPUDD) != 0,
                 screen.DeviceName,
-                probed ? device.DeviceString : string.Empty,
-                probed ? device.DeviceId : string.Empty,
-                probed ? device.DeviceKey : string.Empty);
-        }).ToArray();
+                adapter.DeviceString,
+                adapter.DeviceId,
+                adapter.DeviceKey));
+        }
+
+        return candidates;
     }
 
     [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]

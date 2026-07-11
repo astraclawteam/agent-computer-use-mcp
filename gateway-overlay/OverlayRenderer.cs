@@ -79,12 +79,8 @@ internal static class OverlayRenderer
 
     private static void DrawRiver(Graphics graphics, GraphicsPath river, OverlayFrameState state)
     {
-        using var clay = new SolidBrush(WithAlpha(OverlayTheme.Clay, state.FillAlpha));
-        using var deep = new SolidBrush(WithAlpha(OverlayTheme.ClayDeep, state.FillAlpha * 0.16));
-        using var soft = new SolidBrush(WithAlpha(OverlayTheme.ClaySoft, state.FillAlpha * 0.12));
-        graphics.FillPath(clay, river);
-        graphics.FillPath(deep, river);
-        graphics.FillPath(soft, river);
+        using var fill = new SolidBrush(WithAlpha(OverlayTheme.RiverFill, state.FillAlpha));
+        graphics.FillPath(fill, river);
     }
 
     private static void DrawInnerRim(Graphics graphics, PointF[] innerBoundary, OverlayFrameState state)

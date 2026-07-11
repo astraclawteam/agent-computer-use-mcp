@@ -9,6 +9,11 @@ export const WAVE_ALPHA = Object.freeze({
   min: 0.24,
   max: 0.50,
 });
+export const WAVE_FILL_MIX = Object.freeze({
+  clay: 0.72,
+  deep: 0.16,
+  soft: 0.12,
+});
 
 const POINT_STEP = 18;
 const TAU = Math.PI * 2;
@@ -34,6 +39,15 @@ function normalizeRgb(value) {
   return parts.slice(0, 3).map((part) => Math.max(0, Math.min(255, Math.round(part)))).join(" ");
 }
 
+export function mixWaveFillRgb(clayRgb, deepRgb, softRgb) {
+  const colors = [clayRgb, deepRgb, softRgb].map((value) => normalizeRgb(value).split(" ").map(Number));
+  return colors[0].map((clay, channel) => Math.round(
+    clay * WAVE_FILL_MIX.clay
+      + colors[1][channel] * WAVE_FILL_MIX.deep
+      + colors[2][channel] * WAVE_FILL_MIX.soft,
+  )).join(" ");
+}
+
 function readWaveTheme(canvas) {
   const root = canvas.ownerDocument?.documentElement;
   const source = root ?? canvas;
@@ -53,6 +67,7 @@ function readWaveTheme(canvas) {
     rgb,
     deepRgb,
     softRgb,
+    fillRgb: mixWaveFillRgb(rgb, deepRgb, softRgb),
     minAlpha: Number.isFinite(minAlpha) ? minAlpha : WAVE_ALPHA.min,
     maxAlpha: Number.isFinite(maxAlpha) ? maxAlpha : WAVE_ALPHA.max,
   };
@@ -99,6 +114,17 @@ function makeEdgePoints(length, fixedCoordinate, time, phase, horizontal, revers
 }
 
 export function createWaveBandPath(ctx, width, height, time) {
+  ctx.beginPath();
+  ctx.rect(0, 0, width, height);
+  traceInnerBoundary(ctx, width, height, time);
+}
+
+function createInnerBoundaryPath(ctx, width, height, time) {
+  ctx.beginPath();
+  traceInnerBoundary(ctx, width, height, time);
+}
+
+function traceInnerBoundary(ctx, width, height, time) {
   const corner = WAVE_THICKNESS.max;
   const top = makeEdgePoints(width - corner * 2, (depth) => depth, time, 0.1, true)
     .map(([x, y]) => [x + corner, y]);
@@ -109,8 +135,6 @@ export function createWaveBandPath(ctx, width, height, time) {
   const left = makeEdgePoints(height - corner * 2, (depth) => depth, time, 4.1, false, true)
     .map(([x, y]) => [x, y + corner]);
 
-  ctx.beginPath();
-  ctx.rect(0, 0, width, height);
   ctx.moveTo(top[0][0], top[0][1]);
   for (const [x, y] of top) ctx.lineTo(x, y);
   ctx.quadraticCurveTo(width - corner * 0.35, corner * 0.35, right[0][0], right[0][1]);
@@ -192,17 +216,18 @@ export function createWaveOverlay(canvas) {
     const baseThickness = 30 + (42 - 30) * breath;
 
     createWaveBandPath(ctx, width, height, time);
-    ctx.fillStyle = `rgb(${theme.rgb} / ${fillAlpha})`;
+    ctx.fillStyle = `rgb(${theme.fillRgb} / ${fillAlpha})`;
     ctx.fill("evenodd");
+
+    createInnerBoundaryPath(ctx, width, height, time);
+    ctx.strokeStyle = `rgb(${theme.deepRgb} / ${fillAlpha * 0.62})`;
+    ctx.lineWidth = 1.5;
+    ctx.lineJoin = "round";
+    ctx.stroke();
 
     ctx.save();
     createWaveBandPath(ctx, width, height, time);
     ctx.clip("evenodd");
-
-    ctx.fillStyle = `rgb(${theme.deepRgb} / ${fillAlpha * 0.16})`;
-    ctx.fillRect(0, 0, width, height);
-    ctx.fillStyle = `rgb(${theme.softRgb} / ${fillAlpha * 0.12})`;
-    ctx.fillRect(0, 0, width, height);
 
     drawCurrent(ctx, width, height, time, Math.max(WAVE_THICKNESS.min, baseThickness - 3), fillAlpha * 0.2, 0);
     drawCurrent(ctx, width, height, time, Math.max(WAVE_THICKNESS.min, baseThickness - 1), fillAlpha * 0.12, TAU / 3);

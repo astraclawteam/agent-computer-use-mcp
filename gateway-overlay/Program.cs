@@ -34,8 +34,17 @@ internal static class Program
         }
 
         ApplicationConfiguration.Initialize();
-        Application.Run(new OverlayForm());
-        return 0;
+        Application.SetUnhandledExceptionMode(UnhandledExceptionMode.ThrowException);
+        try
+        {
+            Application.Run(new OverlayForm());
+            return 0;
+        }
+        catch (Exception error)
+        {
+            Console.Error.WriteLine($"Overlay failed before or during presentation: {error}");
+            return 1;
+        }
     }
 
     private static SnapshotOptions ParseSnapshotArguments(string[] args)
@@ -141,6 +150,7 @@ internal sealed class OverlayForm : Form
         NativeMethods.SetWindowPos(Handle, NativeMethods.HWND_TOPMOST, Left, Top, Width, Height, NativeMethods.SWP_NOACTIVATE);
         SyncTargetRect();
         PresentFrame();
+        OverlayReadinessMarker.WriteFromEnvironment();
         _animationTimer.Start();
         _targetRectTimer.Start();
     }
@@ -193,8 +203,8 @@ internal sealed class OverlayForm : Form
             var root = document.RootElement;
             if (root.ValueKind == JsonValueKind.Null) return null;
 
-            var x = root.GetProperty("x").GetDouble() - Left;
-            var y = root.GetProperty("y").GetDouble() - Top;
+            var x = root.GetProperty("x").GetDouble();
+            var y = root.GetProperty("y").GetDouble();
             var width = root.GetProperty("width").GetDouble();
             var height = root.GetProperty("height").GetDouble();
             if (width <= 0 || height <= 0) return null;
@@ -204,11 +214,8 @@ internal sealed class OverlayForm : Form
                 RaiseTargetWindowNoActivate(new IntPtr(hwndValue));
             }
 
-            var left = Math.Max(0, Math.Min(Width, x));
-            var top = Math.Max(0, Math.Min(Height, y));
-            var right = Math.Max(left, Math.Min(Width - 1, x + width));
-            var bottom = Math.Max(top, Math.Min(Height - 1, y + height));
-            return new RectangleF((float)left, (float)top, (float)(right - left), (float)(bottom - top));
+            var targetBounds = new RectangleF((float)x, (float)y, (float)width, (float)height);
+            return OverlayTargetGeometry.ToOverlayRelativeRect(Bounds, targetBounds);
         }
         catch
         {
@@ -254,5 +261,17 @@ internal sealed class OverlayForm : Form
 
         [DllImport("user32.dll")]
         public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
+    }
+}
+
+internal static class OverlayReadinessMarker
+{
+    public static void WriteFromEnvironment()
+    {
+        var markerPath = Environment.GetEnvironmentVariable("AGENT_COMPUTER_USE_OVERLAY_READY_FILE")
+            ?? Environment.GetEnvironmentVariable("XIAOZHICLAW_CUA_OVERLAY_READY_FILE");
+        if (string.IsNullOrWhiteSpace(markerPath)) return;
+
+        File.WriteAllText(markerPath, $"{Environment.ProcessId}\n");
     }
 }

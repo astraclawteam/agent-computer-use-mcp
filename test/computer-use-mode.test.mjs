@@ -71,6 +71,20 @@ test("Computer Use closed river uses shared brand color tokens", async () => {
   assert.doesNotMatch(wave, /rgba\(217,\s*119,\s*87/);
 });
 
+test("Computer Use river pre-mixes one family fill and draws a clay-deep inner rim", async () => {
+  const wave = await readFile(new URL("../public/wave-overlay.mjs", import.meta.url), "utf8");
+
+  assert.deepEqual(waveReference.WAVE_FILL_MIX, { clay: 0.72, deep: 0.16, soft: 0.12 });
+  assert.equal(
+    waveReference.mixWaveFillRgb("217 119 87", "184 89 59", "247 210 195"),
+    "215 125 95",
+  );
+  assert.equal((wave.match(/ctx\.fill\("evenodd"\)/g) ?? []).length, 1);
+  assert.doesNotMatch(wave, /ctx\.fillStyle = [^\n]*fillAlpha \* 0\.(?:16|12)/);
+  assert.match(wave, /ctx\.strokeStyle = `rgb\(\$\{theme\.deepRgb\} \/ \$\{fillAlpha \* 0\.62\}\)`/);
+  assert.match(wave, /createInnerBoundaryPath\(ctx, width, height, time\)/);
+});
+
 test("Computer Use closed river uses one owner for corners instead of overlapping bands", async () => {
   const css = await readFile(new URL("../public/styles.css", import.meta.url), "utf8");
   assert.match(css, /\.computer-use-mode-frame__river\s*\{[\s\S]*inset:\s*0/);
