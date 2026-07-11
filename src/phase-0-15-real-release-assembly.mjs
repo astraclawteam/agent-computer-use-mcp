@@ -8,6 +8,10 @@ import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js"
 
 import { verifyReleaseBundle } from "./release-bundle.mjs";
 import { verifyReleaseOutputs } from "./release-output-manifest.mjs";
+import {
+  WINDOWS_X64_OFFLINE_MAX_BYTES,
+  assertOfflineBundleSize,
+} from "./release-size-policy.mjs";
 import { PP_OCRV6_SMALL_MODEL_PACK } from "./ocr-model-pack.mjs";
 import { verifyWindowsOfflineBundleContents } from "./windows-offline-bundle.mjs";
 import {
@@ -26,7 +30,6 @@ const REQUIRED_SBOM_COMPONENTS = new Set([
   "onnxruntime-node",
   "ocr-model-pp-ocrv6-small-det",
   "ocr-model-pp-ocrv6-small-rec",
-  "webview2-evergreen-standalone-windows-x64",
 ]);
 const MCP_SMOKE_TIMEOUT_MS = 15_000;
 const DRIVER_OVERRIDE_ENV_KEYS = Object.freeze([
@@ -57,6 +60,11 @@ export async function runRealReleaseAssemblyPhase(options = {}) {
       artifactRoot: assembly.outputRoot,
     });
     const offline = requiredArtifact(assembly, "windows-offline-bundle");
+    const offlineFileSize = (await stat(offline.path)).size;
+    const offlineSize = assertOfflineBundleSize({ target: assembly.target, sizeBytes: offlineFileSize });
+    const offlineBundleSizeVerified = assembly.offlineBundleSizeBytes === offlineSize.sizeBytes
+      && assembly.offlineBundleMaxBytes === offlineSize.maxBytes
+      && offlineSize.maxBytes === WINDOWS_X64_OFFLINE_MAX_BYTES;
     const expandedRoot = join(workRoot, "offline");
     await expandVerifiedZip({ archivePath: offline.path, destinationPath: expandedRoot });
     const releaseVerification = await verifyReleaseBundle({ bundleRoot: join(expandedRoot, "release") });
@@ -113,21 +121,22 @@ export async function runRealReleaseAssemblyPhase(options = {}) {
       expectedDriverPath: driver?.entryPoint,
     });
     const model = activated.report.assets.find((asset) => asset.id === "ocr-model-pp-ocrv6-small");
-    const webView = activated.report.assets.find((asset) => asset.id === "webview2-evergreen-standalone-windows-x64");
     const ocrModelPackPresent = await assetFilesPresent(model, PP_OCRV6_SMALL_MODEL_PACK.files);
-    const webView2InstallerPresent = await assetFilesPresent(webView, ["MicrosoftEdgeWebView2RuntimeInstallerX64.exe"]);
+    const nativeOverlayPresent = (await stat(join(activePayloadRoot, ...runtime.overlay.split("/"))).catch(() => null))?.isFile() === true;
+    const overlayRequiresWebView2 = false;
     const sbomVerified = await verifySbom(requiredArtifact(assembly, "release-sbom").path);
 
     const checksumsVerified = outputVerification.status === "passed";
     const passed = assembly.realAssetBytesVerified === true
       && releaseVerification.status === "ready"
       && offlineBundleVerified
+      && offlineBundleSizeVerified
       && install.report.status === "installed"
       && prepared.report.status === "prepared"
       && activated.report.status === "activated"
       && mcpSmoke.status === "passed"
       && ocrModelPackPresent
-      && webView2InstallerPresent
+      && nativeOverlayPresent
       && checksumsVerified
       && sbomVerified;
     return {
@@ -137,6 +146,8 @@ export async function runRealReleaseAssemblyPhase(options = {}) {
       realAssetBytesVerified: assembly.realAssetBytesVerified === true,
       releaseBundleVerified: releaseVerification.status === "ready",
       offlineBundleVerified,
+      offlineBundleSizeBytes: offlineSize.sizeBytes,
+      offlineBundleMaxBytes: offlineSize.maxBytes,
       offlineVerifiedFileCount: offlineContents.fileCount,
       installerAppliedRelease: install.report.status === "installed",
       assetsPreparedAndActivatedOffline: prepared.report.status === "prepared" && activated.report.status === "activated",
@@ -145,7 +156,8 @@ export async function runRealReleaseAssemblyPhase(options = {}) {
       activatedDriverPathMatches: mcpSmoke.activatedDriverPathMatches,
       mcpDeadlineMs: MCP_SMOKE_TIMEOUT_MS,
       ocrModelPackPresent,
-      webView2InstallerPresent,
+      nativeOverlayPresent,
+      overlayRequiresWebView2,
       checksumsVerified,
       sbomVerified,
       firstEnableDownloadCount: assembly.firstEnableDownloadCount,

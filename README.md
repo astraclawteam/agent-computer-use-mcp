@@ -51,8 +51,9 @@ Example MCP client config:
 - `npm run phase:0.12`: verify release artifact hashes and Windows helper signing evidence.
 - `npm run phase:0.13`: verify Windows helper signing inventory coverage for required and reserved helpers.
 - `npm run phase:0.14`: build, integrity-check, MCP-smoke, and pack the protected npm release.
-- `npm run release:windows:assets`: acquire and hash-verify the six locked Windows x64 release inputs.
+- `npm run release:windows:assets`: acquire and hash-verify the five locked Windows x64 release inputs.
 - `npm run release:windows:assemble`: build the real `blocked_unsigned` candidate under `artifacts/windows-release/<version>/`.
+- `npm run release:windows:size-report`: re-stat the assembled offline ZIP and verify its 310 MiB limit, Windows x64 target, ONNX native inventory, and single-blob asset evidence.
 - `npm run phase:0.15`: reverify the outer and inner release inventories, install and activate from bundled bytes with installer network access disabled, resolve the active cua-driver, and standard-MCP-smoke the real candidate.
 - `npm run release:npm:build`: create release-only staging with bundled, minified, obfuscated runtime files and no Source Maps.
 - `npm run release:npm:smoke`: verify SHA-256 and exercise the protected runtime with the official MCP SDK.
@@ -158,3 +159,5 @@ The native installer consumes release bundles and signed asset manifests, verifi
 The repository root is intentionally non-publishable. npm distribution is built from a separate staging package containing only protected `dist` runtime files, release integrity metadata, and license/readme/changelog files. The gate rejects source trees, C#/Python source, tests, Source Maps, and unbundled first-party imports. Because this repository is open source, obfuscation is defense in depth rather than a secrecy boundary.
 
 PR4 Windows outputs are real installable candidates, but they remain `blocked_unsigned`: their asset trust is development-only and first-party PE files do not yet have production Authenticode. Do not distribute files from `artifacts/windows-release/<version>/`. PR5 owns production signing, draft GitHub Release assembly, npm provenance publication, and post-publish verification.
+
+Distribution uses one protected npm package for every supported host and platform-specific GitHub Release assets. The current release target is Windows x64 only. macOS and Linux assets stay unpublished until their native driver, overlay, OCR runtime, installer, and offline smoke paths complete real native validation.

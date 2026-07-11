@@ -8,6 +8,7 @@ test("controller lease timeout revokes stale control and stops overlay before ac
   let now = 1_000;
   const calls = [];
   const overlayCalls = [];
+  const visualCalls = [];
   const router = new ComputerUseProviderRouter({
     clock: {
       now: () => now,
@@ -35,13 +36,21 @@ test("controller lease timeout revokes stale control and stops overlay before ac
         calls.push({ method: "click", args });
         return { status: "ok" };
       },
+      async startCursor() {
+        visualCalls.push("cursor.start");
+      },
+      async stopCursor() {
+        visualCalls.push("cursor.stop");
+      },
     },
     overlayRuntime: {
       async start(args) {
+        visualCalls.push("overlay.start");
         overlayCalls.push({ method: "start", args });
         return { visible: true, processId: 99 };
       },
       async stop(handle) {
+        visualCalls.push("overlay.stop");
         overlayCalls.push({ method: "stop", handle });
       },
     },
@@ -70,6 +79,7 @@ test("controller lease timeout revokes stale control and stops overlay before ac
   assert.equal(state.activeController, null);
   assert.equal(state.lastCapture, null);
   assert.deepEqual(overlayCalls.map((call) => call.method), ["start", "stop"]);
+  assert.deepEqual(visualCalls, ["cursor.start", "overlay.start", "overlay.stop", "cursor.stop"]);
   assert.equal(calls.some((call) => call.method === "click"), false);
   assert.equal(state.auditEvents.map((event) => event.type).includes("computer.controller.expired"), true);
 });

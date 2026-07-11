@@ -12,7 +12,10 @@ This roadmap turns the current MVP into a commercial local MCP module. It is wri
 - OCR sidecar has an MVP path, but model pack management and production scheduling are not complete.
 - Phase 7.0-7.7 are plan/proof gates. Phase 7.8 validates local release transactions. Phase 7.9 validates signed asset manifests, offline/network cache identity, resumable acquisition, safe materialization, atomic activation/rollback, and approval-gated MCP repair through real temporary roots.
 - Phase 0.14 builds a release-only npm staging package, verifies runtime integrity, runs the official MCP SDK smoke, and packs a tarball with zero first-party source and zero Source Maps.
-- Phase 0.15 assembles a real Windows x64 candidate from six locked upstream assets, installs it offline through the NativeAOT installer, and smokes the installed protected MCP with the bundled Node.js runtime.
+- Phase 0.15 assembles a real Windows x64 candidate from five locked upstream assets, installs it offline through the NativeAOT installer, and smokes the installed protected MCP with the bundled Node.js runtime.
+- Distribution keeps one protected npm package while GitHub Release assets are platform-specific. Windows x64 only is enabled now; macOS and Linux remain blocked until real native validation is complete.
+- `.github/workflows/release.yml` implements the tag-only draft-first production path. It cannot succeed until Azure Artifact Signing OIDC, the public-trust certificate profile, npm trusted publishing, and the production asset-manifest key are configured.
+- Phase 8.0 supplies short and scheduled runtime soak evidence. Phase 6.2 supplies sanitized real-app evidence and keeps unavailable app labs blocked rather than promoting declarations.
 
 ## Execution Layers
 
@@ -69,18 +72,23 @@ agent-computer-use-mcp-X.Y.Z-release-manifest.json
 agent-computer-use-mcp-X.Y.Z-checksums.txt
 ```
 
-The offline ZIP is expected to be about 455 MB for 0.0.1 and includes portable Node.js, the protected MCP runtime, NativeAOT installer, overlay, OCR runtime/model pack, cua-driver, WebView2 installer, release manifest, CycloneDX SBOM, and an exact internal checksum inventory. Phase 0.15 installs from bundled bytes with the installer/materializer network policy disabled and without a machine-wide Node.js installation. PR5 must repeat this on a clean runner with operating-system network isolation.
+The Windows x64 offline ZIP has a fail-closed 310 MiB limit and includes portable Node.js, the protected MCP runtime, NativeAOT installer, native overlay, OCR runtime/model pack, cua-driver, release manifest, CycloneDX SBOM, and an exact internal checksum inventory. The overlay renders its closed 24-48px brand river and target frame through WinForms/GDI+ and has no WebView2 runtime dependency. The payload retains only the pinned `onnxruntime-node@1.27.0` Windows x64 DirectML/CPU native files and records retained and removed byte counts. Every installable asset is materialized once as a content-addressed blob; activated views are forbidden inside the ZIP. `npm run release:windows:size-report` re-stats the final ZIP and independently verifies this evidence. Phase 0.15 installs from bundled bytes with the installer/materializer network policy disabled and without a machine-wide Node.js installation. PR5 must repeat this on a clean runner with operating-system network isolation.
 
-The six externally locked inputs are:
+The five externally locked inputs are:
 
 - `node-runtime-windows-x64`
 - `cua-driver-windows-x64`
 - `ocr-model-pp-ocrv6-small-det`
 - `ocr-model-pp-ocrv6-small-rec`
 - `ocr-model-pp-ocrv6-small-rec-metadata`
-- `webview2-evergreen-standalone-windows-x64`
 
 Every PR4 output is `blocked_unsigned`. The candidate asset signature is development-only and the first-party PE files are not production-signed. PR5 must rebuild or promote through production Authenticode and production asset-manifest signing, then independently verify signatures before any GitHub Release or public distribution.
+
+### PR5-PR7 Closure
+
+- **PR5:** `v*` tags on `main` run identity validation, rebuild PR4, sign exactly the first-party installer/overlay PE files with Azure Artifact Signing PublicTrust plus RFC 3161 timestamps, replace development asset trust with an external P-256 production key, create a draft GitHub Release, publish only the protected npm staging directory with provenance, run registry/install/MCP smoke, and then publish the GitHub Release.
+- **PR6:** `phase:8.0` drives standard MCP clients for a configurable duration and records request failures, reconnects, concurrency, p95, RSS/handle deltas, overlay leakage, accidental desktop control, and orphan processes. CI runs 60 seconds; the scheduled Windows job runs two hours.
+- **PR7:** `phase:6.2` launches safe local fixtures through cua-driver while the production overlay is visible to the user, records only sanitized JSON, and requires executable SHA-256 plus runtime provider evidence. This machine currently validates Notepad, Native Lab, Edge, and VS Code; Qt, WPF, Office, and CAD-like labs remain blocked until their public fixtures are installed on the dedicated app-lab runner.
 
 Non-goals:
 
@@ -165,7 +173,7 @@ Deliverables:
 
 Acceptance:
 
-- Overlay remains click-through and 8-16px visible thickness on all tested DPI scales.
+- Overlay remains click-through and 24-48px logical visible thickness on all tested DPI scales.
 - Overlay follows target window across displays.
 - `includeUserOverlay=false` is preserved in every capture path.
 

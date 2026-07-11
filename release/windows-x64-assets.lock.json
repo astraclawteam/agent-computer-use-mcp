@@ -97,25 +97,6 @@
         "role": "ocr-recognition-metadata",
         "fileName": "PP-OCRv6_small_rec_inference.yml"
       }
-    },
-    {
-      "id": "webview2-evergreen-standalone-windows-x64",
-      "kind": "system-runtime",
-      "version": "1.3.241.15",
-      "source": {
-        "url": "https://go.microsoft.com/fwlink/?linkid=2124701",
-        "fileName": "MicrosoftEdgeWebView2RuntimeInstallerX64.exe",
-        "sizeBytes": 203654864,
-        "sha256": "3a08103bed8a3d9aefdfc9ac10a672ea69605163f2dcb08d76cfd3e0444511c9"
-      },
-      "license": {
-        "spdx": "LicenseRef-Microsoft-WebView2",
-        "sourceUrl": "https://www.microsoft.com/web/webview2/terms-of-use/"
-      },
-      "install": {
-        "role": "webview2-offline-installer",
-        "fileName": "MicrosoftEdgeWebView2RuntimeInstallerX64.exe"
-      }
     }
   ]
 }

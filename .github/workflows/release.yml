@@ -1,0 +1,243 @@
+name: formal-release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+  id-token: none
+
+concurrency:
+  group: formal-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    runs-on: windows-2025
+    outputs:
+      version: ${{ steps.identity.outputs.version }}
+      generated_at: ${{ steps.identity.outputs.generated_at }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24.12.0"
+          package-manager-cache: false
+      - run: npm ci
+      - run: npm run release:formal:validate
+      - id: identity
+        shell: pwsh
+        run: |
+          $package = Get-Content package.json -Raw | ConvertFrom-Json
+          "version=$($package.version)" >> $env:GITHUB_OUTPUT
+          "generated_at=$(git show -s --format=%cI HEAD)" >> $env:GITHUB_OUTPUT
+      - run: npm test
+
+  build-windows:
+    needs: validate
+    runs-on: windows-2025
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24.12.0"
+          package-manager-cache: false
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+      - run: npm ci
+      - run: npm run phase:0.15
+      - run: npm run release:windows:size-report
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pr4-windows-candidate
+          path: artifacts/windows-release/${{ needs.validate.outputs.version }}
+          if-no-files-found: error
+          retention-days: 1
+
+  sign-windows:
+    needs: [validate, build-windows]
+    runs-on: windows-2025
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24.12.0"
+          package-manager-cache: false
+      - run: npm ci
+      - uses: actions/download-artifact@v4
+        with:
+          name: pr4-windows-candidate
+          path: artifacts/windows-release/${{ needs.validate.outputs.version }}
+      - name: Fail closed when production signing configuration is absent
+        shell: pwsh
+        env:
+          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          AZURE_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          SIGNING_ENDPOINT: ${{ vars.AZURE_ARTIFACT_SIGNING_ENDPOINT }}
+          SIGNING_ACCOUNT: ${{ vars.AZURE_SIGNING_ACCOUNT_NAME }}
+          SIGNING_PROFILE: ${{ vars.AZURE_CERTIFICATE_PROFILE_NAME }}
+          EXPECTED_PUBLISHER: ${{ vars.WINDOWS_SIGNING_PUBLISHER }}
+        run: |
+          foreach ($name in @("AZURE_CLIENT_ID", "AZURE_TENANT_ID", "AZURE_SUBSCRIPTION_ID", "SIGNING_ENDPOINT", "SIGNING_ACCOUNT", "SIGNING_PROFILE", "EXPECTED_PUBLISHER")) {
+            if ([string]::IsNullOrWhiteSpace((Get-Item "env:$name").Value)) { throw "release.signing_material_missing: $name" }
+          }
+          if ($env:SIGNING_PROFILE -match "(?i)test|private") { throw "release.production_profile_required" }
+      - run: npm run release:formal:assemble -- prepare
+      - uses: azure/login@v3
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+      - uses: azure/artifact-signing-action@v2
+        with:
+          endpoint: ${{ vars.AZURE_ARTIFACT_SIGNING_ENDPOINT }}
+          signing-account-name: ${{ vars.AZURE_SIGNING_ACCOUNT_NAME }}
+          certificate-profile-name: ${{ vars.AZURE_CERTIFICATE_PROFILE_NAME }}
+          files: |
+            ${{ github.workspace }}\artifacts\formal-release-stage\offline\installer\AgentComputerUse.Installer.exe
+            ${{ github.workspace }}\artifacts\formal-release-stage\offline\release\payload\bin\AgentComputerUse.Installer.exe
+            ${{ github.workspace }}\artifacts\formal-release-stage\offline\release\payload\helpers\overlay\GatewayComputerUseOverlay.exe
+          file-digest: SHA256
+          timestamp-rfc3161: http://timestamp.acs.microsoft.com
+          timestamp-digest: SHA256
+      - name: Verify production Authenticode
+        shell: pwsh
+        run: >-
+          ./scripts/verify-authenticode.ps1
+          -CatalogPath artifacts/formal-release-stage/authenticode-files.txt
+          -ExpectedPublisher '${{ vars.WINDOWS_SIGNING_PUBLISHER }}'
+          -OutputPath artifacts/formal-release-stage/authenticode-evidence.json
+          -ProfileType PublicTrust
+      - uses: actions/upload-artifact@v4
+        with:
+          name: signed-windows-stage
+          path: artifacts/formal-release-stage
+          if-no-files-found: error
+          retention-days: 1
+
+  assemble:
+    needs: [validate, sign-windows]
+    runs-on: windows-2025
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24.12.0"
+          package-manager-cache: false
+      - run: npm ci
+      - uses: actions/download-artifact@v4
+        with:
+          name: pr4-windows-candidate
+          path: artifacts/windows-release/${{ needs.validate.outputs.version }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: signed-windows-stage
+          path: artifacts/formal-release-stage
+      - name: Re-verify downloaded signed bytes
+        shell: pwsh
+        run: >-
+          ./scripts/verify-authenticode.ps1
+          -CatalogPath artifacts/formal-release-stage/authenticode-files.txt
+          -ExpectedPublisher '${{ vars.WINDOWS_SIGNING_PUBLISHER }}'
+          -OutputPath artifacts/formal-release-stage/authenticode-evidence.json
+          -ProfileType PublicTrust
+      - name: Materialize production asset signing keys
+        shell: pwsh
+        env:
+          PRIVATE_KEY_B64: ${{ secrets.ASSET_SIGNING_PRIVATE_KEY_B64 }}
+          PUBLIC_KEY_B64: ${{ vars.ASSET_SIGNING_PUBLIC_KEY_B64 }}
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:PRIVATE_KEY_B64) -or [string]::IsNullOrWhiteSpace($env:PUBLIC_KEY_B64)) { throw "release.asset_signing_material_missing" }
+          [IO.File]::WriteAllBytes("artifacts/formal-release-stage/asset-private.pem", [Convert]::FromBase64String($env:PRIVATE_KEY_B64))
+          [IO.File]::WriteAllBytes("artifacts/formal-release-stage/asset-public.pem", [Convert]::FromBase64String($env:PUBLIC_KEY_B64))
+      - name: Assemble formal release
+        env:
+          AGENT_COMPUTER_USE_WINDOWS_PUBLISHER: ${{ vars.WINDOWS_SIGNING_PUBLISHER }}
+          AGENT_COMPUTER_USE_AUTHENTICODE_EVIDENCE: artifacts/formal-release-stage/authenticode-evidence.json
+          AGENT_COMPUTER_USE_ASSET_PRIVATE_KEY: artifacts/formal-release-stage/asset-private.pem
+          AGENT_COMPUTER_USE_ASSET_PUBLIC_KEY: artifacts/formal-release-stage/asset-public.pem
+          AGENT_COMPUTER_USE_ASSET_KEY_ID: ${{ vars.ASSET_SIGNING_KEY_ID }}
+          AGENT_COMPUTER_USE_RELEASE_GENERATED_AT: ${{ needs.validate.outputs.generated_at }}
+          AGENT_COMPUTER_USE_ASSET_EXPIRES_AT: ${{ vars.ASSET_MANIFEST_EXPIRES_AT }}
+        run: npm run release:formal:assemble
+      - name: Remove private signing material
+        if: always()
+        shell: pwsh
+        run: Remove-Item -LiteralPath artifacts/formal-release-stage/asset-private.pem -Force -ErrorAction SilentlyContinue
+      - uses: actions/upload-artifact@v4
+        with:
+          name: formal-release-assets
+          path: artifacts/formal-release/${{ needs.validate.outputs.version }}
+          if-no-files-found: error
+          retention-days: 7
+
+  draft-github-release:
+    needs: [validate, assemble]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: formal-release-assets
+          path: formal-release
+      - name: Create immutable draft boundary
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "${GITHUB_REF_NAME}" formal-release/* --draft --prerelease --verify-tag --title "${GITHUB_REF_NAME} preview" --generate-notes
+
+  publish-npm:
+    needs: [validate, draft-github-release]
+    runs-on: ubuntu-latest
+    environment: release
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24.12.0"
+          registry-url: https://registry.npmjs.org
+          package-manager-cache: false
+      - run: npm ci
+      - run: npm run phase:0.14
+      - run: npm publish artifacts/npm-release/package --access public --provenance
+
+  post-publish-smoke:
+    needs: [validate, publish-npm]
+    runs-on: windows-2025
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24.12.0"
+          package-manager-cache: false
+      - run: npm ci
+      - uses: actions/download-artifact@v4
+        with:
+          name: formal-release-assets
+          path: artifacts/formal-release/${{ needs.validate.outputs.version }}
+      - run: node scripts/post-publish-smoke.mjs
+
+  publish-github-release:
+    needs: post-publish-smoke
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Publish only after npm and install smoke pass
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release edit "${GITHUB_REF_NAME}" --draft=false --prerelease

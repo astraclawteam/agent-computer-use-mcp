@@ -21,6 +21,7 @@ npm run phase:0.12
 npm run phase:0.13
 npm run phase:0.14
 npm run phase:0.15
+npm run release:windows:size-report
 npm run phase:1.6
 npm run phase:1.7
 npm run phase:1.8
@@ -88,7 +89,8 @@ Required evidence:
 - `npm run phase:0.12` verifies release artifact hashes and Windows helper signing evidence.
 - `npm run phase:0.13` verifies Windows helper signing inventory coverage for required helper artifacts and reserved future sidecars.
 - `npm run phase:0.14` builds, integrity-checks, MCP-smokes, and packs the protected npm release with no source or Source Maps.
-- `npm run phase:0.15` verifies six locked upstream assets, assembles the real Windows candidate under a fixed artifact contract, verifies the offline ZIP's exact internal inventory and hashes, installs and activates it with installer network access disabled, proves `computer.doctor` resolves the activated candidate cua-driver rather than host overrides, starts the protected MCP with portable Node.js, and verifies release checksums and CycloneDX SBOM evidence.
+- `npm run phase:0.15` verifies five locked upstream assets, assembles the real Windows candidate under a fixed artifact contract, verifies the offline ZIP's exact internal inventory and hashes, installs and activates it with installer network access disabled, proves `computer.doctor` resolves the activated candidate cua-driver rather than host overrides, verifies the native overlay, starts the protected MCP with portable Node.js, and verifies release checksums and CycloneDX SBOM evidence.
+- `npm run release:windows:size-report` independently verifies the final Windows x64 ZIP is at most 310 MiB and that release evidence contains only the pinned ONNX Windows x64 runtime inventory with valid retained/removed byte and single-blob asset counts.
 - `npm run assets:manifest` records offline/cacheable asset packs.
 - `npm run doctor:install-cache` records readiness and repair actions without starting desktop control.
 - `npm run phase:1.9` verifies permission tiers, unsafe-window deny policy, and secure-field fail-closed behavior.
@@ -211,6 +213,7 @@ Required evidence:
 - Signed Windows helper inventory proof from `npm run phase:0.13`.
 - Protected npm tarball proof from `npm run phase:0.14`, including SHA-256 and zero source/Source Map counts.
 - Real Windows candidate proof from `npm run phase:0.15`, including locked bytes, offline installation, standard MCP smoke, checksums, and SBOM verification.
+- Windows x64 target and 310 MiB offline bundle proof from `npm run release:windows:size-report`.
 - Offline install proof from `npm run phase:7.4`.
 - First-enable safety proof from `npm run phase:7.5`.
 - Repair entrypoint catalog proof from `npm run phase:7.6`.
@@ -226,6 +229,9 @@ Required evidence:
 - MCP approval compatibility proof from `npm run phase:5.5`.
 - Concurrency, multi-client stress, and disconnect test reports from `npm run phase:5.0`, `npm run phase:5.6`, and `npm run phase:5.2`.
 - Human review of public MCP contract changes from `npm run phase:5.7`.
+- Sanitized real-app provider evidence from `npm run phase:6.2`; declaration-only rows do not satisfy this gate.
+- Runtime soak evidence from `npm run phase:8.0`, including zero request failures, overlay leaks, desktop-control starts, and orphan processes.
+- A successful formal tag run of `.github/workflows/release.yml` with production Authenticode, production asset trust, npm provenance, post-publish install smoke, and a published GitHub Release.
 
 ## Blockers
 
@@ -239,3 +245,5 @@ Any of these block release:
 - CI required checks are bypassed for non-admin merges.
 - A publish-ready npm artifact contains first-party source, tests, C# source, Source Maps, or unobfuscated runtime entrypoints.
 - A PR4 `blocked_unsigned` candidate or development-only asset signature is uploaded to a GitHub Release, npm, or another distribution channel before PR5 production signing.
+- A real-app result contains an absolute local path, screenshot, OCR text, document contents, guessed coordinates, or user overlay pixels.
+- A runtime soak exceeds configured RSS/handle growth, reports any request failure, or leaves a child PID alive after shutdown.

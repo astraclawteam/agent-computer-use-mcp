@@ -114,14 +114,18 @@ try {
 
   console.log(JSON.stringify({
     status: passed ? "passed" : "failed",
-    filePath,
+    evidenceKind: "real-app",
+    observationProvider: "uia-som",
+    usedGuessedCoordinates: false,
+    includeUserOverlay: false,
+    fixtureFileName: basename(filePath),
     window: { pid: window.pid, window_id: window.window_id, title: window.title },
     name: { element_index: name.element_index, element_token: name.element_token, label: name.label },
     save: { element_index: save.element_index, element_token: save.element_token, label: save.label },
     cursor: cursorState,
     setValueText: textFromResult(setValueResult),
     clickText: textFromResult(clickResult),
-    diskText,
+    diskBytesVerified: passed,
   }, null, 2));
   process.exitCode = passed ? 0 : 1;
 
@@ -129,7 +133,11 @@ try {
 } catch (error) {
   console.error(JSON.stringify({
     status: "failed",
-    filePath,
+    evidenceKind: "real-app",
+    observationProvider: "uia-som",
+    usedGuessedCoordinates: false,
+    includeUserOverlay: false,
+    fixtureFileName: basename(filePath),
     error: error instanceof Error ? error.message : String(error),
     stderr: mcp.stderrText().slice(-4000),
   }, null, 2));

@@ -1,4 +1,6 @@
 #!/usr/bin/env node
+import { resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
@@ -10,54 +12,52 @@ import { ComputerUseProviderRouter } from "./computer-use-provider-router.mjs";
 import { CuaDriverMcpDriver } from "./cua-driver-mcp-driver.mjs";
 import { startGatewayManagedOverlay, stopGatewayManagedOverlay } from "./gateway-overlay-session.mjs";
 
-const assetRepairRuntime = createAssetRepairRuntime();
-const router = new ComputerUseProviderRouter({
-  ...assetRepairRuntime,
-  driver: new CuaDriverMcpDriver(),
-  overlayRuntime: {
-    start: (args) => startGatewayManagedOverlay(args),
-    stop: (handle) => {
-      handle?.stop?.();
-      stopGatewayManagedOverlay();
+export async function runComputerUseMcpServer() {
+  const assetRepairRuntime = createAssetRepairRuntime();
+  const router = new ComputerUseProviderRouter({
+    ...assetRepairRuntime,
+    driver: new CuaDriverMcpDriver(),
+    overlayRuntime: {
+      start: (args) => startGatewayManagedOverlay(args),
+      stop: (handle) => {
+        handle?.stop?.();
+        stopGatewayManagedOverlay();
+      },
     },
-  },
-});
+  });
 
-const server = new Server(
-  {
-    name: "agent-computer-use-mcp",
-    version: "0.0.1",
-  },
-  {
-    capabilities: {
-      tools: { listChanged: false },
+  const server = new Server(
+    {
+      name: "agent-computer-use-mcp",
+      version: "0.0.1",
     },
-  },
-);
+    {
+      capabilities: {
+        tools: { listChanged: false },
+      },
+    },
+  );
 
-server.setRequestHandler(ListToolsRequestSchema, async () => ({
-  tools: COMPUTER_USE_MCP_TOOLS,
-}));
+  server.setRequestHandler(ListToolsRequestSchema, async () => ({
+    tools: COMPUTER_USE_MCP_TOOLS,
+  }));
 
-server.setRequestHandler(CallToolRequestSchema, async (request) => {
-  const { name, arguments: args = {} } = request.params;
-  return callTool(name, args);
-});
+  server.setRequestHandler(CallToolRequestSchema, async (request) => {
+    const { name, arguments: args = {} } = request.params;
+    return callTool(router, name, args);
+  });
 
-process.on("SIGINT", async () => {
-  await closeAndExit(0);
-});
-process.on("SIGTERM", async () => {
-  await closeAndExit(0);
-});
-process.on("uncaughtException", async (error) => {
-  process.stderr.write(`${error instanceof Error ? error.stack : String(error)}\n`);
-  await closeAndExit(1);
-});
+  let unregisterShutdownHandlers = () => {};
+  const shutdown = createServerShutdown({
+    router,
+    server,
+    cleanup: () => unregisterShutdownHandlers(),
+  });
+  unregisterShutdownHandlers = registerServerShutdownHandlers({ shutdown });
+  await server.connect(new StdioServerTransport());
+}
 
-await server.connect(new StdioServerTransport());
-
-async function callTool(name, args) {
+async function callTool(router, name, args) {
   let structuredContent;
   try {
     if (name === "computer.health") {
@@ -139,8 +139,87 @@ function withResultContract(value) {
   };
 }
 
-async function closeAndExit(code) {
-  await router.close().catch(() => {});
-  await server.close().catch(() => {});
-  process.exit(code);
+export function createServerShutdown({
+  router,
+  server,
+  cleanup = () => {},
+  setExitCode = (code) => {
+    process.exitCode = code;
+  },
+}) {
+  let requestedExitCode = 0;
+  let shutdownPromise = null;
+  let shutdownComplete = false;
+  return function shutdown(code = 0) {
+    requestedExitCode = Math.max(requestedExitCode, code);
+    if (!shutdownPromise) {
+      shutdownPromise = (async () => {
+        try {
+          await router.close();
+        } catch {
+          // Continue shutting down the MCP transport even if provider cleanup fails.
+        }
+        try {
+          await server.close();
+        } catch {
+          // Exit after both independent cleanup stages have been attempted.
+        }
+        try {
+          await cleanup();
+        } catch {
+          // Handler cleanup must not prevent the process from receiving its exit code.
+        }
+        shutdownComplete = true;
+        setExitCode(requestedExitCode);
+      })();
+    } else if (shutdownComplete) {
+      setExitCode(requestedExitCode);
+    }
+    return shutdownPromise;
+  };
+}
+
+export function registerServerShutdownHandlers({
+  shutdown,
+  stdin = process.stdin,
+  processTarget = process,
+}) {
+  const onEnd = () => {
+    void shutdown(0);
+  };
+  const onClose = () => {
+    void shutdown(0);
+  };
+  const onSigint = () => {
+    void shutdown(0);
+  };
+  const onSigterm = () => {
+    void shutdown(0);
+  };
+  const onUncaughtException = (error) => {
+    processTarget.stderr.write(`${error instanceof Error ? error.stack : String(error)}\n`);
+    void shutdown(1);
+  };
+  stdin.on("end", onEnd);
+  stdin.on("close", onClose);
+  processTarget.on("SIGINT", onSigint);
+  processTarget.on("SIGTERM", onSigterm);
+  processTarget.on("uncaughtException", onUncaughtException);
+
+  let registered = true;
+  return function unregister() {
+    if (!registered) return;
+    registered = false;
+    stdin.off("end", onEnd);
+    stdin.off("close", onClose);
+    processTarget.off("SIGINT", onSigint);
+    processTarget.off("SIGTERM", onSigterm);
+    processTarget.off("uncaughtException", onUncaughtException);
+  };
+}
+
+const isDirectEntry = process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url);
+const isVerifiedProtectedRuntime = process.env.AGENT_COMPUTER_USE_RELEASE_INTEGRITY_VERIFIED === "1";
+if (isDirectEntry || isVerifiedProtectedRuntime) {
+  await runComputerUseMcpServer();
 }

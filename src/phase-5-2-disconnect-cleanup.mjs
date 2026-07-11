@@ -53,7 +53,19 @@ try {
   });
   const beforeClose = await router.listState();
   await router.close({ reason: "client-disconnect" });
-  const afterClose = await router.listState();
+  let rejectsNewWork = false;
+  try {
+    await router.listState();
+  } catch (error) {
+    rejectsNewWork = error?.code === "lifecycle.closed";
+  }
+  const afterClose = {
+    status: router.activeController ? "active" : "idle",
+    activeController: router.activeController,
+    lastCapture: router.lastCapture,
+    pendingRepairApproval: router.pendingRepairApproval,
+    auditEvents: router.auditEvents,
+  };
   const overlayStopped = calls.includes("overlay.stop");
 
   const passed = beforeClose.status === "active"
@@ -62,6 +74,7 @@ try {
     && afterClose.lastCapture === null
     && afterClose.pendingRepairApproval === null
     && overlayStopped
+    && rejectsNewWork
     && afterClose.auditEvents.some((event) => event.type === "computer.controller.closed");
 
   process.stdout.write(`${JSON.stringify({
@@ -73,6 +86,7 @@ try {
     lastCaptureCleared: afterClose.lastCapture === null,
     pendingApprovalCleared: afterClose.pendingRepairApproval === null,
     overlayStopped,
+    rejectsNewWork,
     driverClosed: calls.includes("driver.close"),
     includeUserOverlay: false,
   }, null, 2)}\n`);

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { mkdir, mkdtemp, readFile, readdir, rename, rm, stat, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, rename, rm, stat, truncate, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { afterEach, test } from "node:test";
@@ -10,6 +10,8 @@ import {
   promoteReleaseCandidate,
   verifyWindowsReleaseCandidate,
 } from "../src/windows-release-assembly.mjs";
+import { WINDOWS_X64_OFFLINE_MAX_BYTES } from "../src/release-size-policy.mjs";
+import { WINDOWS_X64_RELEASE_TARGET } from "../src/release-target.mjs";
 
 const roots = [];
 
@@ -33,16 +35,75 @@ test("Windows release assembly executes verified stages and atomically promotes 
   assert.deepEqual(calls, ["acquire", "payload", "sbom", "prepare-assets", "offline-bundle", "npm-pack"]);
   assert.equal(report.status, "passed");
   assert.equal(report.platform, "windows-x64");
+  assert.deepEqual(report.target, WINDOWS_X64_RELEASE_TARGET);
   assert.equal(report.installable, true);
   assert.equal(report.distributionStatus, "blocked_unsigned");
-  assert.equal(report.assetCount, 6);
+  assert.equal(report.assetCount, 5);
+  assert.equal(report.blobCount, 2);
+  assert.deepEqual(report.runtimeSelection.retainedNativeFiles, [
+    "DirectML.dll",
+    "dxcompiler.dll",
+    "dxil.dll",
+    "onnxruntime_binding.node",
+    "onnxruntime.dll",
+  ]);
+  assert.equal(report.offlineBundleSizeBytes, 11);
+  assert.equal(report.offlineBundleMaxBytes, WINDOWS_X64_OFFLINE_MAX_BYTES);
   assert.equal(report.firstEnableDownloadCount, 0);
   assert.equal(report.startsDesktopControl, false);
   assert.equal(report.includeUserOverlay, false);
   assert.equal((await stat(report.manifestPath)).isFile(), true);
+  const manifest = JSON.parse(await readFile(report.manifestPath, "utf8"));
+  assert.deepEqual(manifest.evidence.target, WINDOWS_X64_RELEASE_TARGET);
+  assert.equal(manifest.evidence.offlineBundleSizeBytes, 11);
+  assert.equal(manifest.evidence.offlineBundleMaxBytes, WINDOWS_X64_OFFLINE_MAX_BYTES);
+  assert.equal(manifest.evidence.lockedAssetCount, 5);
+  assert.equal(manifest.evidence.assetCount, 2);
+  assert.equal(manifest.evidence.blobCount, 2);
+  assert.equal(manifest.evidence.runtimeSelection.packageVersion, "1.27.0");
   assert.equal((await stat(report.checksumsPath)).isFile(), true);
   assert.equal((await readFile(report.checksumsPath, "utf8")).includes("\r"), false);
   assert.deepEqual(await stagingEntries(fixture.outputRoot), []);
+});
+
+test("Windows release assembly rejects an oversized offline bundle before promotion", async () => {
+  const fixture = await createFixture();
+  const calls = [];
+
+  await assert.rejects(
+    () => assembleWindowsReleaseCandidate({
+      outputRoot: fixture.outputRoot,
+      cacheRoot: join(fixture.root, "cache"),
+      allowNetwork: false,
+      generatedAt: "2026-07-10T00:00:00.000Z",
+      lock: fixture.lock,
+      identity: fixture.identity,
+      dependencies: fixture.dependencies(calls, {
+        offlineSizeBytes: WINDOWS_X64_OFFLINE_MAX_BYTES + 1,
+      }),
+    }),
+    (error) => error?.code === "release.offline_bundle_too_large",
+  );
+
+  assert.deepEqual(calls, ["acquire", "payload", "sbom", "prepare-assets", "offline-bundle"]);
+  assert.equal(await stat(fixture.outputRoot).catch(() => null), null);
+});
+
+test("Windows release assembly rejects a reported offline size that differs from the file", async () => {
+  const fixture = await createFixture();
+
+  await assert.rejects(
+    () => assembleWindowsReleaseCandidate({
+      outputRoot: fixture.outputRoot,
+      cacheRoot: join(fixture.root, "cache"),
+      allowNetwork: false,
+      generatedAt: "2026-07-10T00:00:00.000Z",
+      lock: fixture.lock,
+      identity: fixture.identity,
+      dependencies: fixture.dependencies([], { reportedOfflineSizeBytes: 12 }),
+    }),
+    (error) => error?.code === "release.offline_bundle_size_mismatch",
+  );
 });
 
 test("Windows release assembly preserves the previous candidate and cleans staging after failure", async () => {
@@ -127,6 +188,7 @@ test("verified Windows candidate can be reopened without rebuilding release stag
 
   assert.equal(report.status, "passed");
   assert.equal(report.realAssetBytesVerified, true);
+  assert.deepEqual(report.target, WINDOWS_X64_RELEASE_TARGET);
   assert.equal(report.artifacts.length, 7);
   assert.deepEqual(calls, ["acquire"]);
 });
@@ -311,7 +373,6 @@ async function createFixture() {
     "ocr-model-pp-ocrv6-small-det",
     "ocr-model-pp-ocrv6-small-rec",
     "ocr-model-pp-ocrv6-small-rec-metadata",
-    "webview2-evergreen-standalone-windows-x64",
   ];
   const assets = [];
   for (const id of ids) {
@@ -353,6 +414,7 @@ async function createFixture() {
     commit: "a".repeat(40),
     channel: "preview",
     platform: "windows-x64",
+    target: WINDOWS_X64_RELEASE_TARGET,
   };
   return {
     root,
@@ -372,8 +434,9 @@ function fixtureDependencies({ calls, acquired, options }) {
       calls.push("acquire");
       return acquired();
     },
-    async buildWindowsReleasePayload({ outputRoot }) {
+    async buildWindowsReleasePayload({ outputRoot, target }) {
       calls.push("payload");
+      assert.deepEqual(target, WINDOWS_X64_RELEASE_TARGET);
       const installerPath = join(outputRoot, "payload/bin/AgentComputerUse.Installer.exe");
       const overlayPath = join(outputRoot, "payload/helpers/overlay/GatewayComputerUseOverlay.exe");
       await writeFixture(installerPath, "installer");
@@ -381,13 +444,28 @@ function fixtureDependencies({ calls, acquired, options }) {
       await writeFixture(join(outputRoot, "release-manifest.json"), "{}");
       return {
         status: "ready",
+        target,
+        runtimeSelection: {
+          target,
+          packageVersion: "1.27.0",
+          retainedNativeFiles: [
+            "DirectML.dll",
+            "dxcompiler.dll",
+            "dxil.dll",
+            "onnxruntime_binding.node",
+            "onnxruntime.dll",
+          ],
+          retainedNativeBytes: 64_000_000,
+          removedNativeBytes: 200_000_000,
+        },
         bundleRoot: outputRoot,
         installerPath,
         files: [{ path: "helpers/overlay/GatewayComputerUseOverlay.exe", bytes: 7, sha256: sha256("overlay") }],
       };
     },
-    async prepareWindowsOfflineAssets({ outputRoot }) {
+    async prepareWindowsOfflineAssets({ outputRoot, target }) {
       calls.push("prepare-assets");
+      assert.deepEqual(target, WINDOWS_X64_RELEASE_TARGET);
       const trustRoot = join(outputRoot, "trust");
       const manifestPath = await writeFixture(join(trustRoot, "asset-manifest.json"), "{}");
       const signaturePath = await writeFixture(join(trustRoot, "asset-manifest.sig"), "signature");
@@ -395,14 +473,16 @@ function fixtureDependencies({ calls, acquired, options }) {
       const assets = [{ id: "offline", path: await writeFixture(join(outputRoot, "offline.bin"), "offline"), sizeBytes: 7, sha256: sha256("offline") }];
       return {
         status: "ready",
+        target,
         assets,
         trust: { manifestPath, signaturePath, keyringPath },
         requiredAssetIds: ["offline"],
         licenses: [],
       };
     },
-    async buildWindowsOfflineBundle({ outputRoot }) {
+    async buildWindowsOfflineBundle({ outputRoot, target }) {
       calls.push("offline-bundle");
+      assert.deepEqual(target, WINDOWS_X64_RELEASE_TARGET);
       if (options.failStage === "offline-bundle") {
         const error = new Error("fixture.offline_failed");
         error.code = "fixture.offline_failed";
@@ -410,15 +490,27 @@ function fixtureDependencies({ calls, acquired, options }) {
       }
       const fileName = "agent-computer-use-mcp-0.0.1-windows-x64-offline.candidate.zip";
       const outputPath = await writeFixture(join(outputRoot, fileName), "offline-zip");
-      return { status: "ready", outputPath, fileName, firstEnableDownloadCount: 0 };
+      if (options.offlineSizeBytes !== undefined) await truncate(outputPath, options.offlineSizeBytes);
+      const sizeBytes = (await stat(outputPath)).size;
+      return {
+        status: "ready",
+        target,
+        outputPath,
+        fileName,
+        sizeBytes: options.reportedOfflineSizeBytes ?? sizeBytes,
+        firstEnableDownloadCount: 0,
+        assetCount: 2,
+        blobCount: 2,
+      };
     },
     async packProtectedNpmPackage({ releaseRoot }) {
       calls.push("npm-pack");
       const filename = "agent-computer-use-mcp-0.0.1.tgz";
       return { status: "passed", filename, tarballPath: await writeFixture(join(releaseRoot, filename), "npm") };
     },
-    async buildReleaseSbom({ outputPath }) {
+    async buildReleaseSbom({ outputPath, target }) {
       calls.push("sbom");
+      assert.deepEqual(target, WINDOWS_X64_RELEASE_TARGET);
       await writeFixture(outputPath, JSON.stringify({ bomFormat: "CycloneDX" }));
       return { status: "passed", outputPath };
     },

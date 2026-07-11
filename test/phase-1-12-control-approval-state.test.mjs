@@ -7,18 +7,21 @@ test("control approval state requires explicit approve before desktop control st
   const { ComputerUseProviderRouter } = await import("../src/computer-use-provider-router.mjs");
   let now = 1_000;
   const overlayCalls = [];
+  const visualCalls = [];
   const router = new ComputerUseProviderRouter({
     clock: {
       now: () => now,
       iso: (timeMs = now) => new Date(timeMs).toISOString(),
     },
-    driver: createDriver(),
+    driver: createDriver(visualCalls),
     overlayRuntime: {
       async start(args) {
+        visualCalls.push("overlay.start");
         overlayCalls.push({ method: "start", args });
         return { visible: true, processId: 99 };
       },
       async stop(handle) {
+        visualCalls.push("overlay.stop");
         overlayCalls.push({ method: "stop", handle });
       },
     },
@@ -39,6 +42,7 @@ test("control approval state requires explicit approve before desktop control st
   assert.equal(pending.startsDesktopControl, false);
   assert.equal(pending.includeUserOverlay, false);
   assert.deepEqual(overlayCalls, []);
+  assert.deepEqual(visualCalls, []);
   assert.equal((await router.listState()).pendingAccessApproval.token, pending.approval.token);
 
   await assert.rejects(
@@ -57,6 +61,7 @@ test("control approval state requires explicit approve before desktop control st
   assert.equal(approved.controller.agentId, "agent-approval");
   assert.equal(approved.overlay.visible, true);
   assert.deepEqual(overlayCalls.map((call) => call.method), ["start"]);
+  assert.deepEqual(visualCalls, ["cursor.start", "overlay.start"]);
 
   now = 1_101;
   await assert.rejects(
@@ -64,6 +69,73 @@ test("control approval state requires explicit approve before desktop control st
     /controller.expired/,
   );
   assert.deepEqual(overlayCalls.map((call) => call.method), ["start", "stop"]);
+  assert.deepEqual(visualCalls, ["cursor.start", "overlay.start", "overlay.stop", "cursor.stop"]);
+});
+
+test("control cancellation and revocation stop overlay before cursor", async () => {
+  const { ComputerUseProviderRouter } = await import("../src/computer-use-provider-router.mjs");
+  const calls = [];
+  const router = new ComputerUseProviderRouter({
+    driver: createDriver(calls),
+    overlayRuntime: {
+      async start() {
+        calls.push("overlay.start");
+        return { visible: true, processId: 99 };
+      },
+      async stop() {
+        calls.push("overlay.stop");
+      },
+    },
+  });
+
+  await router.requestAccess({ titlePart: "Computer Use Lab", tier: "full" });
+  await router.cancel({ reason: "operator-cancelled" });
+  await router.requestAccess({ titlePart: "Computer Use Lab", tier: "full" });
+  await router.revoke({ reason: "operator-revoked" });
+
+  assert.deepEqual(calls, [
+    "cursor.start",
+    "overlay.start",
+    "overlay.stop",
+    "cursor.stop",
+    "cursor.start",
+    "overlay.start",
+    "overlay.stop",
+    "cursor.stop",
+  ]);
+});
+
+test("overlay startup failure rolls back cursor and preserves the startup error", async () => {
+  const { ComputerUseProviderRouter } = await import("../src/computer-use-provider-router.mjs");
+  const calls = [];
+  const startupError = new Error("overlay startup failed");
+  const cleanupError = new Error("cursor cleanup failed");
+  const router = new ComputerUseProviderRouter({
+    driver: {
+      ...createDriver(),
+      async startCursor() {
+        calls.push("cursor.start");
+      },
+      async stopCursor() {
+        calls.push("cursor.stop");
+        throw cleanupError;
+      },
+    },
+    overlayRuntime: {
+      async start() {
+        calls.push("overlay.start");
+        throw startupError;
+      },
+    },
+  });
+
+  await assert.rejects(
+    () => router.requestAccess({ titlePart: "Computer Use Lab", tier: "full" }),
+    (error) => error === startupError,
+  );
+
+  assert.equal((await router.listState()).activeController, null);
+  assert.deepEqual(calls, ["cursor.start", "overlay.start", "cursor.stop"]);
 });
 
 test("control approval state denies cancels revokes and expires fail closed", async () => {
@@ -179,7 +251,7 @@ test("Phase 1.12 exposes control approval through MCP schema and smoke script", 
   assert.equal(report.includeUserOverlay, false);
 });
 
-function createDriver() {
+function createDriver(lifecycleCalls = []) {
   return {
     async findWindow() {
       return {
@@ -199,6 +271,12 @@ function createDriver() {
     },
     async click() {
       return { status: "ok" };
+    },
+    async startCursor() {
+      lifecycleCalls.push("cursor.start");
+    },
+    async stopCursor() {
+      lifecycleCalls.push("cursor.stop");
     },
   };
 }

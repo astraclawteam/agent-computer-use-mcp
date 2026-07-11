@@ -9,7 +9,11 @@ test("Phase 0.15 assembles installs and smokes a real offline Windows release ca
   assert.equal(packageJson.scripts["release:windows:assemble"], "node scripts/build-windows-release-candidate.mjs");
   assert.equal(packageJson.scripts["phase:0.15"], "node src/phase-0-15-real-release-assembly.mjs");
   assert.match(readFileSync("scripts/build-windows-release-candidate.mjs", "utf8"), /artifacts\/windows-release/u);
-  assert.match(readFileSync("src/phase-0-15-real-release-assembly.mjs", "utf8"), /artifacts\/windows-release/u);
+  const phaseSource = readFileSync("src/phase-0-15-real-release-assembly.mjs", "utf8");
+  assert.match(phaseSource, /artifacts\/windows-release/u);
+  assert.match(phaseSource, /WINDOWS_X64_OFFLINE_MAX_BYTES/u);
+  assert.match(phaseSource, /offlineBundleSizeBytes/u);
+  assert.match(phaseSource, /offlineBundleMaxBytes/u);
 
   const { ComputerUseProviderRouter } = await import("../src/computer-use-provider-router.mjs");
   const health = await new ComputerUseProviderRouter().health({ fast: true });
@@ -52,7 +56,6 @@ test("Phase 0.15 assembles installs and smokes a real offline Windows release ca
     "ocr-model-pp-ocrv6-small-det",
     "ocr-model-pp-ocrv6-small-rec",
     "ocr-model-pp-ocrv6-small-rec-metadata",
-    "webview2-evergreen-standalone-windows-x64",
   ]) {
     assert.equal(releaseDocs.includes(assetId), true, assetId);
   }
@@ -67,6 +70,8 @@ test("Phase 0.15 assembles installs and smokes a real offline Windows release ca
   assert.equal(report.realAssetBytesVerified, true);
   assert.equal(report.releaseBundleVerified, true);
   assert.equal(report.offlineBundleVerified, true);
+  assert.ok(report.offlineBundleSizeBytes <= report.offlineBundleMaxBytes);
+  assert.equal(report.offlineBundleMaxBytes, 310 * 1024 * 1024);
   assert.ok(report.offlineVerifiedFileCount > 0);
   assert.equal(report.installerAppliedRelease, true);
   assert.equal(report.assetsPreparedAndActivatedOffline, true);
@@ -75,7 +80,8 @@ test("Phase 0.15 assembles installs and smokes a real offline Windows release ca
   assert.equal(report.activatedDriverPathMatches, true);
   assert.equal(report.mcpDeadlineMs, 15_000);
   assert.equal(report.ocrModelPackPresent, true);
-  assert.equal(report.webView2InstallerPresent, true);
+  assert.equal(report.nativeOverlayPresent, true);
+  assert.equal(report.overlayRequiresWebView2, false);
   assert.equal(report.checksumsVerified, true);
   assert.equal(report.sbomVerified, true);
   assert.equal(report.firstEnableDownloadCount, 0);

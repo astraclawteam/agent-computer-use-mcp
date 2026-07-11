@@ -8,6 +8,7 @@ import {
   verifyReleaseOutputs,
   writeReleaseOutputManifest,
 } from "../src/release-output-manifest.mjs";
+import { WINDOWS_X64_RELEASE_TARGET } from "../src/release-target.mjs";
 
 const roots = [];
 
@@ -30,7 +31,9 @@ test("release output manifest records exact sorted artifact hashes and checksums
       commit: "a".repeat(40),
       channel: "preview",
       platform: "windows-x64",
+      target: WINDOWS_X64_RELEASE_TARGET,
     },
+    evidence: releaseEvidence(),
     artifacts,
     outputRoot: root,
     generatedAt: "2026-07-10T00:00:00.000Z",
@@ -38,6 +41,7 @@ test("release output manifest records exact sorted artifact hashes and checksums
 
   assert.equal(report.status, "passed");
   const manifest = JSON.parse(await readFile(report.manifestPath, "utf8"));
+  assert.deepEqual(manifest.evidence, releaseEvidence());
   assert.deepEqual(
     manifest.artifacts.map((item) => item.fileName),
     ["agent-0.0.1-installer.exe", "agent-0.0.1-offline.zip", "agent-0.0.1-sbom.cdx.json"],
@@ -53,6 +57,30 @@ test("release output manifest records exact sorted artifact hashes and checksums
   assert.match(checksums, /^[a-f0-9]{64}  agent-computer-use-mcp-0\.0\.1-release-manifest\.json/m);
   assert.equal((await verifyReleaseOutputs({ manifestPath: report.manifestPath, checksumsPath: report.checksumsPath, artifactRoot: root })).status, "passed");
 });
+
+function releaseEvidence() {
+  return {
+    target: WINDOWS_X64_RELEASE_TARGET,
+    runtimeSelection: {
+      target: WINDOWS_X64_RELEASE_TARGET,
+      packageVersion: "1.27.0",
+      retainedNativeFiles: [
+        "DirectML.dll",
+        "dxcompiler.dll",
+        "dxil.dll",
+        "onnxruntime_binding.node",
+        "onnxruntime.dll",
+      ],
+      retainedNativeBytes: 64_000_000,
+      removedNativeBytes: 200_000_000,
+    },
+    offlineBundleSizeBytes: 300_000_000,
+    offlineBundleMaxBytes: 325_058_560,
+    lockedAssetCount: 5,
+    assetCount: 2,
+    blobCount: 2,
+  };
+}
 
 test("release output verification detects artifact tampering", async () => {
   const root = await fixtureRoot();

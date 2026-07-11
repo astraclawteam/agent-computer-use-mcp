@@ -7,6 +7,7 @@ import { dirname, join, relative, resolve } from "node:path";
 import { writeDevelopmentAssetTrustBundle } from "./asset-manifest-signing.mjs";
 import { buildOfficialCuaDriverManifest } from "./cua-driver-live-asset.mjs";
 import { buildPpOcrV6SmallPack } from "./ocr-release-model-pack.mjs";
+import { WINDOWS_X64_RELEASE_TARGET, assertReleaseTarget, sameReleaseTarget } from "./release-target.mjs";
 
 const REQUIRED_PAYLOAD_PATHS = Object.freeze([
   "release-manifest.json",
@@ -18,6 +19,7 @@ const REQUIRED_PAYLOAD_PATHS = Object.freeze([
 ]);
 
 export async function prepareWindowsOfflineAssets(options = {}) {
+  const target = assertReleaseTarget(options.target ?? WINDOWS_X64_RELEASE_TARGET);
   const outputRoot = resolve(required(options.outputRoot, "release.offline_asset_output_missing"));
   const packageVersion = required(options.packageVersion, "release.package_version_missing");
   const generatedAt = required(options.generatedAt, "release.generated_at_missing");
@@ -53,18 +55,6 @@ export async function prepareWindowsOfflineAssets(options = {}) {
     generatedAt,
   });
 
-  const webView = requireAcquired(acquired, "webview2-evergreen-standalone-windows-x64");
-  const webViewRoot = join(outputRoot, "webview2-source");
-  const webViewName = "MicrosoftEdgeWebView2RuntimeInstallerX64.exe";
-  await mkdir(webViewRoot, { recursive: true });
-  await copyFile(webView.path, join(webViewRoot, webViewName));
-  const webViewArchive = await archiveDirectory({
-    id: webView.id,
-    sourceRoot: webViewRoot,
-    outputPath: join(outputRoot, "blobs/webview2-evergreen-standalone-windows-x64.zip"),
-    generatedAt,
-  });
-
   const driver = requireAcquired(acquired, "cua-driver-windows-x64");
   const keyId = "candidate-release-assets";
   const driverDefinition = options.driverDefinition
@@ -84,23 +74,7 @@ export async function prepareWindowsOfflineAssets(options = {}) {
     })),
     entryPoint: "ppocrv6_dict.txt",
   });
-  const webViewDefinition = archiveAssetDefinition({
-    id: webViewArchive.id,
-    kind: "system-runtime",
-    version: normalizeAssetVersion(lockAssets.get(webView.id)?.version ?? webView.version),
-    packageVersion,
-    archive: webViewArchive,
-    files: [{
-      path: webViewName,
-      installPath: webViewName,
-      sizeBytes: webView.sizeBytes,
-      sha256: webView.sha256,
-      executable: true,
-    }],
-    entryPoint: webViewName,
-    authenticode: { mode: "microsoft", publisher: "Microsoft Corporation", timestampRequired: true },
-  });
-  const definitions = [driverDefinition, modelDefinition, webViewDefinition];
+  const definitions = [driverDefinition, modelDefinition];
   const manifest = {
     schemaVersion: 2,
     packageName: "agent-computer-use-mcp",
@@ -109,6 +83,7 @@ export async function prepareWindowsOfflineAssets(options = {}) {
     generatedAt,
     expiresAt: "2099-01-01T00:00:00.000Z",
     developmentOnly: true,
+    target,
     signing: { algorithm: "ecdsa-p256-sha256", keyId },
     assets: definitions,
   };
@@ -116,10 +91,10 @@ export async function prepareWindowsOfflineAssets(options = {}) {
   const assets = [
     { id: driverDefinition.id, path: driver.path, sizeBytes: driver.sizeBytes, sha256: driver.sha256 },
     { id: modelDefinition.id, path: modelArchive.path, sizeBytes: modelArchive.sizeBytes, sha256: modelArchive.sha256 },
-    { id: webViewDefinition.id, path: webViewArchive.path, sizeBytes: webViewArchive.sizeBytes, sha256: webViewArchive.sha256 },
   ];
   return {
     status: "ready",
+    target,
     modelPack,
     assets,
     trust: {
@@ -140,12 +115,13 @@ export async function buildWindowsOfflineBundle(options = {}) {
   if (process.platform !== "win32") {
     throw releaseError("release.windows_required", "Windows offline bundle requires Windows");
   }
+  const target = assertReleaseTarget(options.target ?? WINDOWS_X64_RELEASE_TARGET);
   const outputRoot = resolve(required(options.outputRoot, "release.offline_output_missing"));
   const payloadBundleRoot = resolve(required(options.payloadBundleRoot, "release.payload_root_missing"));
   const generatedAt = required(options.generatedAt, "release.generated_at_missing");
   const packageName = required(options.packageName, "release.package_name_missing");
   const packageVersion = required(options.packageVersion, "release.package_version_missing");
-  await validateInputs({ ...options, payloadBundleRoot });
+  const input = await validateInputs({ ...options, payloadBundleRoot, target });
 
   const stageRoot = `${outputRoot}.staging-${randomUUID()}`;
   const contentRoot = join(stageRoot, "content");
@@ -161,7 +137,7 @@ export async function buildWindowsOfflineBundle(options = {}) {
       join(contentRoot, "installer/AgentComputerUse.Installer.exe"),
     );
 
-    for (const asset of [...options.assets].sort((left, right) => left.id.localeCompare(right.id, "en"))) {
+    for (const asset of input.uniqueAssets) {
       const destination = join(contentRoot, "assets", "blobs", "sha256", asset.sha256);
       await mkdir(dirname(destination), { recursive: true });
       await copyFile(asset.path, destination);
@@ -176,6 +152,7 @@ export async function buildWindowsOfflineBundle(options = {}) {
       packageName,
       packageVersion,
       platform: "windows-x64",
+      target,
       generatedAt,
       distributionStatus: "blocked_unsigned",
       firstEnableDownloadCount: 0,
@@ -204,6 +181,7 @@ export async function buildWindowsOfflineBundle(options = {}) {
     return {
       status: "ready",
       platform: "windows-x64",
+      target,
       installable: true,
       distributionStatus: "blocked_unsigned",
       outputPath: join(outputRoot, fileName),
@@ -212,6 +190,7 @@ export async function buildWindowsOfflineBundle(options = {}) {
       sha256: zipSha256,
       entries,
       assetCount: options.assets.length,
+      blobCount: input.uniqueAssets.length,
       firstEnableDownloadCount: 0,
       startsDesktopControl: false,
       includeUserOverlay: false,
@@ -321,26 +300,32 @@ function requireAcquired(acquired, id) {
   return asset;
 }
 
-function normalizeAssetVersion(value) {
-  if (/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/u.test(value)) return value;
-  const fourPart = /^(\d+\.\d+\.\d+)\.(\d+)$/u.exec(value);
-  if (fourPart) return `${fourPart[1]}+${fourPart[2]}`;
-  throw releaseError("release.asset_version_invalid", `Asset version cannot be represented as SemVer: ${value}`);
-}
-
 async function validateInputs(options) {
+  const target = assertReleaseTarget(options.target);
+  const payloadPaths = await listRelativeFiles(options.payloadBundleRoot);
+  if (payloadPaths.some((path) => path.startsWith("payload/assets/")
+    || path.startsWith("payload/activated-assets/"))) {
+    throw releaseError(
+      "release.offline_activated_view_forbidden",
+      "Release payload contains an activated asset view",
+    );
+  }
   for (const path of REQUIRED_PAYLOAD_PATHS) {
     if (!(await stat(join(options.payloadBundleRoot, path)).catch(() => null))?.isFile()) {
       throw releaseError("release.offline_bundle_incomplete", `Required payload file is missing: ${path}`);
     }
   }
-  const assetsById = new Map((options.assets ?? []).map((asset) => [asset.id, asset]));
+  const assets = [...(options.assets ?? [])];
+  const assetsById = new Map(assets.map((asset) => [asset.id, asset]));
+  if (assetsById.size !== assets.length) {
+    throw releaseError("release.offline_asset_duplicate", "Offline asset IDs must be unique");
+  }
   for (const id of options.requiredAssetIds ?? []) {
     if (!assetsById.has(id)) {
       throw releaseError("release.offline_bundle_incomplete", `Required offline asset is missing: ${id}`);
     }
   }
-  for (const asset of options.assets ?? []) {
+  for (const asset of assets) {
     const fileStat = await stat(asset.path).catch(() => null);
     if (!fileStat?.isFile() || fileStat.size !== asset.sizeBytes
       || sha256(await readFile(asset.path)) !== asset.sha256) {
@@ -361,9 +346,14 @@ async function validateInputs(options) {
     throw releaseError("release.offline_bundle_incomplete", "Release SBOM is not CycloneDX");
   }
   const manifest = JSON.parse(await readFile(options.trust.manifestPath, "utf8"));
-  if (manifest.developmentOnly !== true) {
+  if (manifest.developmentOnly !== true || !sameReleaseTarget(manifest.target, target)) {
     throw releaseError("release.offline_bundle_incomplete", "PR4 candidate trust must be development-only");
   }
+  const byHash = new Map();
+  for (const asset of assets.sort((left, right) => left.id.localeCompare(right.id, "en"))) {
+    if (!byHash.has(asset.sha256)) byHash.set(asset.sha256, asset);
+  }
+  return { uniqueAssets: [...byHash.values()] };
 }
 
 async function listRelativeFiles(root) {

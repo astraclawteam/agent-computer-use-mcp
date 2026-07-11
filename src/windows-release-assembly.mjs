@@ -7,9 +7,11 @@ import { packProtectedNpmPackage } from "../scripts/pack-protected-npm-package.m
 import { acquireReleaseAssets } from "./release-asset-acquirer.mjs";
 import { loadReleaseAssetLock } from "./release-asset-lock.mjs";
 import { verifyReleaseOutputs, writeReleaseOutputManifest } from "./release-output-manifest.mjs";
+import { assertOfflineBundleSize } from "./release-size-policy.mjs";
 import { buildReleaseSbom } from "./release-sbom.mjs";
 import { buildWindowsOfflineBundle, prepareWindowsOfflineAssets } from "./windows-offline-bundle.mjs";
 import { buildWindowsReleasePayload } from "./windows-release-payload.mjs";
+import { WINDOWS_X64_RELEASE_TARGET, assertReleaseTarget, sameReleaseTarget } from "./release-target.mjs";
 
 const DEFAULT_DEPENDENCIES = Object.freeze({
   acquireReleaseAssets,
@@ -26,6 +28,9 @@ export async function assembleWindowsReleaseCandidate(options = {}) {
   if (process.platform !== "win32") {
     throw releaseError("release.windows_required", "Windows release assembly requires Windows");
   }
+  const target = assertReleaseTarget(
+    options.target ?? options.identity?.target ?? WINDOWS_X64_RELEASE_TARGET,
+  );
   const outputRoot = resolve(required(options.outputRoot, "release.output_root_missing"));
   const cacheRoot = resolve(required(options.cacheRoot, "release.cache_root_missing"));
   const generatedAt = options.generatedAt ?? new Date().toISOString();
@@ -34,8 +39,8 @@ export async function assembleWindowsReleaseCandidate(options = {}) {
     options.lockPath ?? "release/windows-x64-assets.lock.json",
   );
   const packageJson = options.packageJson ?? JSON.parse(await readFile("package.json", "utf8"));
-  const identity = options.identity ?? await releaseIdentity(packageJson, lock.platform);
-  validateIdentity(identity, lock, packageJson);
+  const identity = options.identity ?? await releaseIdentity(packageJson, target);
+  validateIdentity(identity, lock, packageJson, undefined, target);
   await assertReplaceableOutputRoot(outputRoot, identity);
 
   const stageRoot = `${outputRoot}.staging-${randomUUID()}`;
@@ -59,7 +64,9 @@ export async function assembleWindowsReleaseCandidate(options = {}) {
       outputRoot: join(workRoot, "release"),
       nodeArchivePath: requiredAcquired(acquired, "node-runtime-windows-x64").path,
       generatedAt,
+      target,
     });
+    assertStageTarget(payloadReport, target, "payload");
     const sbomFileName = `${prefix}-sbom.cdx.json`;
     const sbomPath = join(workRoot, "evidence", sbomFileName);
     await dependencies.buildReleaseSbom({
@@ -67,6 +74,7 @@ export async function assembleWindowsReleaseCandidate(options = {}) {
       lock,
       payloadReport,
       generatedAt,
+      target,
     });
     const offlineAssets = await dependencies.prepareWindowsOfflineAssets({
       outputRoot: join(workRoot, "offline-assets"),
@@ -74,7 +82,9 @@ export async function assembleWindowsReleaseCandidate(options = {}) {
       generatedAt,
       lock,
       acquiredAssets,
+      target,
     });
+    assertStageTarget(offlineAssets, target, "offline assets");
     const offlineReport = await dependencies.buildWindowsOfflineBundle({
       outputRoot: join(workRoot, "offline-bundle"),
       payloadBundleRoot: payloadReport.bundleRoot,
@@ -86,7 +96,17 @@ export async function assembleWindowsReleaseCandidate(options = {}) {
       trust: offlineAssets.trust,
       licenses: offlineAssets.licenses,
       sbomPath,
+      target,
     });
+    assertStageTarget(offlineReport, target, "offline bundle");
+    const offlineStat = await stat(offlineReport.outputPath).catch(() => null);
+    if (!offlineStat?.isFile() || offlineReport.sizeBytes !== offlineStat.size) {
+      throw releaseError(
+        "release.offline_bundle_size_mismatch",
+        "Offline bundle report size does not match the assembled file",
+      );
+    }
+    const offlineSize = assertOfflineBundleSize({ target, sizeBytes: offlineStat.size });
     const npmReport = await dependencies.packProtectedNpmPackage({
       packageRoot: join(workRoot, "npm-package"),
       releaseRoot: join(workRoot, "npm-release"),
@@ -113,6 +133,15 @@ export async function assembleWindowsReleaseCandidate(options = {}) {
     await rm(workRoot, { recursive: true, force: true });
     const output = await dependencies.writeReleaseOutputManifest({
       identity,
+      evidence: {
+        target,
+        runtimeSelection: payloadReport.runtimeSelection,
+        offlineBundleSizeBytes: offlineSize.sizeBytes,
+        offlineBundleMaxBytes: offlineSize.maxBytes,
+        lockedAssetCount: lock.assets.length,
+        assetCount: offlineReport.assetCount,
+        blobCount: offlineReport.blobCount,
+      },
       artifacts: candidates,
       outputRoot: stageRoot,
       generatedAt,
@@ -133,6 +162,7 @@ export async function assembleWindowsReleaseCandidate(options = {}) {
     return {
       status: "passed",
       platform: "windows-x64",
+      target,
       installable: true,
       distributionStatus: "blocked_unsigned",
       outputRoot,
@@ -146,6 +176,10 @@ export async function assembleWindowsReleaseCandidate(options = {}) {
         distributionStatus: candidate.distributionStatus,
       })),
       assetCount: lock.assets.length,
+      blobCount: offlineReport.blobCount,
+      runtimeSelection: payloadReport.runtimeSelection,
+      offlineBundleSizeBytes: offlineSize.sizeBytes,
+      offlineBundleMaxBytes: offlineSize.maxBytes,
       realAssetBytesVerified: true,
       firstEnableDownloadCount: offlineReport.firstEnableDownloadCount ?? 0,
       startsDesktopControl: false,
@@ -219,8 +253,15 @@ export async function verifyWindowsReleaseCandidate(options = {}) {
     throw error;
   }
   const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
+  const target = assertReleaseTarget(options.target ?? manifest.release?.target);
   const expectedCommit = options.expectedCommit ?? process.env.GITHUB_SHA ?? await currentCommit();
-  validateIdentity(manifest.release ?? {}, lock, packageJson, expectedCommit);
+  validateIdentity(manifest.release ?? {}, lock, packageJson, expectedCommit, target);
+  const offlineManifestArtifact = (manifest.artifacts ?? [])
+    .find((artifact) => artifact.id === "windows-offline-bundle");
+  const offlineSize = assertOfflineBundleSize({
+    target,
+    sizeBytes: offlineManifestArtifact?.sizeBytes,
+  });
   const artifacts = (manifest.artifacts ?? []).map((entry) => ({
     id: entry.id,
     fileName: entry.fileName,
@@ -258,6 +299,7 @@ export async function verifyWindowsReleaseCandidate(options = {}) {
   return {
     status: "passed",
     platform: "windows-x64",
+    target,
     installable: true,
     distributionStatus: "blocked_unsigned",
     outputRoot,
@@ -265,6 +307,8 @@ export async function verifyWindowsReleaseCandidate(options = {}) {
     checksumsPath,
     artifacts,
     assetCount: lock.assets.length,
+    offlineBundleSizeBytes: offlineSize.sizeBytes,
+    offlineBundleMaxBytes: offlineSize.maxBytes,
     realAssetBytesVerified: true,
     firstEnableDownloadCount: 0,
     startsDesktopControl: false,
@@ -322,7 +366,8 @@ async function assertReplaceableOutputRoot(outputRoot, identity) {
     throw releaseError("release.output_root_unsafe", "existing output directory is not a release candidate");
   }
   if (marker.schemaVersion !== 1 || marker.release?.packageName !== identity.packageName
-    || marker.release?.version !== identity.version || marker.release?.platform !== identity.platform) {
+    || marker.release?.version !== identity.version || marker.release?.platform !== identity.platform
+    || !sameReleaseTarget(marker.release?.target, identity.target)) {
     throw releaseError("release.output_root_unsafe", "existing output directory has a different release identity");
   }
 }
@@ -343,14 +388,15 @@ function requiredAcquired(acquired, id) {
   return asset;
 }
 
-async function releaseIdentity(packageJson, platform) {
+async function releaseIdentity(packageJson, target) {
   return {
     packageName: packageJson.name,
     version: packageJson.version,
     tag: `v${packageJson.version}`,
     commit: process.env.GITHUB_SHA ?? await currentCommit(),
     channel: packageJson.version.startsWith("0.") ? "preview" : "latest",
-    platform,
+    platform: target.id,
+    target,
   };
 }
 
@@ -374,12 +420,19 @@ async function currentCommit() {
   });
 }
 
-function validateIdentity(identity, lock, packageJson, expectedCommit) {
+function validateIdentity(identity, lock, packageJson, expectedCommit, target) {
   if (identity.packageName !== packageJson.name || identity.version !== packageJson.version
-    || identity.tag !== `v${packageJson.version}` || identity.platform !== lock.platform
+    || identity.tag !== `v${packageJson.version}` || identity.platform !== target.id
+    || lock.platform !== target.id || !sameReleaseTarget(identity.target, target)
     || !/^[a-f0-9]{40}$/u.test(identity.commit ?? "")
     || (expectedCommit !== undefined && identity.commit !== expectedCommit)) {
     throw releaseError("release.identity_invalid", "release identity does not match package and asset lock");
+  }
+}
+
+function assertStageTarget(report, target, stage) {
+  if (!sameReleaseTarget(report?.target, target)) {
+    throw releaseError("release.target_mismatch", `${stage} report target does not match release target`);
   }
 }
 

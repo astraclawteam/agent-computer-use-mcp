@@ -56,21 +56,30 @@ try {
   }
 
   await router.close({ reason: "phase-5-5-disconnect" });
-  const stateAfterClose = await router.listState();
-  const afterCloseApproval = await router.approveAccess({
-    approvalToken: pending.approval.token,
-    approved: true,
-  });
-  const pendingClearedOnClose = stateAfterClose.pendingAccessApproval === null
-    && stateAfterClose.auditEvents.some((event) => event.type === "computer.access.approval_closed");
-  const approvalInvalidAfterClose = afterCloseApproval.status === "approval_invalid"
-    && afterCloseApproval.startsDesktopControl === false;
+  const pendingClearedOnClose = router.pendingAccessApproval === null
+    && router.auditEvents.some((event) => event.type === "computer.access.approval_closed");
+  let closedListStateRejected = false;
+  let closedApprovalRejected = false;
+  try {
+    await router.listState();
+  } catch (error) {
+    closedListStateRejected = error?.code === "lifecycle.closed";
+  }
+  try {
+    await router.approveAccess({
+      approvalToken: pending.approval.token,
+      approved: true,
+    });
+  } catch (error) {
+    closedApprovalRejected = error?.code === "lifecycle.closed";
+  }
+  const closedOperationsRejected = closedListStateRejected && closedApprovalRejected;
 
   const passed = schemaDeclaresPendingAccessApproval
     && pendingVisibleInState
     && duplicatePendingRejected
     && pendingClearedOnClose
-    && approvalInvalidAfterClose
+    && closedOperationsRejected
     && startsDesktopControlBeforeApproval === false;
 
   process.stdout.write(`${JSON.stringify({
@@ -81,7 +90,7 @@ try {
     pendingVisibleInState,
     duplicatePendingRejected,
     pendingClearedOnClose,
-    approvalInvalidAfterClose,
+    closedOperationsRejected,
     startsDesktopControlBeforeApproval,
     includeUserOverlay: false,
   }, null, 2)}\n`);

@@ -1,5 +1,7 @@
-using Microsoft.Web.WebView2.Core;
-using Microsoft.Web.WebView2.WinForms;
+using System.Diagnostics;
+using System.Drawing;
+using System.Drawing.Imaging;
+using System.Globalization;
 using System.Runtime.InteropServices;
 using System.Text.Json;
 using System.Windows.Forms;
@@ -9,10 +11,87 @@ namespace GatewayComputerUseOverlay;
 internal static class Program
 {
     [STAThread]
-    private static void Main()
+    private static int Main(string[] args)
     {
+        if (args.Length > 0)
+        {
+            try
+            {
+                var snapshot = ParseSnapshotArguments(args);
+                SnapshotCompositor.Render(snapshot);
+                return 0;
+            }
+            catch (ArgumentException error)
+            {
+                Console.Error.WriteLine($"Invalid arguments: {error.Message}");
+                return 2;
+            }
+            catch (NotSupportedException error)
+            {
+                Console.Error.WriteLine(error.Message);
+                return 3;
+            }
+        }
+
         ApplicationConfiguration.Initialize();
-        Application.Run(new OverlayForm());
+        Application.SetUnhandledExceptionMode(UnhandledExceptionMode.ThrowException);
+        try
+        {
+            Application.Run(new OverlayForm());
+            return 0;
+        }
+        catch (Exception error)
+        {
+            Console.Error.WriteLine($"Overlay failed before or during presentation: {error}");
+            return 1;
+        }
+    }
+
+    private static SnapshotOptions ParseSnapshotArguments(string[] args)
+    {
+        if (args.Length != 8
+            || args[0] != "--snapshot"
+            || args[2] != "--width"
+            || args[4] != "--height"
+            || args[6] != "--phase")
+        {
+            throw new ArgumentException("expected --snapshot <png> --width <int> --height <int> --phase <double>");
+        }
+
+        if (string.IsNullOrWhiteSpace(args[1]))
+        {
+            throw new ArgumentException("snapshot path must not be empty");
+        }
+
+        if (!int.TryParse(args[3], NumberStyles.Integer, CultureInfo.InvariantCulture, out var width) || width <= 0)
+        {
+            throw new ArgumentException("width must be a positive integer");
+        }
+
+        if (!int.TryParse(args[5], NumberStyles.Integer, CultureInfo.InvariantCulture, out var height) || height <= 0)
+        {
+            throw new ArgumentException("height must be a positive integer");
+        }
+
+        if (!double.TryParse(args[7], NumberStyles.Float, CultureInfo.InvariantCulture, out var phase) || !double.IsFinite(phase))
+        {
+            throw new ArgumentException("phase must be a finite number");
+        }
+
+        return new SnapshotOptions(args[1], width, height, phase - Math.Floor(phase));
+    }
+
+    private sealed record SnapshotOptions(string OutputPath, int Width, int Height, double Phase);
+
+    private static class SnapshotCompositor
+    {
+        public static void Render(SnapshotOptions options)
+        {
+            var outputDirectory = Path.GetDirectoryName(Path.GetFullPath(options.OutputPath));
+            Directory.CreateDirectory(outputDirectory!);
+            using var bitmap = OverlayRenderer.Render(new Size(options.Width, options.Height), options.Phase, null);
+            bitmap.Save(options.OutputPath, ImageFormat.Png);
+        }
     }
 }
 
@@ -21,14 +100,15 @@ internal sealed class OverlayForm : Form
     private const int WS_EX_TRANSPARENT = 0x00000020;
     private const int WS_EX_TOOLWINDOW = 0x00000080;
     private const int WS_EX_NOACTIVATE = 0x08000000;
-    private const int MinWaveThickness = 8;
-    private const int RestWaveThickness = 12;
-    private const int MaxWaveThickness = 16;
+    private const int WS_EX_LAYERED = 0x00080000;
 
-    private readonly WebView2 _webView;
+    private readonly System.Windows.Forms.Timer _animationTimer;
     private readonly System.Windows.Forms.Timer _targetRectTimer;
+    private readonly Stopwatch _animationClock = Stopwatch.StartNew();
+    private readonly LayeredWindowPresenter _presenter = new();
     private readonly string? _targetRectFile;
     private string? _lastTargetRectPayload;
+    private RectangleF? _targetRect;
 
     public OverlayForm()
     {
@@ -36,66 +116,63 @@ internal sealed class OverlayForm : Form
         FormBorderStyle = FormBorderStyle.None;
         ShowInTaskbar = false;
         TopMost = true;
-        Bounds = Screen.PrimaryScreen?.WorkingArea ?? SystemInformation.VirtualScreen;
+        var allowVirtualDisplays = IsEnabled(Environment.GetEnvironmentVariable("AGENT_COMPUTER_USE_OVERLAY_ALLOW_VIRTUAL_DISPLAYS"))
+            || IsEnabled(Environment.GetEnvironmentVariable("XIAOZHICLAW_CUA_OVERLAY_ALLOW_VIRTUAL_DISPLAYS"));
+        Bounds = OverlayDisplaySelector.SelectDesktopBounds(allowVirtualDisplays);
         StartPosition = FormStartPosition.Manual;
-        BackColor = System.Drawing.Color.FromArgb(1, 2, 3);
-        TransparencyKey = BackColor;
-
-        _webView = new WebView2
-        {
-            Dock = DockStyle.Fill,
-            DefaultBackgroundColor = System.Drawing.Color.Transparent,
-            AllowExternalDrop = false,
-            CreationProperties = new CoreWebView2CreationProperties
-            {
-                UserDataFolder = Path.Combine(
-                    Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-                    "Agent Computer Use",
-                    "GatewayComputerUseOverlayWebView2"),
-            },
-        };
-
-        Controls.Add(_webView);
 
         _targetRectFile = Environment.GetEnvironmentVariable("AGENT_COMPUTER_USE_OVERLAY_TARGET_RECT_FILE")
             ?? Environment.GetEnvironmentVariable("XIAOZHICLAW_CUA_OVERLAY_TARGET_RECT_FILE");
+        _animationTimer = new System.Windows.Forms.Timer { Interval = 33 };
+        _animationTimer.Tick += (_, _) => PresentFrame();
         _targetRectTimer = new System.Windows.Forms.Timer { Interval = 120 };
         _targetRectTimer.Tick += (_, _) => SyncTargetRect();
     }
+
+    private static bool IsEnabled(string? value)
+        => value is not null && (value == "1" || value.Equals("true", StringComparison.OrdinalIgnoreCase));
 
     protected override CreateParams CreateParams
     {
         get
         {
             var cp = base.CreateParams;
-            cp.ExStyle |= WS_EX_TRANSPARENT | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE;
+            cp.ExStyle |= WS_EX_TRANSPARENT | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE | WS_EX_LAYERED;
             return cp;
         }
     }
 
     protected override bool ShowWithoutActivation => true;
 
-    protected override async void OnShown(EventArgs e)
+    protected override void OnShown(EventArgs e)
     {
         base.OnShown(e);
         NativeMethods.SetWindowPos(Handle, NativeMethods.HWND_TOPMOST, Left, Top, Width, Height, NativeMethods.SWP_NOACTIVATE);
-        await InitializeOverlayAsync();
+        SyncTargetRect();
+        PresentFrame();
+        OverlayReadinessMarker.WriteFromEnvironment();
+        _animationTimer.Start();
+        _targetRectTimer.Start();
     }
 
-    private async Task InitializeOverlayAsync()
+    protected override void Dispose(bool disposing)
     {
-        await _webView.EnsureCoreWebView2Async();
-        _webView.CoreWebView2.Settings.AreDefaultContextMenusEnabled = false;
-        _webView.CoreWebView2.Settings.AreDevToolsEnabled = false;
-        _webView.CoreWebView2.Settings.IsStatusBarEnabled = false;
-        var overlayHtmlPath = ResolveOverlayHtmlPath();
-        var projectRoot = ResolveProjectRoot(overlayHtmlPath);
-        _webView.CoreWebView2.SetVirtualHostNameToFolderMapping(
-            "agent-computer-use-overlay.local",
-            projectRoot,
-            CoreWebView2HostResourceAccessKind.Allow);
-        _webView.CoreWebView2.Navigate("https://agent-computer-use-overlay.local/gateway-overlay/overlay.html");
-        _targetRectTimer.Start();
+        if (disposing)
+        {
+            _animationTimer.Dispose();
+            _targetRectTimer.Dispose();
+        }
+
+        base.Dispose(disposing);
+    }
+
+    private void PresentFrame()
+    {
+        if (!IsHandleCreated || IsDisposed) return;
+
+        var phase = OverlayTheme.PhaseAtElapsedMilliseconds(_animationClock.Elapsed.TotalMilliseconds);
+        using var frame = OverlayRenderer.Render(ClientSize, phase, _targetRect);
+        _presenter.Present(this, frame, new Point(Left, Top));
     }
 
     private void SyncTargetRect()
@@ -114,47 +191,31 @@ internal sealed class OverlayForm : Form
 
         if (payload == _lastTargetRectPayload) return;
         _lastTargetRectPayload = payload;
-
-        var relativePayload = ToOverlayRelativeRect(payload);
-        if (relativePayload is null) return;
-
-        _ = _webView.CoreWebView2?.ExecuteScriptAsync(
-            $"window.__setComputerUseTargetRect?.({relativePayload});");
+        _targetRect = ToOverlayRelativeRect(payload);
+        PresentFrame();
     }
 
-    private string? ToOverlayRelativeRect(string payload)
+    private RectangleF? ToOverlayRelativeRect(string payload)
     {
         try
         {
             using var document = JsonDocument.Parse(payload);
             var root = document.RootElement;
-            if (root.ValueKind == JsonValueKind.Null) return "null";
+            if (root.ValueKind == JsonValueKind.Null) return null;
 
-            var x = root.GetProperty("x").GetDouble() - Left;
-            var y = root.GetProperty("y").GetDouble() - Top;
+            var x = root.GetProperty("x").GetDouble();
+            var y = root.GetProperty("y").GetDouble();
             var width = root.GetProperty("width").GetDouble();
             var height = root.GetProperty("height").GetDouble();
-            if (width <= 0 || height <= 0) return "null";
+            if (width <= 0 || height <= 0) return null;
 
             if (root.TryGetProperty("windowId", out var windowId) && windowId.TryGetInt64(out var hwndValue))
             {
                 RaiseTargetWindowNoActivate(new IntPtr(hwndValue));
             }
 
-            var left = Math.Max(0, Math.Min(Width, x));
-            var top = Math.Max(0, Math.Min(Height, y));
-            var right = Math.Max(left, Math.Min(Width, x + width));
-            var bottom = Math.Max(top, Math.Min(Height, y + height));
-            var clamped = new
-            {
-                x = left,
-                y = top,
-                width = right - left,
-                height = bottom - top,
-                title = root.TryGetProperty("title", out var title) ? title.GetString() : null,
-            };
-
-            return JsonSerializer.Serialize(clamped);
+            var targetBounds = new RectangleF((float)x, (float)y, (float)width, (float)height);
+            return OverlayTargetGeometry.ToOverlayRelativeRect(Bounds, targetBounds);
         }
         catch
         {
@@ -185,31 +246,6 @@ internal sealed class OverlayForm : Form
             NativeMethods.SWP_NOMOVE | NativeMethods.SWP_NOSIZE | NativeMethods.SWP_NOACTIVATE | NativeMethods.SWP_SHOWWINDOW);
     }
 
-    private static string ResolveOverlayHtmlPath()
-    {
-        var candidates = new[]
-        {
-            Path.Combine(AppContext.BaseDirectory, "overlay.html"),
-            Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "overlay.html"),
-            Path.Combine(Environment.CurrentDirectory, "gateway-overlay", "overlay.html"),
-        };
-
-        foreach (var candidate in candidates)
-        {
-            var fullPath = Path.GetFullPath(candidate);
-            if (File.Exists(fullPath)) return fullPath;
-        }
-
-        throw new FileNotFoundException("Gateway overlay HTML asset was not found.", "overlay.html");
-    }
-
-    private static string ResolveProjectRoot(string overlayHtmlPath)
-    {
-        var overlayDirectory = Path.GetDirectoryName(overlayHtmlPath)
-            ?? throw new DirectoryNotFoundException("Gateway overlay directory was not found.");
-        return Path.GetFullPath(Path.Combine(overlayDirectory, ".."));
-    }
-
     private static class NativeMethods
     {
         public static readonly IntPtr HWND_TOPMOST = new(-1);
@@ -225,5 +261,17 @@ internal sealed class OverlayForm : Form
 
         [DllImport("user32.dll")]
         public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
+    }
+}
+
+internal static class OverlayReadinessMarker
+{
+    public static void WriteFromEnvironment()
+    {
+        var markerPath = Environment.GetEnvironmentVariable("AGENT_COMPUTER_USE_OVERLAY_READY_FILE")
+            ?? Environment.GetEnvironmentVariable("XIAOZHICLAW_CUA_OVERLAY_READY_FILE");
+        if (string.IsNullOrWhiteSpace(markerPath)) return;
+
+        File.WriteAllText(markerPath, $"{Environment.ProcessId}\n");
     }
 }

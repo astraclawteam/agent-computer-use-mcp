@@ -5,6 +5,9 @@ import { dirname, join, relative, resolve } from "node:path";
 
 import { buildProtectedNpmPackage } from "../scripts/build-protected-npm-package.mjs";
 import { materializeReleaseBundle } from "./release-bundle.mjs";
+import { publishGatewayOverlay } from "./gateway-overlay-build-host.mjs";
+import { selectProductionRuntime } from "./release-runtime-selector.mjs";
+import { WINDOWS_X64_RELEASE_TARGET, assertReleaseTarget } from "./release-target.mjs";
 import { ensureWindowsInstallerPublished } from "./windows-installer-host.mjs";
 
 const SOURCE_PATTERN = /^(src|test|scripts|windows-installer|gateway-overlay|native-lab|ocr-sidecar)\//;
@@ -13,6 +16,7 @@ export async function buildWindowsReleasePayload(options = {}) {
   if (process.platform !== "win32") {
     throw releaseError("release.windows_required", "Windows release payload requires Windows");
   }
+  const target = assertReleaseTarget(options.target ?? WINDOWS_X64_RELEASE_TARGET);
   const outputRoot = resolve(required(options.outputRoot, "release.output_root_missing"));
   const nodeArchivePath = resolve(required(options.nodeArchivePath, "release.node_archive_missing"));
   const packageJson = JSON.parse(await readFile("package.json", "utf8"));
@@ -27,6 +31,7 @@ export async function buildWindowsReleasePayload(options = {}) {
     const packageRoot = join(sourceRoot, "package");
     await cp(protectedRoot, packageRoot, { recursive: true });
     await installProductionDependencies(stageRoot, packageRoot);
+    const runtimeSelection = await selectProductionRuntime({ packageRoot, target });
 
     const expandedNodeRoot = join(stageRoot, "expanded-node");
     await expandVerifiedZip({ archivePath: nodeArchivePath, destinationPath: expandedNodeRoot });
@@ -45,15 +50,7 @@ export async function buildWindowsReleasePayload(options = {}) {
     const nativeRoot = join(stageRoot, "native");
     const overlayOutput = join(nativeRoot, "overlay");
     const installerPublication = await ensureWindowsInstallerPublished();
-    await runChecked("dotnet", [
-      "publish",
-      "gateway-overlay/GatewayComputerUseOverlay.csproj",
-      "--configuration", "Release",
-      "--runtime", "win-x64",
-      "--self-contained", "true",
-      "--output", overlayOutput,
-      "--nologo",
-    ], "release.overlay_publish_failed");
+    await publishGatewayOverlay({ outputRoot: overlayOutput });
     await copyPublishOutput(dirname(installerPublication.exePath), join(sourceRoot, "bin"));
     await copyPublishOutput(overlayOutput, join(sourceRoot, "helpers", "overlay"));
 
@@ -66,6 +63,7 @@ export async function buildWindowsReleasePayload(options = {}) {
       },
       installer: "bin/AgentComputerUse.Installer.exe",
       overlay: "helpers/overlay/GatewayComputerUseOverlay.exe",
+      target,
       distributionStatus: "blocked_unsigned",
     }, null, 2)}\n`, "utf8");
 
@@ -91,6 +89,8 @@ export async function buildWindowsReleasePayload(options = {}) {
     return {
       status: "ready",
       platform: "windows-x64",
+      target,
+      runtimeSelection,
       distributionStatus: "blocked_unsigned",
       bundleRoot: outputRoot,
       installerPath: join(outputRoot, "payload", "bin", "AgentComputerUse.Installer.exe"),

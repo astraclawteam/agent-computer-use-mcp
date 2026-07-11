@@ -1,0 +1,118 @@
+{
+  "schemaVersion": 1,
+  "apps": [
+    {
+      "appId": "win32-notepad",
+      "appName": "Windows Notepad",
+      "category": "Win32",
+      "executableCandidates": ["C:/Windows/System32/notepad.exe"],
+      "script": "src/real-cua-notepad-file-sequence.mjs",
+      "capabilitySources": ["uia-som"],
+      "flow": "Open a generated temporary text file, write through an accessibility element, save, and verify normalized disk text.",
+      "required": true,
+      "maxAttempts": 2,
+      "timeoutMs": 30000
+    },
+    {
+      "appId": "winforms-native-lab",
+      "appName": "Native Computer Use Lab",
+      "category": "WinForms",
+      "executableCandidates": ["native-lab/bin/Debug/net10.0-windows/NativeComputerUseLab.exe"],
+      "script": "src/real-cua-winforms-file-sequence.mjs",
+      "capabilitySources": ["uia-som"],
+      "flow": "Set a textbox by element identity, click Save by element identity, and verify exact disk bytes.",
+      "required": true,
+      "timeoutMs": 30000
+    },
+    {
+      "appId": "browser-edge-local-fixture",
+      "appName": "Microsoft Edge",
+      "category": "Browser",
+      "executableCandidates": ["C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe"],
+      "script": "src/real-cua-observe-app.mjs",
+      "capabilitySources": ["uia-som"],
+      "flow": "Launch a local non-network fixture and observe its titled document and safe button without screenshots.",
+      "required": false,
+      "timeoutMs": 30000
+    },
+    {
+      "appId": "electron-vscode-local-fixture",
+      "appName": "Visual Studio Code",
+      "category": "Electron",
+      "executableCandidates": ["%LOCALAPPDATA%/Programs/Microsoft VS Code/Code.exe"],
+      "script": "src/real-cua-observe-app.mjs",
+      "capabilitySources": ["uia-som"],
+      "flow": "Launch a generated local text fixture and observe the editor surface without persisting document contents.",
+      "required": false,
+      "timeoutMs": 30000
+    },
+    {
+      "appId": "qt-public-fixture",
+      "appName": "Qt Public Fixture",
+      "category": "Qt",
+      "executableCandidates": ["artifacts/app-fixtures/qt/AgentComputerUseQtFixture.exe"],
+      "script": "src/real-cua-observe-app.mjs",
+      "capabilitySources": ["uia-som", "ocr"],
+      "flow": "Observe a public Qt button and label fixture.",
+      "required": false,
+      "timeoutMs": 30000
+    },
+    {
+      "appId": "wpf-public-fixture",
+      "appName": "WPF Public Fixture",
+      "category": "WPF",
+      "executableCandidates": ["artifacts/app-fixtures/wpf/AgentComputerUseWpfFixture.exe"],
+      "script": "src/real-cua-observe-app.mjs",
+      "capabilitySources": ["uia-som"],
+      "flow": "Observe a public WPF textbox and button fixture.",
+      "required": false,
+      "timeoutMs": 30000
+    },
+    {
+      "appId": "office-writer-public-fixture",
+      "appName": "Office Writer Fixture",
+      "category": "Office",
+      "executableCandidates": ["artifacts/app-fixtures/office/AgentComputerUseOfficeFixture.exe"],
+      "script": "src/real-cua-observe-app.mjs",
+      "capabilitySources": ["uia-som", "ocr"],
+      "flow": "Observe a generated document fixture without reading unrelated documents.",
+      "required": false,
+      "timeoutMs": 30000
+    },
+    {
+      "appId": "terminal-policy-boundary",
+      "appName": "Windows Terminal Policy Boundary",
+      "category": "Terminal",
+      "executableCandidates": [],
+      "script": "src/real-cua-observe-app.mjs",
+      "capabilitySources": ["uia-som"],
+      "flow": "Verify terminal command execution remains policy-blocked in the unattended app matrix.",
+      "policyBlockedReason": "policy.terminal_action_denied",
+      "required": false,
+      "timeoutMs": 30000
+    },
+    {
+      "appId": "canvas-edge-local-fixture",
+      "appName": "Edge Canvas Fixture",
+      "category": "Canvas",
+      "executableCandidates": ["C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe"],
+      "script": "src/real-cua-observe-app.mjs",
+      "capabilitySources": ["cv", "template", "ocr"],
+      "flow": "Prove a self-drawn canvas fails closed when no safe actionable proposal is available.",
+      "expectedStatus": "insufficient",
+      "required": false,
+      "timeoutMs": 30000
+    },
+    {
+      "appId": "industrial-cad-public-fixture",
+      "appName": "CAD-like Public Fixture",
+      "category": "Industrial",
+      "executableCandidates": ["artifacts/app-fixtures/cad/AgentComputerUseCadFixture.exe"],
+      "script": "src/real-cua-observe-app.mjs",
+      "capabilitySources": ["cv", "template", "ocr"],
+      "flow": "Identify panels and viewport regions without guessed coordinates.",
+      "required": false,
+      "timeoutMs": 30000
+    }
+  ]
+}
