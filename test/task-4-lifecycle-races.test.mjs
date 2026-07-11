@@ -525,6 +525,61 @@ for (const stage of ["cursor", "overlay"]) {
   }
 }
 
+test("router releases a ticket-invalidated visual queue wait before queued cancel and close", { timeout: 1_000 }, async () => {
+  const calls = [];
+  const cursorEntered = deferred();
+  const cursorRelease = deferred();
+  const router = new ComputerUseProviderRouter({
+    driver: {
+      async findWindow() {
+        return {
+          windowId: "lab",
+          title: "Computer Use Lab",
+          bounds: { x: 10, y: 20, width: 300, height: 180 },
+        };
+      },
+      async startCursor() {
+        calls.push("cursor.start");
+        cursorEntered.resolve();
+        await cursorRelease.promise;
+      },
+      async stopCursor() {
+        calls.push("cursor.stop");
+      },
+      async close() {
+        calls.push("driver.close");
+      },
+    },
+    overlayRuntime: {
+      async start() {
+        calls.push("overlay.start");
+        return { visible: true, processId: 42 };
+      },
+      async stop() {
+        calls.push("overlay.stop");
+      },
+    },
+  });
+
+  const access = router.requestAccess({ titlePart: "Computer Use Lab", tier: "full" });
+  await cursorEntered.promise;
+  const cancel = router.cancel({ reason: "queue-race" });
+  const close = router.close({ reason: "queue-race" });
+  cursorRelease.resolve();
+
+  await Promise.all([
+    assert.rejects(access, isLifecycleClosed),
+    assert.rejects(cancel, isLifecycleClosed),
+    close,
+  ]);
+
+  assert.equal(router.activeController, null);
+  assert.equal(router.overlayHandle, null);
+  assert.equal(router.cursorActive, false);
+  assert.equal(router.cursorStartAttempted, false);
+  assert.deepEqual(calls, ["cursor.start", "cursor.stop", "driver.close"]);
+});
+
 test("observe access keeps the user overlay but never starts the control cursor", async () => {
   const calls = [];
   const router = createReadyRouter({ calls });

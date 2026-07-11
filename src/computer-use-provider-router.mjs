@@ -1535,12 +1535,12 @@ export class ComputerUseProviderRouter {
     this.controlVisualTail = new Promise((resolve) => {
       release = resolve;
     });
-    if (ticket) {
-      await this.awaitExternal(ticket, () => previous);
-    } else {
-      await previous;
-    }
     try {
+      if (ticket) {
+        await this.awaitExternal(ticket, () => previous);
+      } else {
+        await previous;
+      }
       return await operation();
     } finally {
       release();

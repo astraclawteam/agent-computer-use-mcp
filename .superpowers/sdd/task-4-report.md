@@ -256,3 +256,67 @@ No new concern in the focused lifecycle or MCP gates. The pre-existing Phase
 0.15 candidate identity concern remains outside this change and was not rerun
 after the stop instruction. The existing Phase 5.5 smoke still reads
 `listState()` after terminal close; it was not weakened or changed.
+
+## Queue Release Deadlock Review Fix
+
+### RED
+
+Command from clean head `a0adf0a` after adding the regression:
+
+```powershell
+node --test --test-name-pattern "router releases a ticket-invalidated visual queue wait before queued cancel and close" test/task-4-lifecycle-races.test.mjs
+```
+
+Result: exit `1`; the one regression was cancelled by its `1000ms` test bound.
+
+- `requestAccess()` entered and held `startCursor()`.
+- `cancel()` published a queued visual tail behind that work.
+- `close()` invalidated the cancel ticket before cursor release.
+- Releasing the cursor left cancel waiting forever because its ticketed wait
+  threw before the tail's `finally` had been entered; access cleanup and close
+  then remained queued behind that unreleased tail.
+
+### GREEN
+
+Focused regression command:
+
+```powershell
+node --test --test-name-pattern "router releases a ticket-invalidated visual queue wait before queued cancel and close" test/task-4-lifecycle-races.test.mjs
+```
+
+Result: `pass 1`, `fail 0`, `cancelled 0` in `0.52s`; the test completed in
+`9.6ms` after cursor release.
+
+Bounded lifecycle command:
+
+```powershell
+node --test --test-timeout=10000 test/task-4-lifecycle-races.test.mjs test/cua-driver-mcp-driver.test.mjs test/phase-1-10-controller-timeout.test.mjs test/phase-1-12-control-approval-state.test.mjs test/phase-4-1-overlay-theme-cursor-tokens.test.mjs test/phase-5-2-disconnect-cleanup.test.mjs
+```
+
+Result: `pass 47`, `fail 0` in `2.53s`.
+
+Bounded standard MCP compatibility command:
+
+```powershell
+node --test --test-timeout=10000 test/computer-use-mcp.test.mjs test/server-smoke.test.mjs test/phase-1-7-standard-mcp-client.test.mjs test/phase-1-8-standard-mcp-server.test.mjs test/phase-5-1-multi-client.test.mjs test/phase-5-6-mcp-stress.test.mjs
+```
+
+Result: `pass 13`, `fail 0` in `2.05s`.
+
+### Implementation And Self-Review
+
+- `runControlVisualLifecycle()` now enters its release-protected `try/finally`
+  before awaiting the previous tail. A ticket invalidated while waiting still
+  releases its own published tail, allowing queued cleanup and close to drain.
+- The gated regression verifies that access, queued cancel, and close all
+  settle after cursor release, with no active controller, overlay handle, or
+  cursor state retained. It also verifies exactly one cursor stop and driver
+  close with no overlay startup.
+- The change is limited to the router queue primitive, the lifecycle race
+  regression, and this Task 4 evidence. No public MCP schema, runtime
+  dependency, or visual behavior changed.
+
+### Concerns
+
+No new Task 4 concern. The pre-existing ignored Phase 0.15 release-candidate
+identity concern remains owned by Task 6.
