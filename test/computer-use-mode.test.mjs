@@ -3,7 +3,9 @@ import { readFile } from "node:fs/promises";
 import { test } from "node:test";
 
 import { COMPUTER_USE_EDGES, shouldShowGatewayComputerUseFrame } from "../public/computer-use-mode.mjs";
-import { WAVE_THICKNESS } from "../public/wave-overlay.mjs";
+import * as waveReference from "../public/wave-overlay.mjs";
+
+const { WAVE_THICKNESS } = waveReference;
 
 test("Gateway frame is visible only for gateway-managed controllers", () => {
   assert.equal(shouldShowGatewayComputerUseFrame(null), false);
@@ -39,12 +41,19 @@ test("Computer Use frame CSS animates ocean wave edges with reduced-motion fallb
   assert.match(css, /prefers-reduced-motion:\s*reduce[\s\S]*opacity:\s*\.82/);
 });
 
-test("Computer Use closed river varies visible thickness inside the 8-16px range", async () => {
+test("Computer Use closed river follows the native 18-36px breathing envelope", async () => {
   const css = await readFile(new URL("../public/styles.css", import.meta.url), "utf8");
-  assert.match(css, /--wave-depth-min:\s*8px/);
-  assert.match(css, /--wave-depth-max:\s*16px/);
-  assert.match(css, /--wave-depth-rest:\s*12px/);
-  assert.deepEqual(WAVE_THICKNESS, { min: 8, rest: 12, max: 16 });
+  const wave = await readFile(new URL("../public/wave-overlay.mjs", import.meta.url), "utf8");
+
+  assert.match(css, /--wave-depth-min:\s*18px/);
+  assert.match(css, /--wave-depth-max:\s*36px/);
+  assert.match(css, /--wave-depth-rest:\s*27px/);
+  assert.match(css, /--computer-use-wave-min-alpha:\s*\.14/);
+  assert.match(css, /--computer-use-wave-max-alpha:\s*\.32/);
+  assert.deepEqual(WAVE_THICKNESS, { min: 18, rest: 27, max: 36 });
+  assert.equal(waveReference.WAVE_BREATH_PERIOD_MS, 3200);
+  assert.deepEqual(waveReference.WAVE_ALPHA, { min: 0.14, max: 0.32 });
+  assert.match(wave, /Math\.cos\(TAU \* phase\)/);
 });
 
 test("Computer Use closed river uses shared brand color tokens", async () => {

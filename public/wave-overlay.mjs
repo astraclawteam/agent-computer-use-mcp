@@ -1,12 +1,20 @@
 export const WAVE_THICKNESS = Object.freeze({
-  min: 8,
-  rest: 12,
-  max: 16,
+  min: 18,
+  rest: 27,
+  max: 36,
+});
+
+export const WAVE_BREATH_PERIOD_MS = 3200;
+export const WAVE_ALPHA = Object.freeze({
+  min: 0.14,
+  max: 0.32,
 });
 
 const POINT_STEP = 18;
 const TAU = Math.PI * 2;
 const DEFAULT_WAVE_RGB = "217 119 87";
+const DEFAULT_WAVE_DEEP_RGB = "184 89 59";
+const DEFAULT_WAVE_SOFT_RGB = "247 210 195";
 
 function readCssValue(element, name, fallback) {
   const ownerWindow = element?.ownerDocument?.defaultView;
@@ -32,31 +40,49 @@ function readWaveTheme(canvas) {
   const rgb = normalizeRgb(
     readCssValue(source, "--computer-use-wave-rgb", readCssValue(source, "--clay-rgb", DEFAULT_WAVE_RGB)),
   );
-  const fillAlpha = Number(readCssValue(source, "--computer-use-wave-fill-alpha", "0.28"));
-  const midAlpha = Number(readCssValue(source, "--computer-use-wave-mid-alpha", "0.12"));
-  const currentPrimaryAlpha = Number(readCssValue(source, "--computer-use-wave-current-primary-alpha", "0.28"));
-  const currentSecondaryAlpha = Number(readCssValue(source, "--computer-use-wave-current-secondary-alpha", "0.18"));
+  const deepRgb = normalizeRgb(
+    readCssValue(source, "--computer-use-wave-deep-rgb", readCssValue(source, "--clay-deep-rgb", DEFAULT_WAVE_DEEP_RGB)),
+  );
+  const softRgb = normalizeRgb(
+    readCssValue(source, "--computer-use-wave-soft-rgb", readCssValue(source, "--clay-soft-rgb", DEFAULT_WAVE_SOFT_RGB)),
+  );
+  const minAlpha = Number(readCssValue(source, "--computer-use-wave-min-alpha", String(WAVE_ALPHA.min)));
+  const maxAlpha = Number(readCssValue(source, "--computer-use-wave-max-alpha", String(WAVE_ALPHA.max)));
 
   return {
     rgb,
-    fillAlpha: Number.isFinite(fillAlpha) ? fillAlpha : 0.28,
-    midAlpha: Number.isFinite(midAlpha) ? midAlpha : 0.12,
-    currentPrimaryAlpha: Number.isFinite(currentPrimaryAlpha) ? currentPrimaryAlpha : 0.28,
-    currentSecondaryAlpha: Number.isFinite(currentSecondaryAlpha) ? currentSecondaryAlpha : 0.18,
+    deepRgb,
+    softRgb,
+    minAlpha: Number.isFinite(minAlpha) ? minAlpha : WAVE_ALPHA.min,
+    maxAlpha: Number.isFinite(maxAlpha) ? maxAlpha : WAVE_ALPHA.max,
   };
 }
 
+function phaseAt(time) {
+  const elapsedInPeriod = time % WAVE_BREATH_PERIOD_MS;
+  return (elapsedInPeriod + WAVE_BREATH_PERIOD_MS) % WAVE_BREATH_PERIOD_MS / WAVE_BREATH_PERIOD_MS;
+}
+
+function breathAt(time) {
+  const phase = phaseAt(time);
+  return 0.5 - 0.5 * Math.cos(TAU * phase);
+}
+
 function waveAt(index, time, phase) {
+  const cycleRadians = phaseAt(time) * TAU;
   return (
-    Math.sin(index * 0.72 + time * 0.0018 + phase) * 0.55 +
-    Math.sin(index * 1.37 - time * 0.0011 + phase * 0.7) * 0.32 +
-    Math.sin(index * 2.41 + time * 0.0007 + phase * 1.9) * 0.13
+    Math.sin(index * 0.72 + cycleRadians + phase) * 0.55 +
+    Math.sin(index * 1.37 - cycleRadians * 0.61 + phase * 0.7) * 0.32 +
+    Math.sin(index * 2.41 + cycleRadians * 0.39 + phase * 1.9) * 0.13
   );
 }
 
 function thicknessAt(index, time, phase) {
-  const normalized = (waveAt(index, time, phase) + 1) / 2;
-  return WAVE_THICKNESS.min + normalized * (WAVE_THICKNESS.max - WAVE_THICKNESS.min);
+  const baseThickness = 23 + (31 - 23) * breathAt(time);
+  return Math.max(
+    WAVE_THICKNESS.min,
+    Math.min(WAVE_THICKNESS.max, baseThickness + waveAt(index, time, phase) * 5),
+  );
 }
 
 function makeEdgePoints(length, fixedCoordinate, time, phase, horizontal, reverse = false) {
@@ -98,35 +124,36 @@ export function createWaveBandPath(ctx, width, height, time) {
 }
 
 function drawCurrent(ctx, width, height, time, inset, alpha, phase) {
+  const cycleRadians = phaseAt(time) * TAU;
   ctx.save();
   ctx.strokeStyle = `rgba(255, 255, 255, ${alpha})`;
   ctx.lineWidth = 1.5;
   ctx.setLineDash([24, 32, 8, 28]);
-  ctx.lineDashOffset = -time * 0.045 - phase;
+  ctx.lineDashOffset = -phaseAt(time) * 44 - phase;
   ctx.beginPath();
 
-  const topY = inset + Math.sin(time * 0.001 + phase) * 1.2;
+  const topY = inset + Math.sin(cycleRadians + phase) * 1.2;
   ctx.moveTo(0, topY);
   for (let x = 0; x <= width; x += 28) {
-    ctx.lineTo(x, topY + Math.sin(x * 0.03 + time * 0.002 + phase) * 1.4);
+    ctx.lineTo(x, topY + Math.sin(x * 0.03 + cycleRadians + phase) * 1.4);
   }
 
-  const rightX = width - inset + Math.sin(time * 0.0012 + phase) * 1.2;
+  const rightX = width - inset + Math.sin(cycleRadians + phase) * 1.2;
   ctx.moveTo(rightX, 0);
   for (let y = 0; y <= height; y += 28) {
-    ctx.lineTo(rightX + Math.sin(y * 0.03 + time * 0.002 + phase) * 1.4, y);
+    ctx.lineTo(rightX + Math.sin(y * 0.03 + cycleRadians + phase) * 1.4, y);
   }
 
-  const bottomY = height - inset + Math.sin(time * 0.0014 + phase) * 1.2;
+  const bottomY = height - inset + Math.sin(cycleRadians + phase) * 1.2;
   ctx.moveTo(width, bottomY);
   for (let x = width; x >= 0; x -= 28) {
-    ctx.lineTo(x, bottomY + Math.sin(x * 0.03 - time * 0.002 + phase) * 1.4);
+    ctx.lineTo(x, bottomY + Math.sin(x * 0.03 - cycleRadians + phase) * 1.4);
   }
 
-  const leftX = inset + Math.sin(time * 0.0016 + phase) * 1.2;
+  const leftX = inset + Math.sin(cycleRadians + phase) * 1.2;
   ctx.moveTo(leftX, height);
   for (let y = height; y >= 0; y -= 28) {
-    ctx.lineTo(leftX + Math.sin(y * 0.03 - time * 0.002 + phase) * 1.4, y);
+    ctx.lineTo(leftX + Math.sin(y * 0.03 - cycleRadians + phase) * 1.4, y);
   }
 
   ctx.stroke();
@@ -160,9 +187,12 @@ export function createWaveOverlay(canvas) {
     const theme = readWaveTheme(canvas);
     ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
     ctx.clearRect(0, 0, width, height);
+    const breath = breathAt(time);
+    const fillAlpha = theme.minAlpha + (theme.maxAlpha - theme.minAlpha) * breath;
+    const baseThickness = 23 + (31 - 23) * breath;
 
     createWaveBandPath(ctx, width, height, time);
-    ctx.fillStyle = `rgb(${theme.rgb} / ${theme.fillAlpha})`;
+    ctx.fillStyle = `rgb(${theme.rgb} / ${fillAlpha})`;
     ctx.fill("evenodd");
 
     ctx.save();
@@ -170,14 +200,14 @@ export function createWaveOverlay(canvas) {
     ctx.clip("evenodd");
 
     const sheen = ctx.createLinearGradient(0, 0, width, height);
-    sheen.addColorStop(0, "rgba(255, 255, 255, 0.34)");
-    sheen.addColorStop(0.45, `rgb(${theme.rgb} / ${theme.midAlpha})`);
-    sheen.addColorStop(1, "rgba(255, 255, 255, 0.24)");
+    sheen.addColorStop(0, `rgb(${theme.softRgb} / ${fillAlpha * 0.3})`);
+    sheen.addColorStop(0.45, `rgb(${theme.rgb} / ${fillAlpha * 0.4})`);
+    sheen.addColorStop(1, `rgb(${theme.deepRgb} / ${fillAlpha * 0.4})`);
     ctx.fillStyle = sheen;
     ctx.fillRect(0, 0, width, height);
 
-    drawCurrent(ctx, width, height, time, WAVE_THICKNESS.min + 2, theme.currentPrimaryAlpha, 0);
-    drawCurrent(ctx, width, height, time, WAVE_THICKNESS.rest + 1, theme.currentSecondaryAlpha, TAU / 3);
+    drawCurrent(ctx, width, height, time, Math.max(WAVE_THICKNESS.min, baseThickness - 3), fillAlpha * 0.2, 0);
+    drawCurrent(ctx, width, height, time, Math.max(WAVE_THICKNESS.min, baseThickness - 1), fillAlpha * 0.12, TAU / 3);
     ctx.restore();
 
     if (running) {

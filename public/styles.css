@@ -4,16 +4,21 @@
   --muted: #5c5d60;
   --clay-rgb: 217 119 87;
   --clay-deep-rgb: 184 89 59;
+  --clay-soft-rgb: 247 210 195;
   --computer-use-wave-rgb: var(--clay-rgb);
-  --computer-use-wave-fill-alpha: .38;
-  --computer-use-wave-mid-alpha: .18;
-  --computer-use-wave-current-primary-alpha: .34;
-  --computer-use-wave-current-secondary-alpha: .22;
+  --computer-use-wave-deep-rgb: var(--clay-deep-rgb);
+  --computer-use-wave-soft-rgb: var(--clay-soft-rgb);
+  --computer-use-wave-min-alpha: .14;
+  --computer-use-wave-max-alpha: .32;
+  --computer-use-wave-fill-alpha: .32;
+  --computer-use-wave-mid-alpha: .14;
+  --computer-use-wave-current-primary-alpha: .064;
+  --computer-use-wave-current-secondary-alpha: .0384;
   --panel: #f5f4ec;
   --border: #e6e1d3;
-  --wave-depth-min: 8px;
-  --wave-depth-rest: 12px;
-  --wave-depth-max: 16px;
+  --wave-depth-min: 18px;
+  --wave-depth-rest: 27px;
+  --wave-depth-max: 36px;
 }
 
 * {
