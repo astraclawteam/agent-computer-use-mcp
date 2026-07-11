@@ -1,13 +1,12 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, rm, truncate, writeFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { mkdtemp, readFile, rm, truncate, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, test } from "node:test";
 
-import { WINDOWS_X64_ONNX_REQUIRED_FILES } from "../src/release-runtime-selector.mjs";
-import { WINDOWS_X64_OFFLINE_MAX_BYTES } from "../src/release-size-policy.mjs";
-import { WINDOWS_X64_RELEASE_TARGET } from "../src/release-target.mjs";
 import { buildWindowsReleaseSizeReport } from "../scripts/windows-release-size-report.mjs";
+import { WINDOWS_X64_OFFLINE_MAX_BYTES } from "../src/release-size-policy.mjs";
 
 const roots = [];
 
@@ -15,101 +14,54 @@ afterEach(async () => {
   await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
 });
 
-test("Windows release size report verifies the real ZIP and selected runtime inventory", async () => {
+test("Windows release size report verifies the complete ZIP and platform inventory", async () => {
   const fixture = await createFixture();
-
   const report = await buildWindowsReleaseSizeReport(fixture);
 
   assert.equal(report.status, "passed");
-  assert.deepEqual(report.target, WINDOWS_X64_RELEASE_TARGET);
+  assert.equal(report.target, "windows-x64");
   assert.equal(report.offlineBundleSizeBytes, 1024);
   assert.equal(report.offlineBundleMaxBytes, WINDOWS_X64_OFFLINE_MAX_BYTES);
-  assert.deepEqual(report.runtimeSelection.retainedNativeFiles, WINDOWS_X64_ONNX_REQUIRED_FILES);
-  assert.equal(report.runtimeSelection.packageVersion, "1.27.0");
-  assert.equal(report.lockedAssetCount, 5);
-  assert.equal(report.assetCount, 2);
-  assert.equal(report.blobCount, 2);
+  assert.equal(report.platformFileCount, 2);
+  assert.equal(report.platformPayloadBytes, 30);
 });
 
-test("Windows release size report rejects missing runtime selection evidence", async () => {
-  const fixture = await createFixture({ mutate(manifest) { delete manifest.evidence.runtimeSelection; } });
-
-  await assert.rejects(
-    () => buildWindowsReleaseSizeReport(fixture),
-    (error) => error?.code === "release.runtime_evidence_invalid",
-  );
+test("Windows release size report rejects hash size and target mismatches", async () => {
+  for (const mutate of [
+    (manifest) => { manifest.artifacts[0].sha256 = "0".repeat(64); },
+    (manifest) => { manifest.artifacts[0].sizeBytes += 1; },
+    (manifest) => { manifest.target = "linux-x64"; },
+  ]) {
+    const fixture = await createFixture({ mutate });
+    await assert.rejects(buildWindowsReleaseSizeReport(fixture), /release\.(?:offline_bundle_identity_mismatch|target_mismatch)/);
+  }
 });
 
-test("Windows release size report rejects foreign runtime files", async () => {
-  const fixture = await createFixture({
-    mutate(manifest) {
-      manifest.evidence.runtimeSelection.retainedNativeFiles = ["libonnxruntime.so"];
-    },
-  });
-
-  await assert.rejects(
-    () => buildWindowsReleaseSizeReport(fixture),
-    (error) => error?.code === "release.runtime_evidence_invalid",
-  );
-});
-
-test("Windows release size report rejects a manifest size that differs from the real ZIP", async () => {
-  const fixture = await createFixture({
-    mutate(manifest) {
-      manifest.evidence.offlineBundleSizeBytes += 1;
-    },
-  });
-
-  await assert.rejects(
-    () => buildWindowsReleaseSizeReport(fixture),
-    (error) => error?.code === "release.offline_bundle_size_mismatch",
-  );
-});
-
-test("Windows release size report rejects an oversized real ZIP", async () => {
+test("Windows release size report rejects an oversized complete ZIP", async () => {
   const fixture = await createFixture({ sizeBytes: WINDOWS_X64_OFFLINE_MAX_BYTES + 1 });
-
-  await assert.rejects(
-    () => buildWindowsReleaseSizeReport(fixture),
-    (error) => error?.code === "release.offline_bundle_too_large",
-  );
+  await assert.rejects(buildWindowsReleaseSizeReport(fixture), /release\.offline_bundle_too_large/);
 });
 
 async function createFixture({ sizeBytes = 1024, mutate } = {}) {
-  const root = await mkdtemp(join(tmpdir(), "agent-release-size-report-"));
+  const root = await mkdtemp(join(tmpdir(), "agent-platform-size-report-"));
   roots.push(root);
-  const fileName = "agent-computer-use-mcp-0.0.1-windows-x64-offline.candidate.zip";
-  const offlinePath = join(root, fileName);
-  await mkdir(root, { recursive: true });
-  await writeFile(offlinePath, "", "utf8");
-  await truncate(offlinePath, sizeBytes);
+  const name = "agent-computer-use-mcp-0.0.1-windows-x64.zip";
+  const zipPath = join(root, name);
+  await writeFile(zipPath, "");
+  await truncate(zipPath, sizeBytes);
+  const sha256 = createHash("sha256").update(await readFile(zipPath)).digest("hex");
   const manifest = {
     schemaVersion: 1,
-    release: {
-      packageName: "agent-computer-use-mcp",
-      version: "0.0.1",
-      platform: "windows-x64",
-      target: WINDOWS_X64_RELEASE_TARGET,
-    },
-    evidence: {
-      target: WINDOWS_X64_RELEASE_TARGET,
-      runtimeSelection: {
-        target: WINDOWS_X64_RELEASE_TARGET,
-        packageVersion: "1.27.0",
-        retainedNativeFiles: WINDOWS_X64_ONNX_REQUIRED_FILES,
-        retainedNativeBytes: 64_000_000,
-        removedNativeBytes: 200_000_000,
-      },
-      offlineBundleSizeBytes: sizeBytes,
-      offlineBundleMaxBytes: WINDOWS_X64_OFFLINE_MAX_BYTES,
-      lockedAssetCount: 5,
-      assetCount: 2,
-      blobCount: 2,
-    },
-    artifacts: [{ id: "windows-offline-bundle", fileName, sizeBytes }],
+    version: "0.0.1",
+    target: "windows-x64",
+    platformInventory: [
+      { path: "cua-driver/cua-driver.exe", sizeBytes: 10, sha256: "a".repeat(64) },
+      { path: "models/pp-ocr-v6/det.onnx", sizeBytes: 20, sha256: "b".repeat(64) },
+    ],
+    artifacts: [{ name, sizeBytes, sha256 }],
   };
   mutate?.(manifest);
-  const manifestPath = join(root, "agent-computer-use-mcp-0.0.1-release-manifest.json");
-  await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, "utf8");
+  const manifestPath = join(root, "release-manifest.json");
+  await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
   return { manifestPath, artifactRoot: root };
 }

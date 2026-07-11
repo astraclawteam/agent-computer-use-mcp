@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { createHash } from "node:crypto";
-import { readFileSync, statSync } from "node:fs";
-import { dirname, resolve, sep } from "node:path";
+import { existsSync, readFileSync, statSync } from "node:fs";
+import { basename, dirname, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { resolveVerifiedPlatform } from "../src/platform-package-resolver.mjs";
 
@@ -17,6 +17,7 @@ try {
     platform: process.platform,
     arch: process.arch,
     coreVersion: result.packageVersion,
+    resolvePackageJson: offlinePlatformResolver(),
   });
   process.env.AGENT_COMPUTER_USE_RELEASE_INTEGRITY_VERIFIED = "1";
   if (process.argv.includes("--verify-only")) {
@@ -33,6 +34,16 @@ try {
 } catch (error) {
   process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
   process.exitCode = 1;
+}
+
+function offlinePlatformResolver() {
+  const runtimeRoot = dirname(packageRoot);
+  const platformPackageJson = resolve(runtimeRoot, "platform", "package.json");
+  if (basename(packageRoot) === "core" && basename(runtimeRoot) === "runtime"
+    && existsSync(platformPackageJson) && statSync(platformPackageJson).isFile()) {
+    return () => platformPackageJson;
+  }
+  return undefined;
 }
 
 function verifyReleaseIntegrity() {

@@ -1,72 +1,57 @@
+import { createHash } from "node:crypto";
+import { createReadStream } from "node:fs";
 import { readFile, stat } from "node:fs/promises";
 import { basename, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
-import { WINDOWS_X64_ONNX_REQUIRED_FILES } from "../src/release-runtime-selector.mjs";
 import { assertOfflineBundleSize, WINDOWS_X64_OFFLINE_MAX_BYTES } from "../src/release-size-policy.mjs";
-import { assertReleaseTarget, sameReleaseTarget } from "../src/release-target.mjs";
-
-const SUPPORTED_ONNX_VERSION = "1.27.0";
+import { WINDOWS_X64_RELEASE_TARGET } from "../src/release-target.mjs";
 
 export async function buildWindowsReleaseSizeReport({ manifestPath, artifactRoot } = {}) {
   const resolvedManifestPath = resolve(required(manifestPath, "release.manifest_path_missing"));
   const root = resolve(required(artifactRoot, "release.artifact_root_missing"));
   const manifest = JSON.parse(await readFile(resolvedManifestPath, "utf8"));
-  const target = assertReleaseTarget(manifest.release?.target);
-  const evidence = manifest.evidence;
-  if (!sameReleaseTarget(evidence?.target, target)) {
-    throw releaseError("release.target_mismatch", "Release evidence target does not match release identity");
+  if (manifest.target !== "windows-x64") throw releaseError("release.target_mismatch", String(manifest.target));
+  const offlineArtifact = manifest.artifacts?.find(({ name }) => name?.endsWith("-windows-x64.zip"));
+  if (!offlineArtifact || basename(offlineArtifact.name) !== offlineArtifact.name) {
+    throw releaseError("release.offline_bundle_identity_mismatch", "artifact missing");
   }
-
-  const offlineArtifact = (manifest.artifacts ?? [])
-    .find((artifact) => artifact.id === "windows-offline-bundle");
-  if (!offlineArtifact || basename(offlineArtifact.fileName ?? "") !== offlineArtifact.fileName) {
-    throw releaseError("release.offline_bundle_evidence_invalid", "Offline bundle artifact is missing or invalid");
+  const offlinePath = resolve(root, offlineArtifact.name);
+  if (offlinePath !== join(root, offlineArtifact.name)) {
+    throw releaseError("release.offline_bundle_identity_mismatch", "path escape");
   }
-  const offlinePath = resolve(root, offlineArtifact.fileName);
-  if (offlinePath !== join(root, offlineArtifact.fileName)) {
-    throw releaseError("release.offline_bundle_evidence_invalid", "Offline bundle artifact escapes the artifact root");
+  const fileStat = await stat(offlinePath);
+  const offlineSize = assertOfflineBundleSize({
+    target: WINDOWS_X64_RELEASE_TARGET,
+    sizeBytes: fileStat.size,
+  });
+  if (offlineArtifact.sizeBytes !== fileStat.size || offlineArtifact.sha256 !== await sha256File(offlinePath)) {
+    throw releaseError("release.offline_bundle_identity_mismatch", offlineArtifact.name);
   }
-  const offlineStat = await stat(offlinePath);
-  if (!offlineStat.isFile()) {
-    throw releaseError("release.offline_bundle_evidence_invalid", "Offline bundle artifact is not a file");
+  if (!Array.isArray(manifest.platformInventory) || manifest.platformInventory.length === 0) {
+    throw releaseError("release.platform_inventory_invalid", "empty");
   }
-  const offlineSize = assertOfflineBundleSize({ target, sizeBytes: offlineStat.size });
-  if (offlineArtifact.sizeBytes !== offlineSize.sizeBytes
-    || evidence?.offlineBundleSizeBytes !== offlineSize.sizeBytes
-    || evidence?.offlineBundleMaxBytes !== offlineSize.maxBytes) {
-    throw releaseError("release.offline_bundle_size_mismatch", "Offline bundle evidence does not match the assembled file");
+  let previous = "";
+  let platformPayloadBytes = 0;
+  for (const file of manifest.platformInventory) {
+    if (typeof file.path !== "string" || file.path <= previous
+      || !Number.isSafeInteger(file.sizeBytes) || file.sizeBytes < 0
+      || !/^[a-f0-9]{64}$/u.test(file.sha256 ?? "")) {
+      throw releaseError("release.platform_inventory_invalid", String(file.path));
+    }
+    previous = file.path;
+    platformPayloadBytes += file.sizeBytes;
   }
-
-  const runtimeSelection = evidence?.runtimeSelection;
-  const retainedFiles = runtimeSelection?.retainedNativeFiles;
-  if (!sameReleaseTarget(runtimeSelection?.target, target)
-    || runtimeSelection?.packageVersion !== SUPPORTED_ONNX_VERSION
-    || !sameStringArray(retainedFiles, WINDOWS_X64_ONNX_REQUIRED_FILES)
-    || !positiveSafeInteger(runtimeSelection?.retainedNativeBytes)
-    || !positiveSafeInteger(runtimeSelection?.removedNativeBytes)) {
-    throw releaseError("release.runtime_evidence_invalid", "ONNX Runtime evidence does not match the Windows x64 release contract");
-  }
-
-  if (!positiveSafeInteger(evidence?.lockedAssetCount)
-    || !positiveSafeInteger(evidence?.assetCount)
-    || !positiveSafeInteger(evidence?.blobCount)
-    || evidence.assetCount > evidence.lockedAssetCount
-    || evidence.blobCount > evidence.assetCount) {
-    throw releaseError("release.asset_evidence_invalid", "Release asset and blob counts are invalid");
-  }
-
   return {
     status: "passed",
-    target,
+    target: "windows-x64",
     offlineBundleSizeBytes: offlineSize.sizeBytes,
     offlineBundleMiB: toMiB(offlineSize.sizeBytes),
     offlineBundleMaxBytes: offlineSize.maxBytes,
     offlineBundleMaxMiB: toMiB(offlineSize.maxBytes),
-    runtimeSelection,
-    lockedAssetCount: evidence.lockedAssetCount,
-    assetCount: evidence.assetCount,
-    blobCount: evidence.blobCount,
+    platformFileCount: manifest.platformInventory.length,
+    platformPayloadBytes,
+    platformPayloadMiB: toMiB(platformPayloadBytes),
   };
 }
 
@@ -74,24 +59,24 @@ async function runCli() {
   const packageJson = JSON.parse(await readFile(new URL("../package.json", import.meta.url), "utf8"));
   const artifactRoot = resolve(
     process.env.AGENT_COMPUTER_USE_RELEASE_OUTPUT_ROOT
-      ?? join("artifacts/windows-release", packageJson.version),
+      ?? join("artifacts/platform-release", packageJson.version),
   );
   const manifestPath = resolve(
     process.env.AGENT_COMPUTER_USE_RELEASE_MANIFEST_PATH
-      ?? join(artifactRoot, `${packageJson.name}-${packageJson.version}-release-manifest.json`),
+      ?? join(artifactRoot, "release-manifest.json"),
   );
   const report = await buildWindowsReleaseSizeReport({ manifestPath, artifactRoot });
   process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
 }
 
-function sameStringArray(left, right) {
-  return Array.isArray(left)
-    && left.length === right.length
-    && left.every((value, index) => value === right[index]);
-}
-
-function positiveSafeInteger(value) {
-  return Number.isSafeInteger(value) && value > 0;
+function sha256File(path) {
+  return new Promise((resolveHash, reject) => {
+    const hash = createHash("sha256");
+    const stream = createReadStream(path);
+    stream.on("error", reject);
+    stream.on("data", (chunk) => hash.update(chunk));
+    stream.on("end", () => resolveHash(hash.digest("hex")));
+  });
 }
 
 function toMiB(bytes) {
@@ -103,13 +88,12 @@ function required(value, code) {
   return value;
 }
 
-function releaseError(code, message) {
-  const error = new Error(`${code}: ${message}`);
+function releaseError(code, detail) {
+  const error = new Error(`${code}: ${detail}`);
   error.code = code;
   return error;
 }
 
-const invokedPath = process.argv[1] ? pathToFileURL(resolve(process.argv[1])).href : null;
-if (invokedPath === import.meta.url) {
+if (process.argv[1] && pathToFileURL(resolve(process.argv[1])).href === import.meta.url) {
   await runCli();
 }
