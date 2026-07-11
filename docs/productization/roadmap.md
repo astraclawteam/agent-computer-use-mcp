@@ -70,7 +70,7 @@ agent-computer-use-mcp-X.Y.Z-release-manifest.json
 agent-computer-use-mcp-X.Y.Z-checksums.txt
 ```
 
-The Windows x64 offline ZIP has a fail-closed 310 MiB limit and includes portable Node.js, the protected MCP runtime, NativeAOT installer, native overlay, OCR runtime/model pack, cua-driver, release manifest, CycloneDX SBOM, and an exact internal checksum inventory. The overlay renders its closed 8-16px brand river and target frame through WinForms/GDI+ and has no WebView2 runtime dependency. The payload retains only the pinned `onnxruntime-node@1.27.0` Windows x64 DirectML/CPU native files and records retained and removed byte counts. Every installable asset is materialized once as a content-addressed blob; activated views are forbidden inside the ZIP. `npm run release:windows:size-report` re-stats the final ZIP and independently verifies this evidence. Phase 0.15 installs from bundled bytes with the installer/materializer network policy disabled and without a machine-wide Node.js installation. PR5 must repeat this on a clean runner with operating-system network isolation.
+The Windows x64 offline ZIP has a fail-closed 310 MiB limit and includes portable Node.js, the protected MCP runtime, NativeAOT installer, native overlay, OCR runtime/model pack, cua-driver, release manifest, CycloneDX SBOM, and an exact internal checksum inventory. The overlay renders its closed 24-48px brand river and target frame through WinForms/GDI+ and has no WebView2 runtime dependency. The payload retains only the pinned `onnxruntime-node@1.27.0` Windows x64 DirectML/CPU native files and records retained and removed byte counts. Every installable asset is materialized once as a content-addressed blob; activated views are forbidden inside the ZIP. `npm run release:windows:size-report` re-stats the final ZIP and independently verifies this evidence. Phase 0.15 installs from bundled bytes with the installer/materializer network policy disabled and without a machine-wide Node.js installation. PR5 must repeat this on a clean runner with operating-system network isolation.
 
 The five externally locked inputs are:
 
@@ -165,7 +165,7 @@ Deliverables:
 
 Acceptance:
 
-- Overlay remains click-through and 8-16px visible thickness on all tested DPI scales.
+- Overlay remains click-through and 24-48px logical visible thickness on all tested DPI scales.
 - Overlay follows target window across displays.
 - `includeUserOverlay=false` is preserved in every capture path.
 

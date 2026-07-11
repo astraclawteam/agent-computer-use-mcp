@@ -22,7 +22,8 @@ driver-process state and can remain rendered after the MCP server exits.
 1. Replace `TransparencyKey` rendering with a Windows per-pixel-alpha layered
    window updated through `UpdateLayeredWindow`.
 2. Keep `WS_EX_TRANSPARENT`, `WS_EX_TOOLWINDOW`, `WS_EX_NOACTIVATE`, topmost
-   placement, virtual-screen coverage, and target-window no-activate behavior.
+   placement, selected-physical-display coverage, and target-window
+   no-activate behavior.
 3. Render one closed river path. Four independent edge bands are forbidden.
 4. Visible thickness stays within 24-48 logical pixels.
 5. One breathing cycle is 3.2 seconds. A smooth cosine envelope modulates both
@@ -90,8 +91,8 @@ fillAlpha = lerp(0.24, 0.50, breath)
 The breath envelope changes slowly and uniformly around the perimeter; the
 harmonics supply spatial water motion without destroying the breathing read.
 
-The renderer creates a 32-bit premultiplied ARGB bitmap for the virtual-screen
-bounds, draws the closed even-odd path and target frame into that bitmap, and
+The renderer creates a 32-bit premultiplied ARGB bitmap for the selected
+physical-display bounds, draws the closed even-odd path and target frame into that bitmap, and
 commits it with `UpdateLayeredWindow`, `AC_SRC_OVER`, and `AC_SRC_ALPHA`.
 
 ## Observation Boundary

@@ -29,7 +29,7 @@ test("overlay placement planner follows the target window onto the dominant disp
   assert.equal(plan.startsDesktopControl, false);
 });
 
-test("overlay placement planner keeps logical wave thickness 8-16px across high DPI displays", async () => {
+test("overlay placement planner keeps logical wave thickness 24-48px across high DPI displays", async () => {
   const { planOverlayPlacement } = await import("../src/overlay-placement-planner.mjs");
 
   const plan = planOverlayPlacement({
@@ -46,8 +46,8 @@ test("overlay placement planner keeps logical wave thickness 8-16px across high 
   });
 
   assert.equal(plan.display.id, "left-4k");
-  assert.deepEqual(plan.logicalWaveThickness, { min: 8, rest: 12, max: 16 });
-  assert.deepEqual(plan.physicalWaveThickness, { min: 16, rest: 24, max: 32 });
+  assert.deepEqual(plan.logicalWaveThickness, { min: 24, rest: 36, max: 48 });
+  assert.deepEqual(plan.physicalWaveThickness, { min: 48, rest: 72, max: 96 });
   assert.equal(plan.devicePixelRatio, 2);
   assert.equal(plan.capturePolicy.includeUserOverlay, false);
   assert.equal(plan.capturePolicy.excludeOverlayBeforeCapture, true);
@@ -146,8 +146,8 @@ test("Phase 4.0 has an executable overlay placement planner smoke script", async
   assert.equal(report.highDpi, true);
   assert.equal(report.fullscreenBorderless, true);
   assert.equal(report.unavailableWindowHandling, true);
-  assert.equal(report.minVisibleThickness, 8);
-  assert.equal(report.maxVisibleThickness, 16);
+  assert.equal(report.minVisibleThickness, 24);
+  assert.equal(report.maxVisibleThickness, 48);
   assert.equal(report.includeUserOverlay, false);
   assert.equal(report.startsDesktopControl, false);
 });

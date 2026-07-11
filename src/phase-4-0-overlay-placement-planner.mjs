@@ -65,8 +65,8 @@ const occludedPlan = planOverlayPlacement({
 
 const passed = multiDisplayPlan.display.id === "secondary"
   && highDpiPlan.devicePixelRatio === 2
-  && highDpiPlan.logicalWaveThickness.min === 8
-  && highDpiPlan.logicalWaveThickness.max === 16
+  && highDpiPlan.logicalWaveThickness.min === 24
+  && highDpiPlan.logicalWaveThickness.max === 48
   && fullscreenPlan.windowMode === "fullscreen-borderless"
   && minimizedPlan.status === "suspended"
   && occludedPlan.status === "degraded"

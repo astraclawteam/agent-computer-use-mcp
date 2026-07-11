@@ -441,7 +441,7 @@ offline contract. WebView2 was used only by the overlay, its offline installer
 was about 194 MiB, and the staged overlay was missing its HTML assets.
 
 The implementation therefore replaces the WebView2 surface with a native
-WinForms/GDI+ drawing loop that preserves the closed 8-16px brand river,
+WinForms/GDI+ drawing loop that preserves the closed 24-48px brand river,
 target frame, no-activate behavior, multi-display virtual screen, and target
 window tracking. Remove WebView2 from the formal release lock, SBOM, offline
 asset manifest, and Phase 0.15 requirements. Keep the generic host WebView2

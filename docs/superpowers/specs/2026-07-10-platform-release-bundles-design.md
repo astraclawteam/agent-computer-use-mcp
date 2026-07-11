@@ -37,7 +37,7 @@ runtimes and would make platform signing and smoke evidence ambiguous.
    The installer materializes cache and activated views from that blob after
    extraction; activated asset views are not embedded in the release payload.
 8. The Windows x64 offline candidate has a hard maximum size of 310 MiB.
-9. The Windows overlay renders the closed 8-16px brand river and target frame
+9. The Windows overlay renders the closed 24-48px brand river and target frame
    natively. It does not depend on WebView2 or release-time HTML assets.
 
 ## Validation Amendment

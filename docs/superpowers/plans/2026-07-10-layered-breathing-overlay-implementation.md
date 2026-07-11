@@ -35,15 +35,15 @@
 
 - [ ] **Step 1: Write failing source-contract tests**
 
-Update `test/gateway-run.test.mjs` so the native helper must contain `WS_EX_LAYERED`, `UpdateLayeredWindow`, `AC_SRC_ALPHA`, `Format32bppPArgb`, `MinWaveThickness = 18`, `MaxWaveThickness = 36`, `BreathPeriodMilliseconds = 3200`, and no `TransparencyKey`.
+Update `test/gateway-run.test.mjs` so the native helper must contain `WS_EX_LAYERED`, `UpdateLayeredWindow`, `AC_SRC_ALPHA`, `Format32bppPArgb`, `MinWaveThickness = 24`, `MaxWaveThickness = 48`, `BreathPeriodMilliseconds = 3200`, and no `TransparencyKey`.
 
 ```js
 assert.match(program, /WS_EX_LAYERED/);
 assert.match(program, /UpdateLayeredWindow/);
 assert.match(program, /AC_SRC_ALPHA/);
 assert.match(program, /Format32bppPArgb/);
-assert.match(program, /MinWaveThickness = 18/);
-assert.match(program, /MaxWaveThickness = 36/);
+assert.match(program, /MinWaveThickness = 24/);
+assert.match(program, /MaxWaveThickness = 48/);
 assert.match(program, /BreathPeriodMilliseconds = 3200/);
 assert.doesNotMatch(program, /TransparencyKey/);
 ```
@@ -153,7 +153,7 @@ git commit -m "feat: add deterministic breathing overlay compositor"
 
 **Interfaces:**
 - Produces: `void Present(Form window, Bitmap frame, Point screenLocation)`.
-- Consumes: `OverlayRenderer.Render(...)` and virtual-screen bounds.
+- Consumes: `OverlayRenderer.Render(...)` and selected-display bounds.
 
 - [ ] **Step 1: Run the existing source contract and verify it remains RED**
 
@@ -177,7 +177,7 @@ Restore the previous selected GDI object and release/delete every HDC/HBITMAP in
 
 - [ ] **Step 3: Replace the paint loop with layered updates**
 
-Add `WS_EX_LAYERED` to `CreateParams`, remove `BackColor`, `TransparencyKey`, `DoubleBuffered`, `OnPaintBackground`, and `OnPaint`, and have the 33ms timer render the current phase from `_animationClock.Elapsed.TotalMilliseconds / 3200.0` before presenting it. Preserve click-through, no-activate, tool-window, topmost, virtual-screen, target tracking, and no-activate target raising.
+Add `WS_EX_LAYERED` to `CreateParams`, remove `BackColor`, `TransparencyKey`, `DoubleBuffered`, `OnPaintBackground`, and `OnPaint`, and have the 33ms timer render the current phase from `_animationClock.Elapsed.TotalMilliseconds / 3200.0` before presenting it. Preserve click-through, no-activate, tool-window, topmost, selected-physical-display coverage, target tracking, and no-activate target raising.
 
 - [ ] **Step 4: Run build and focused tests**
 
