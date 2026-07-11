@@ -24,3 +24,10 @@
 ## Future Platforms
 
 macOS and Linux platform packages remain unpublished. Each platform needs real driver, overlay, OCR runtime, permission, packaging, offline ZIP, and app-matrix validation before it is added to core `optionalDependencies`.
+## Preview Browser Boundary
+
+- The public MCP remains OS-only and contains no built-in browser/CDP kernel.
+- XiaozhiClaw built-in Preview Browser actions default to the host semantic provider.
+- Explicit physical control of a built-in preview must use canonical OS tokens and the host's shared target lease.
+- Third-party agent-native capabilities remain outside Gateway enforcement.
+
