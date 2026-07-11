@@ -49,6 +49,24 @@ driver-process state and can remain rendered after the MCP server exits.
 15. Cursor visibility belongs to an active Gateway-managed control lease, not
     to generic driver initialization. Observe-only calls may start the driver
     session but must not enable the rendered cursor.
+16. Router, driver, OCR startup, and the cua-driver MCP client use an explicit
+    terminal lifecycle: `open -> closing -> closed`. Entering `closing` is
+    synchronous and permanently rejects new work for that instance.
+17. Every asynchronous startup is registered before its first `await`.
+    Shutdown invalidates pending grants, waits for registered startup work to
+    settle, then cleans any resource that startup created.
+18. A controller is published only after its permitted cursor state and user
+    overlay are fully started and its grant generation remains current.
+19. Driver session, cursor, action, and close transitions share one serialized
+    lifecycle queue. No operation may reconnect or recreate a session after
+    close begins.
+20. OCR startup has one shared startup promise. Router close waits for it and
+    closes the sidecar if startup completed, including completion after close
+    was requested.
+21. The cua-driver MCP client coalesces concurrent start and close calls.
+    `start()` waits for an in-progress close and then rejects because the
+    client is terminally closed; it never reports success for a removed
+    transport.
 
 ## Rendering Model
 
@@ -117,6 +135,19 @@ release must not leave process-global cursor state behind. Each shutdown call
 executes even when the previous call fails. Session and control startup record
 which stages completed and run the corresponding reverse cleanup before
 rethrowing the original startup error.
+
+## Terminal Lifecycle Barrier
+
+The lifecycle barrier is fail-closed. Public work calls synchronously acquire
+an operation ticket while the owner is `open`. `close()` synchronously changes
+the owner to `closing`, invalidates every pending grant generation, and then
+waits for admitted operations to settle. Operations check their ticket after
+each external await and before publishing state. An invalid ticket performs
+reverse cleanup and returns a lifecycle-closed error.
+
+Successful close changes the owner to `closed`. Cleanup failure leaves it in
+`closing` with failed resources retained, so a later `close()` retries cleanup;
+new work remains forbidden. Concurrent close calls share the same attempt.
 
 ## Verification
 

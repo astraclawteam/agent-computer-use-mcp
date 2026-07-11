@@ -209,6 +209,8 @@ git commit -m "feat: present overlay with per-pixel alpha"
 - Produces: `CuaDriverMcpDriver.startCursor(): Promise<void>`.
 - Produces: `CuaDriverMcpDriver.stopCursor(): Promise<void>`.
 - Produces: router-internal `stopControlVisuals(): Promise<void>`.
+- Produces: terminal `open`, `closing`, and `closed` lifecycle barriers for
+  router, driver, OCR startup, and the cua-driver MCP client.
 - Consumes: existing `DEFAULT_AGENT_CURSOR_STYLE` and cua-driver MCP tools.
 
 - [ ] **Step 1: Write failing driver lifecycle tests**
@@ -248,6 +250,33 @@ Expected: all focused tests pass with disable-before-end ordering.
 ```powershell
 git add src/cua-driver-mcp-driver.mjs src/computer-use-provider-router.mjs src/computer-use-mcp-server.mjs test/cua-driver-mcp-driver.test.mjs test/phase-1-10-controller-timeout.test.mjs test/phase-1-12-control-approval-state.test.mjs test/phase-5-2-disconnect-cleanup.test.mjs
 git commit -m "fix: bind branded cursor to control lease"
+```
+
+- [ ] **Step 9: Write failing reverse-interleaving lifecycle tests**
+
+Use deferred gates to require close to win when it begins before grant
+registration, during driver `findWindow`, during OCR startup, and during MCP
+client close. Assert that no controller, cursor, overlay, session, OCR process,
+or transport survives and that new work rejects after `closing` begins.
+
+- [ ] **Step 10: Replace independent booleans with terminal barriers**
+
+Register work synchronously before its first await, invalidate grant
+generations on close, serialize all driver transitions, share OCR startup, and
+coalesce client start/close. Publish state only while the operation ticket is
+still current. Retain failed cleanup resources for close retry.
+
+- [ ] **Step 11: Run lifecycle and standard MCP verification**
+
+Run the focused lifecycle suite followed by standard SDK client/server,
+multi-client, and stress tests. Expected: all pass without active handles,
+listener growth, forced process exit, or post-close restart.
+
+- [ ] **Step 12: Commit terminal lifecycle hardening**
+
+```powershell
+git add src test docs/superpowers/specs/2026-07-10-overlay-breathing-and-cursor-cleanup-design.md docs/superpowers/plans/2026-07-10-layered-breathing-overlay-implementation.md
+git commit -m "fix: enforce terminal computer use lifecycle"
 ```
 
 ### Task 5: Align The Browser Reference And Produce Visual Evidence
