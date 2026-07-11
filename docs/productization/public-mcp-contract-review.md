@@ -25,3 +25,9 @@ This review records the public `computer.*` MCP contract that requires human PR 
 | computer.capture_window | reviewed | compatible | overlay-free | reviewed | Window capture artifact path must exclude user overlay. |
 | computer.ocr_region | reviewed | compatible | overlay-free | reviewed | Local OCR input must exclude user overlay. |
 | computer.observe_diff | reviewed | compatible | overlay-free | reviewed | Dirty-region OCR diff path must exclude user overlay. |
+## Browser Kernel Boundary
+
+`agent-computer-use-mcp` is an OS Computer Use MCP package. It does not own or embed XiaozhiClaw's built-in Preview Browser, Electron `WebContentsView`, CDP proxy, Playwright transport, or raw browser endpoint. Built-in preview automation remains an Electron-owned semantic provider reached through the host's high-level Preview contract.
+
+Third-party agent-native Computer Use remains agent-owned and is not wrapped by this package's Gateway lease or approval policy.
+
