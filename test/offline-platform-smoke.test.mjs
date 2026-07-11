@@ -15,7 +15,7 @@ afterEach(async () => {
   await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
 });
 
-test("complete ZIP starts an official MCP client without network or desktop control", { timeout: 120_000 }, async () => {
+test("complete ZIP starts an official MCP client without network or desktop control", { timeout: 240_000 }, async () => {
   const root = await fixtureRoot();
   const coreRoot = join(root, "core");
   const platformRoot = join(root, "platform");

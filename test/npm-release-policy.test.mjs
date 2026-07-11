@@ -20,7 +20,6 @@ test("protected npm inventory rejects source Source Maps and unknown entries", (
     ...REQUIRED_PROTECTED_NPM_ENTRIES,
     "src/computer-use-mcp-server.mjs",
     "test/server-smoke.test.mjs",
-    "windows-installer/Program.cs",
     "ocr-sidecar/xiaozhiclaw_ocr_sidecar.py",
     "dist/computer-use-mcp-server.mjs.map",
     "docs/private-release-notes.md",
@@ -30,7 +29,6 @@ test("protected npm inventory rejects source Source Maps and unknown entries", (
   assert.deepEqual(result.violations.map((item) => [item.code, item.path]), [
     ["source-entry-forbidden", "src/computer-use-mcp-server.mjs"],
     ["source-entry-forbidden", "test/server-smoke.test.mjs"],
-    ["source-entry-forbidden", "windows-installer/Program.cs"],
     ["source-entry-forbidden", "ocr-sidecar/xiaozhiclaw_ocr_sidecar.py"],
     ["source-map-forbidden", "dist/computer-use-mcp-server.mjs.map"],
     ["entry-not-allowlisted", "docs/private-release-notes.md"],

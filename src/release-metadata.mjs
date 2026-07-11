@@ -45,7 +45,7 @@ export function buildReleaseMetadata(options = {}) {
         required: true,
       },
       {
-        name: "signed-helper-inventory",
+        name: "platform-native-inventory",
         command: "npm run phase:0.13",
         required: true,
       },

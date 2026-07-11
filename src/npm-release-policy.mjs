@@ -14,7 +14,6 @@ const SOURCE_ROOTS = [
   "src/",
   "test/",
   "scripts/",
-  "windows-installer/",
   "gateway-overlay/",
   "native-lab/",
   "ocr-sidecar/",

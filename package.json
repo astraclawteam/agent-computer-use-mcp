@@ -63,7 +63,7 @@
     "phase:0.10": "node src/phase-0-10-release-metadata.mjs",
     "phase:0.11": "node src/phase-0-11-release-readiness.mjs",
     "phase:0.12": "node src/phase-0-12-release-artifacts.mjs",
-    "phase:0.13": "node src/phase-0-13-signed-helper-inventory.mjs",
+    "phase:0.13": "node src/phase-0-13-platform-native-inventory.mjs",
     "phase:0.14": "node src/phase-0-14-protected-npm-release.mjs",
     "phase:0.15": "node src/phase-0-15-real-release-assembly.mjs",
     "phase:1.4": "node src/phase-1-4-real-mcp-action.mjs",

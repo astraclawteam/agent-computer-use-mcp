@@ -36,7 +36,7 @@ test("release readiness gate captures the alpha release command contract", async
   assert.equal(gate.invariants.every((invariant) => invariant.required === true), true);
   assert.ok(gate.evidence.some((item) => item.id === "release-metadata-changelog"));
   assert.ok(gate.evidence.some((item) => item.id === "release-artifact-verification"));
-  assert.ok(gate.evidence.some((item) => item.id === "signed-helper-inventory"));
+  assert.ok(gate.evidence.some((item) => item.id === "platform-native-inventory"));
   assert.ok(gate.evidence.some((item) => item.id === "protected-npm-release"));
   assert.ok(gate.evidence.some((item) => item.id === "real-release-assembly" && item.command === "npm run phase:0.15"));
   assert.ok(gate.evidence.some((item) => item.id === "offline-install-proof"));

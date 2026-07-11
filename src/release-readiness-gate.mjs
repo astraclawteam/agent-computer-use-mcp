@@ -89,7 +89,7 @@ export const REQUIRED_RELEASE_EVIDENCE = [
   ["release-metadata-changelog", "npm run phase:0.10"],
   ["release-readiness-gate", "npm run phase:0.11"],
   ["release-artifact-verification", "npm run phase:0.12"],
-  ["signed-helper-inventory", "npm run phase:0.13"],
+  ["platform-native-inventory", "npm run phase:0.13"],
   ["protected-npm-release", "npm run phase:0.14"],
   ["real-release-assembly", "npm run phase:0.15"],
   ["package-foundation", "npm run package:foundation"],

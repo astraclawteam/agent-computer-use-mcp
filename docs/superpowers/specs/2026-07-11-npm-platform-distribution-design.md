@@ -1,6 +1,8 @@
 # npm Platform Distribution Design
 
-**Status:** Approved for planning
+**Status:** Implemented on `feat/npm-platform-distribution`; pending PR review
+
+**Implementation plan:** `docs/superpowers/plans/2026-07-11-npm-platform-distribution-implementation.md`
 
 **Date:** 2026-07-11
 

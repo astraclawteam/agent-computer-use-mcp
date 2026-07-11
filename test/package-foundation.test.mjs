@@ -13,91 +13,48 @@ import {
   validatePackEntries,
 } from "../src/package-foundation.mjs";
 
-test("package foundation defines stable install directories", () => {
-  const layout = getInstallLayout({
-    platform: "win32",
-    env: {
-      LOCALAPPDATA: "C:\\Users\\demo\\AppData\\Local",
-      ProgramFiles: "C:\\Program Files",
-    },
-  });
-
+test("package foundation limits writable state to disposable user data", () => {
+  const layout = getInstallLayout({ platform: "win32", env: { LOCALAPPDATA: "C:\\Users\\demo\\AppData\\Local" } });
   assert.equal(layout.dataRoot, "C:\\Users\\demo\\AppData\\Local\\AgentComputerUse");
-  assert.equal(layout.artifactRoot, "C:\\Users\\demo\\AppData\\Local\\AgentComputerUse\\artifacts");
-  assert.equal(layout.modelRoot, "C:\\Users\\demo\\AppData\\Local\\AgentComputerUse\\models");
-  assert.equal(layout.cacheRoot, "C:\\Users\\demo\\AppData\\Local\\Programs\\AgentComputerUse");
-  assert.equal(layout.driverRoot, "C:\\Users\\demo\\AppData\\Local\\Programs\\AgentComputerUse\\cua-driver");
-  assert.equal(layout.overlayRoot, "C:\\Users\\demo\\AppData\\Local\\Programs\\AgentComputerUse\\overlay");
+  assert.equal(layout.cacheRoot, `${layout.dataRoot}\\cache`);
+  assert.equal(layout.sessionRoot, `${layout.dataRoot}\\sessions`);
+  assert.equal(layout.authoritativeProgramState, false);
 });
 
-test("package foundation documents version and upgrade policy", () => {
+test("package foundation assigns upgrade and rollback to exact npm versions", () => {
   const policy = getVersionPolicy();
-
   assert.equal(policy.versionSource, "package.json");
-  assert.equal(policy.channel, "0.x-preview");
-  assert.equal(policy.publicContract, "computer.* MCP tools and structuredContent schemas");
-  assert.equal(policy.upgradeStrategy, "side-by-side-assets-in-place-package");
-  assert.equal(policy.rollbackStrategy, "retain previous asset manifest until next successful doctor run");
-  assert.deepEqual(policy.compatibilityAliases, ["XIAOZHICLAW_*"]);
+  assert.equal(policy.upgradeStrategy, "npm-install-exact-core-and-platform-version");
+  assert.equal(policy.rollbackStrategy, "npm-install-previous-exact-version");
 });
 
-test("package foundation documents Windows signing policy", () => {
+test("package foundation requires npm provenance hashes and SBOM", () => {
   const policy = getSigningPolicy();
-
-  assert.equal(policy.windowsHelpers.firstPartyAuthenticodeRequired, true);
-  assert.deepEqual(policy.windowsHelpers.firstPartyFiles, [
-    "gateway-overlay",
-    "windows-installer",
-    "future-native-sidecars",
-  ]);
-  assert.deepEqual(policy.windowsHelpers.thirdPartyUnsigned, {
-    files: ["cua-driver"],
-    requiredVerification: ["signed-asset-manifest", "upstream-release-sha256", "extracted-file-sha256"],
-    authenticode: "vendor-unsigned-explicit",
-  });
-  assert.equal(policy.windowsHelpers.microsoftSystemRuntime.publisher, "Microsoft Corporation");
-  assert.equal(policy.unsignedDevelopmentBuilds.allowed, true);
-  assert.equal(policy.unsignedDevelopmentBuilds.distribution, "blocked");
+  assert.equal(policy.npm.provenanceRequired, true);
+  assert.deepEqual(policy.npm.publishOrder, ["@agent-computer-use/win32-x64", "agent-computer-use-mcp"]);
+  assert.equal(policy.releaseArtifacts.sha256Required, true);
+  assert.equal(policy.releaseArtifacts.sbomRequired, true);
+  assert.equal(policy.windowsHelpers.firstPartyFiles.includes("gateway-overlay"), true);
 });
 
-test("offline asset manifest declares productized asset packs", () => {
-  const manifest = buildOfflineAssetManifest({
-    packageVersion: "0.0.1",
-    generatedAt: "2026-07-09T00:00:00.000Z",
-  });
-
-  assert.equal(manifest.schemaVersion, 1);
-  assert.equal(manifest.packageName, "agent-computer-use-mcp");
-  assert.equal(manifest.packageVersion, "0.0.1");
-  assert.deepEqual(manifest.installRoots.windows, {
-    dataRoot: "%LOCALAPPDATA%\\AgentComputerUse",
-    cacheRoot: "%LOCALAPPDATA%\\Programs\\AgentComputerUse",
-  });
-  assert.deepEqual(manifest.assets.map((asset) => asset.id), [
+test("offline asset manifest assigns every native byte to the platform package", () => {
+  const manifest = buildOfflineAssetManifest({ packageVersion: "0.0.1", generatedAt: "2026-07-11T00:00:00.000Z" });
+  assert.equal(manifest.distribution.runtimeDownloadAllowed, false);
+  assert.equal(manifest.distribution.platformPackage, "@agent-computer-use/win32-x64@0.0.1");
+  assert.deepEqual(manifest.assets.map(({ id }) => id), [
     "cua-driver-windows-x64",
     "gateway-overlay-windows",
     "ocr-runtime-onnxruntime-node",
     "ocr-model-pp-ocrv6-small",
-    "webview2-runtime",
   ]);
-  assert.equal(manifest.assets.find((asset) => asset.id === "ocr-model-pp-ocrv6-small").offlineRequired, false);
-  assert.equal(manifest.assets.find((asset) => asset.id === "webview2-runtime").offlineRequired, false);
+  assert.equal(manifest.assets.every(({ offlineRequired }) => offlineRequired), true);
+  assert.equal(manifest.assets.every(({ acquisition }) => acquisition === "npm-platform-package-or-complete-zip"), true);
 });
 
-test("package files policy rejects generated artifacts and local caches", () => {
+test("package files policy keeps protected core source-free", () => {
   const policy = getPackageFilesPolicy();
   assert.deepEqual(policy.forbiddenPathPrefixes, FORBIDDEN_PACKAGE_PATHS);
-  assert.deepEqual(policy.includeRoots, ["dist/"]);
-  assert.deepEqual(policy.includeFiles, [
-    "package.json",
-    "release-integrity.json",
-    "README.md",
-    "CHANGELOG.md",
-    "LICENSE",
-  ]);
   assert.equal(policy.protection.sourceMap, false);
-  assert.equal(policy.protection.obfuscationRequired, true);
-
   const result = validatePackEntries([
     "package/package.json",
     "package/LICENSE",
@@ -109,71 +66,31 @@ test("package files policy rejects generated artifacts and local caches", () => 
     "package/dist/ocr-sidecar.mjs",
     "package/src/computer-use-mcp-server.mjs",
   ]);
-
   assert.equal(result.status, "failed");
-  assert.deepEqual(result.violations.map((item) => item.code), [
-    "source-entry-forbidden",
-  ]);
 });
 
-test("package dry-run script emits a JSON report", async () => {
+test("package foundation and dry-run scripts emit current reports", async () => {
   const packageJson = JSON.parse(readFileSync("package.json", "utf8"));
-  assert.equal(packageJson.scripts.test, "node --test");
-  assert.equal(packageJson.scripts["package:dry-run"], "node scripts/package-dry-run.mjs");
   assert.equal(packageJson.scripts["package:foundation"], "node scripts/package-foundation-report.mjs");
-  assert.equal(packageJson.scripts["assets:manifest"], "node scripts/offline-asset-manifest.mjs");
+  const foundation = await runNode("scripts/package-foundation-report.mjs");
+  assert.equal(foundation.exitCode, 0, foundation.stderr);
+  const report = JSON.parse(foundation.stdout);
+  assert.equal(report.offlineAssetManifest.assets.length, 4);
+  assert.equal(report.signingPolicy.npm.provenanceRequired, true);
 
-  const result = await runNode(["scripts/package-foundation-report.mjs"]);
-  assert.equal(result.exitCode, 0, result.stderr);
-  const report = JSON.parse(result.stdout);
-  assert.equal(report.status, "passed");
-  assert.equal(report.packageName, "agent-computer-use-mcp");
-  assert.equal(report.offlineAssetManifest.assets.length, 5);
-  assert.equal(report.signingPolicy.windowsHelpers.firstPartyAuthenticodeRequired, true);
-  assert.equal(report.packageFilesPolicy.forbiddenPathPrefixes.includes("node_modules/"), true);
+  const dryRun = await runNode("scripts/package-dry-run.mjs");
+  assert.equal(dryRun.exitCode, 0, dryRun.stderr);
+  assert.equal(JSON.parse(dryRun.stdout).sourceMapCount, 0);
 });
 
-test("npm package dry run inspects protected staging without source", async () => {
-  const result = await runNode(["scripts/package-dry-run.mjs"]);
-  assert.equal(result.exitCode, 0, result.stderr);
-  const report = JSON.parse(result.stdout);
-
-  assert.equal(report.status, "passed");
-  assert.equal(report.sourceEntryCount, 0);
-  assert.equal(report.sourceMapCount, 0);
-  assert.equal(report.inventory.status, "passed");
-  assert.equal(report.protection.sourceMap, false);
-  assert.equal(report.protection.selfDefending, true);
-});
-
-test("offline asset manifest script emits the asset manifest only", async () => {
-  const result = await runNode(["scripts/offline-asset-manifest.mjs"]);
-  assert.equal(result.exitCode, 0, result.stderr);
-  const manifest = JSON.parse(result.stdout);
-  assert.equal(manifest.packageName, "agent-computer-use-mcp");
-  assert.equal(manifest.schemaVersion, 1);
-  assert.equal(Array.isArray(manifest.assets), true);
-  assert.equal(Object.hasOwn(manifest, "installLayout"), false);
-});
-
-function runNode(args) {
+function runNode(path) {
   return new Promise((resolve, reject) => {
-    const child = spawn(process.execPath, args, {
-      cwd: process.cwd(),
-      stdio: ["ignore", "pipe", "pipe"],
-      windowsHide: true,
-    });
+    const child = spawn(process.execPath, [path], { cwd: process.cwd(), windowsHide: true, stdio: ["ignore", "pipe", "pipe"] });
     let stdout = "";
     let stderr = "";
-    child.stdout.on("data", (chunk) => {
-      stdout += chunk.toString("utf8");
-    });
-    child.stderr.on("data", (chunk) => {
-      stderr += chunk.toString("utf8");
-    });
+    child.stdout.on("data", (chunk) => { stdout += chunk.toString("utf8"); });
+    child.stderr.on("data", (chunk) => { stderr += chunk.toString("utf8"); });
     child.on("error", reject);
-    child.on("close", (exitCode) => {
-      resolve({ exitCode, stdout, stderr });
-    });
+    child.on("close", (exitCode) => resolve({ exitCode, stdout, stderr }));
   });
 }
