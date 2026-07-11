@@ -32,5 +32,6 @@ macOS and Linux platform packages remain unpublished. Each platform needs real d
 - XiaozhiClaw built-in Preview Browser actions always use the host semantic provider and never receive a raw CDP endpoint.
 - Explicit physical control of a built-in preview must use canonical OS tokens and the host's shared target lease.
 - Third-party agent-native capabilities remain outside Gateway enforcement; agent-native operations MUST NOT be routed through Gateway approval, target leases, or policy enforcement.
+- End-to-end agent-native routing is a host-owned invariant; the host runtime, rather than this OS MCP package, owns its executable bypass test.
 
 
