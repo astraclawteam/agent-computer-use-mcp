@@ -103,6 +103,81 @@ test("router shares OCR startup and close waits to close a late-started sidecar"
   await assert.rejects(() => router.ensureOcr(), isLifecycleClosed);
 });
 
+test("router close during OCR doctor prevents health prewarm follow-on work", async () => {
+  const calls = [];
+  const doctorEntered = deferred();
+  const doctorGate = deferred();
+  const router = createReadyRouter({
+    calls,
+    ocrSession: {
+      async start() {
+        calls.push("ocr.start");
+      },
+      async doctor() {
+        calls.push("ocr.doctor");
+        doctorEntered.resolve();
+        await doctorGate.promise;
+        return { status: "healthy" };
+      },
+      async recognize() {
+        calls.push("ocr.prewarm");
+        return { items: [] };
+      },
+      async close() {
+        calls.push("ocr.close");
+      },
+    },
+  });
+
+  const health = router.health({ prewarm: true });
+  await doctorEntered.promise;
+  const close = router.close({ reason: "ocr-doctor-close" });
+  doctorGate.resolve();
+
+  await assert.rejects(health, isLifecycleClosed);
+  await close;
+
+  assert.deepEqual(calls, ["ocr.start", "ocr.doctor", "driver.close", "ocr.close"]);
+});
+
+test("router close during repair doctor prevents later diagnostic work", async () => {
+  const calls = [];
+  const installDoctorEntered = deferred();
+  const installDoctorGate = deferred();
+  const router = new ComputerUseProviderRouter({
+    driver: {
+      async close() {
+        calls.push("driver.close");
+      },
+    },
+    installCacheDoctor: async () => {
+      calls.push("install.doctor");
+      installDoctorEntered.resolve();
+      await installDoctorGate.promise;
+      return {
+        status: "healthy",
+        repairPlan: { mode: "plan-only", requiresApproval: false, actions: [] },
+      };
+    },
+    runtimeCleanup: {
+      async inspect() {
+        calls.push("runtime.inspect");
+        return { status: "clean", staleLocks: [], expired: [] };
+      },
+    },
+  });
+
+  const repair = router.repair({ operation: "plan" });
+  await installDoctorEntered.promise;
+  const close = router.close({ reason: "repair-doctor-close" });
+  installDoctorGate.resolve();
+
+  await assert.rejects(repair, isLifecycleClosed);
+  await close;
+
+  assert.deepEqual(calls, ["install.doctor", "driver.close"]);
+});
+
 test("driver close waits for findWindow and action work and never reconnects", async () => {
   const calls = [];
   const listEntered = deferred();
@@ -259,6 +334,102 @@ test("MCP client start during a retryable close waits and then rejects terminall
   assert.equal(closeAttempts, 2);
   assert.equal(client.transport, null);
   assert.deepEqual(calls, ["client.close:1", "client.close:2"]);
+});
+
+test("MCP client close adjudicates an admitted call before closing its transport", async () => {
+  const calls = [];
+  const closeEntered = deferred();
+  const closeGate = deferred();
+  let sdkCloseInProgress = false;
+  const transport = {
+    async close() {
+      calls.push("transport.close");
+    },
+  };
+  const client = new CuaDriverMcpClient({
+    driverPath: "cua-driver",
+    client: {
+      async connect() {
+        calls.push("client.connect");
+      },
+      async callTool() {
+        calls.push("client.callTool");
+        assert.equal(sdkCloseInProgress, false, "SDK tool call raced SDK close");
+        return { structuredContent: { status: "ok" } };
+      },
+      async close() {
+        calls.push("client.close");
+        sdkCloseInProgress = true;
+        closeEntered.resolve();
+        await closeGate.promise;
+        sdkCloseInProgress = false;
+      },
+    },
+    transportFactory: () => transport,
+  });
+  client.transport = transport;
+  client.started = true;
+  client.connected = true;
+
+  const toolCall = client.callTool("list_windows", { on_screen_only: false });
+  const close = client.close();
+  await closeEntered.promise;
+  closeGate.resolve();
+
+  await assert.rejects(toolCall, isLifecycleClosed);
+  await close;
+
+  assert.deepEqual(calls, ["client.close"]);
+  assert.equal(client.transport, null);
+});
+
+test("MCP client close waits for an admitted SDK tool call before transport cleanup", async () => {
+  const calls = [];
+  const toolEntered = deferred();
+  const toolGate = deferred();
+  let toolInProgress = false;
+  const transport = {
+    async close() {
+      calls.push("transport.close");
+    },
+  };
+  const client = new CuaDriverMcpClient({
+    driverPath: "cua-driver",
+    client: {
+      async connect() {
+        calls.push("client.connect");
+      },
+      async callTool() {
+        calls.push("client.callTool");
+        toolInProgress = true;
+        toolEntered.resolve();
+        await toolGate.promise;
+        toolInProgress = false;
+        return { structuredContent: { status: "ok" } };
+      },
+      async close() {
+        calls.push("client.close");
+        assert.equal(toolInProgress, false, "SDK close raced an admitted SDK tool call");
+      },
+    },
+    transportFactory: () => transport,
+  });
+  client.transport = transport;
+  client.started = true;
+  client.connected = true;
+
+  const toolCall = client.callTool("list_windows", { on_screen_only: false });
+  await toolEntered.promise;
+  const close = client.close();
+  await Promise.resolve();
+  assert.deepEqual(calls, ["client.callTool"]);
+  toolGate.resolve();
+
+  await assert.rejects(toolCall, isLifecycleClosed);
+  await close;
+
+  assert.deepEqual(calls, ["client.callTool", "client.close"]);
+  assert.equal(client.transport, null);
 });
 
 for (const stage of ["cursor", "overlay"]) {

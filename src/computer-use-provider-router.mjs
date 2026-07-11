@@ -61,7 +61,7 @@ export class ComputerUseProviderRouter {
     return this.runOperation((ticket) => this.healthOperation(options, ticket));
   }
 
-  async healthOperation(options = {}) {
+  async healthOperation(options = {}, ticket) {
     const result = {
       status: "ready",
       module: "agent-computer-use-mcp",
@@ -144,15 +144,15 @@ export class ComputerUseProviderRouter {
 
     if (!options.fast) {
       if (this.driver?.health) {
-        result.driver = await this.driver.health();
+        result.driver = await this.awaitExternal(ticket, () => this.driver.health());
         if (result.driver.status !== "healthy") {
           result.status = "degraded";
         }
       }
-      await this.ensureOcr();
-      result.ocr = await this.ocr.doctor();
+      await this.ensureOcrResources(ticket);
+      result.ocr = await this.awaitExternal(ticket, () => this.ocr.doctor());
       if (options.prewarm) {
-        result.prewarm = await this.prewarmOcrBuckets();
+        result.prewarm = await this.prewarmOcrBuckets(ticket);
       }
     }
 
@@ -163,21 +163,21 @@ export class ComputerUseProviderRouter {
     return this.runOperation((ticket) => this.doctorOperation(options, ticket));
   }
 
-  async doctorOperation(options = {}) {
-    const runtime = await this.health({
+  async doctorOperation(options = {}, ticket) {
+    const runtime = await this.awaitExternal(ticket, () => this.healthOperation({
       fast: options.fast ?? true,
       prewarm: false,
-    });
+    }, ticket));
     const installCache = options.includeInstallCache === false
       ? null
-      : await this.installCacheDoctor();
+      : await this.awaitExternal(ticket, () => this.installCacheDoctor());
     const runtimeSupervisor = this.processSupervisor?.health
       ? this.processSupervisor.health()
       : null;
     const daemonSession = this.daemonSession?.health
       ? this.daemonSession.health()
       : null;
-    const runtimeCleanup = await this.inspectRuntimeCleanup();
+    const runtimeCleanup = await this.awaitExternal(ticket, () => this.inspectRuntimeCleanup());
     const status = deriveDoctorStatus([runtime.status, installCache?.status, runtimeSupervisor?.status, daemonSession?.status, runtimeCleanup?.status]);
     const repairPlan = mergeRepairPlans(
       installCache?.repairPlan,
@@ -213,25 +213,33 @@ export class ComputerUseProviderRouter {
     return this.runOperation((ticket) => this.repairOperation(options, ticket));
   }
 
-  async repairOperation(options = {}) {
+  async repairOperation(options = {}, ticket) {
     const operation = options.operation ?? "plan";
     if (operation === "status") {
+      const operationState = await this.awaitExternal(
+        ticket,
+        () => this.requireAssetOperationManager().status(options.operationId),
+      );
       return this.assetOperationResult({
         status: "repair_status",
-        operation: await this.requireAssetOperationManager().status(options.operationId),
+        operation: operationState,
       });
     }
     if (operation === "cancel") {
+      const operationState = await this.awaitExternal(
+        ticket,
+        () => this.requireAssetOperationManager().cancel(options.operationId, "mcp-cancel"),
+      );
       return this.assetOperationResult({
         status: "repair_cancelled",
-        operation: await this.requireAssetOperationManager().cancel(options.operationId, "mcp-cancel"),
+        operation: operationState,
       });
     }
 
-    const doctor = await this.doctor({
+    const doctor = await this.awaitExternal(ticket, () => this.doctorOperation({
       fast: true,
       includeInstallCache: options.includeInstallCache,
-    });
+    }, ticket));
     const actionIds = new Set(options.actionIds ?? []);
     const actions = doctor.repairPlan.actions
       .filter((action) => actionIds.size === 0 || actionIds.has(action.id))
@@ -343,13 +351,13 @@ export class ComputerUseProviderRouter {
       if (!this.assetDeliveryConfig) {
         throw new Error("asset.delivery_config_required");
       }
-      const operationState = await manager.start({
+      const operationState = await this.awaitExternal(ticket, () => manager.start({
         ...this.assetDeliveryConfig,
         operationId: options.operationId,
         actionIds: actions.map((action) => action.id),
         allowNetwork: options.allowNetwork === true,
         timeoutMs: options.timeoutMs,
-      });
+      }));
       this.pendingRepairApproval = null;
       return this.assetOperationResult({
         status: "repair_started",
@@ -367,10 +375,10 @@ export class ComputerUseProviderRouter {
       && dryRun === false
       && (executableProcessActions.length > 0 || executableRuntimeCleanupActions.length > 0);
     const executionResults = shouldExecuteRepairActions
-      ? await Promise.all([
+      ? await this.awaitExternal(ticket, () => Promise.all([
         ...executableProcessActions.map((action) => this.recoverProcessAction(action)),
         ...executableRuntimeCleanupActions.map((action) => this.executeRuntimeCleanupAction(action)),
-      ])
+      ]))
       : [];
     const status = shouldExecuteRepairActions
       ? "repaired"
@@ -450,8 +458,10 @@ export class ComputerUseProviderRouter {
     if (!this.driver?.findWindow) {
       fail("provider.unavailable", "cua-driver is not available", { provider: "cua-driver" });
     }
-    await this.expireActiveController({ throwOnExpire: false });
-    this.assertOperationTicket(ticket);
+    await this.awaitExternal(
+      ticket,
+      () => this.expireActiveController({ throwOnExpire: false }, ticket),
+    );
     if (this.controllerRequestInProgress) {
       fail("controller.request_in_progress", "A Gateway-managed Computer Use controller request is already in progress.", {
         includeUserOverlay: false,
@@ -474,7 +484,10 @@ export class ComputerUseProviderRouter {
     const grant = this.beginControlGrant();
     try {
       const tier = args.tier ?? "full";
-      const window = await this.driver.findWindow({ titlePart: args.titlePart });
+      const window = await this.awaitExternal(
+        ticket,
+        () => this.driver.findWindow({ titlePart: args.titlePart }),
+      );
       this.assertControlGrant(grant);
       this.enforcePolicyDecision(this.policy.evaluateAccessRequest({ tier, window }));
       if (args.approvalRequired === true) {
@@ -513,14 +526,15 @@ export class ComputerUseProviderRouter {
         };
       }
       const leaseTtlMs = Math.max(1, args.leaseTtlMs ?? 300000);
-      return await this.grantAccessController({
+      return await this.awaitExternal(ticket, () => this.grantAccessController({
         tier,
         agentId: args.agentId ?? "unknown",
         window,
         leaseTtlMs,
         approval: { status: "not_required" },
         grant,
-      });
+        ticket,
+      }));
     } finally {
       this.finishControlGrant(grant);
       this.controllerRequestInProgress = false;
@@ -532,8 +546,10 @@ export class ComputerUseProviderRouter {
   }
 
   async approveAccessOperation(args = {}, ticket) {
-    await this.expireActiveController({ throwOnExpire: false });
-    this.assertOperationTicket(ticket);
+    await this.awaitExternal(
+      ticket,
+      () => this.expireActiveController({ throwOnExpire: false }, ticket),
+    );
     const pending = this.pendingAccessApproval;
     if (!args.approvalToken || !pending || pending.token !== args.approvalToken) {
       return {
@@ -601,14 +617,15 @@ export class ComputerUseProviderRouter {
     this.controllerRequestInProgress = true;
     const grant = this.beginControlGrant();
     try {
-      return await this.grantAccessController({
+      return await this.awaitExternal(ticket, () => this.grantAccessController({
         tier: request.tier,
         agentId: request.agentId,
         window: request.window,
         leaseTtlMs: Math.max(1, args.leaseTtlMs ?? request.leaseTtlMs ?? 300000),
         approval: { ...this.serializeAccessApproval(pending), status: "approved" },
         grant,
-      });
+        ticket,
+      }));
     } finally {
       this.finishControlGrant(grant);
       this.controllerRequestInProgress = false;
@@ -620,32 +637,31 @@ export class ComputerUseProviderRouter {
   }
 
   async captureOperation(args = {}, ticket) {
-    await this.requireActiveController();
+    await this.awaitExternal(ticket, () => this.requireActiveController(ticket));
     const mode = args.mode ?? "semantic";
     let observation;
     if (mode === "semantic") {
       if (!this.driver?.capture) fail("provider.unavailable", "semantic capture provider is not available");
-      observation = await this.driver.capture({
+      observation = await this.awaitExternal(ticket, () => this.driver.capture({
         window: this.activeController.window,
         mode,
         controllerId: this.activeController.controllerId,
-      });
+      }));
     } else if (mode === "ocr-region") {
-      observation = (await this.ocrRegion({
+      observation = (await this.awaitExternal(ticket, () => this.ocrRegionOperation({
         titlePart: this.activeController.window.title,
         crop: args.crop,
         timeoutMs: args.timeoutMs,
-      })).observation;
+      }, ticket))).observation;
     } else if (mode === "screenshot") {
-      observation = await this.captureWindow({
+      observation = await this.awaitExternal(ticket, () => this.captureWindowOperation({
         titlePart: this.activeController.window.title,
         timeoutMs: args.timeoutMs,
-      });
+      }, ticket));
     } else {
       fail("capture.mode_unsupported", `Unsupported capture mode: ${mode}`);
     }
 
-    this.assertOperationTicket(ticket);
     this.lastCapture = {
       ...observation,
       provider: observation.provider ?? "gateway-managed",
@@ -664,7 +680,7 @@ export class ComputerUseProviderRouter {
   }
 
   async actOperation(args = {}, ticket) {
-    await this.requireActiveController();
+    await this.awaitExternal(ticket, () => this.requireActiveController(ticket));
     const action = args.action;
     this.validateAction(action);
     this.recordAudit("computer.action.started", {
@@ -678,22 +694,23 @@ export class ComputerUseProviderRouter {
     try {
       if (action.kind === "set_value") {
         if (!this.driver?.setValue) fail("provider.unavailable", "set_value provider is not available");
-        result = await this.driver.setValue({
+        result = await this.awaitExternal(ticket, () => this.driver.setValue({
           window: this.activeController.window,
           elementToken: action.elementToken,
           elementIndex: action.elementIndex,
           value: action.value,
-        });
+        }));
       } else if (action.kind === "click") {
         if (!this.driver?.click) fail("provider.unavailable", "click provider is not available");
-        result = await this.driver.click({
+        result = await this.awaitExternal(ticket, () => this.driver.click({
           window: this.activeController.window,
           elementToken: action.elementToken,
           elementIndex: action.elementIndex,
           deliveryMode: action.deliveryMode ?? "background",
-        });
+        }));
       }
     } catch (error) {
+      this.assertOperationTicket(ticket);
       this.recordAudit("computer.action.failed", {
         controllerId: this.activeController.controllerId,
         kind: action.kind,
@@ -702,7 +719,6 @@ export class ComputerUseProviderRouter {
       throw error;
     }
 
-    this.assertOperationTicket(ticket);
     const actionResult = {
       status: result.status ?? "ok",
       provider: "gateway-managed",
@@ -712,7 +728,10 @@ export class ComputerUseProviderRouter {
       includeUserOverlay: false,
     };
     if (action.captureAfter) {
-      actionResult.capture = await this.capture({ mode: "semantic" });
+      actionResult.capture = await this.awaitExternal(
+        ticket,
+        () => this.captureOperation({ mode: "semantic" }, ticket),
+      );
     }
     this.recordAudit("computer.action.completed", {
       controllerId: this.activeController.controllerId,
@@ -726,7 +745,7 @@ export class ComputerUseProviderRouter {
     return this.runOperation((ticket) => this.cancelOperation(args, ticket));
   }
 
-  async cancelOperation(args = {}) {
+  async cancelOperation(args = {}, ticket) {
     this.invalidateControlGrant(
       "controller.cancelled",
       "The Gateway-managed Computer Use controller request was cancelled.",
@@ -735,7 +754,7 @@ export class ComputerUseProviderRouter {
     const previousApproval = this.getPendingAccessApproval();
     this.pendingAccessApproval = null;
     this.activeController = null;
-    await this.stopControlVisuals();
+    await this.awaitExternal(ticket, () => this.stopControlVisuals(ticket));
     this.recordAudit("computer.cancelled", {
       controllerId: previous?.controllerId,
       approvalToken: previousApproval?.token,
@@ -748,7 +767,7 @@ export class ComputerUseProviderRouter {
     return this.runOperation((ticket) => this.revokeOperation(args, ticket));
   }
 
-  async revokeOperation(args = {}) {
+  async revokeOperation(args = {}, ticket) {
     this.invalidateControlGrant(
       "controller.revoked",
       "The Gateway-managed Computer Use controller request was revoked.",
@@ -761,13 +780,18 @@ export class ComputerUseProviderRouter {
     this.pendingRepairApproval = null;
     let firstError;
     try {
-      await this.assetOperationManager?.cancelAll?.(args.reason ?? "router-revoked");
+      await this.awaitExternal(
+        ticket,
+        () => this.assetOperationManager?.cancelAll?.(args.reason ?? "router-revoked"),
+      );
     } catch (error) {
+      this.assertOperationTicket(ticket);
       firstError = error;
     }
     try {
-      await this.stopControlVisuals();
+      await this.awaitExternal(ticket, () => this.stopControlVisuals(ticket));
     } catch (error) {
+      this.assertOperationTicket(ticket);
       firstError ??= error;
     }
     this.recordAudit("computer.revoked", {
@@ -784,8 +808,10 @@ export class ComputerUseProviderRouter {
   }
 
   async listStateOperation(ticket) {
-    await this.expireActiveController({ throwOnExpire: false });
-    this.assertOperationTicket(ticket);
+    await this.awaitExternal(
+      ticket,
+      () => this.expireActiveController({ throwOnExpire: false }, ticket),
+    );
     this.expireAccessApproval();
     return {
       status: this.activeController ? "active" : "idle",
@@ -803,11 +829,13 @@ export class ComputerUseProviderRouter {
   }
 
   async captureWindowOperation(args, ticket) {
-    const outputPath = args.outputPath ?? await this.createArtifactPath("window.png");
-    const capture = await captureWindowPngByTitle(args.titlePart, outputPath, {
+    const outputPath = args.outputPath ?? await this.awaitExternal(
+      ticket,
+      () => this.createArtifactPath("window.png", ticket),
+    );
+    const capture = await this.awaitExternal(ticket, () => captureWindowPngByTitle(args.titlePart, outputPath, {
       timeoutMs: args.timeoutMs,
-    });
-    this.assertOperationTicket(ticket);
+    }));
     return {
       status: "ok",
       provider: "gateway-managed",
@@ -823,15 +851,14 @@ export class ComputerUseProviderRouter {
   }
 
   async ocrRegionOperation(args, ticket) {
-    await this.ensureOcr();
-    this.assertOperationTicket(ticket);
+    await this.ensureOcrResources(ticket);
     let imagePath = args.imagePath;
     let capture = null;
     if (!imagePath && args.titlePart) {
-      const captured = await this.captureWindow({
+      const captured = await this.awaitExternal(ticket, () => this.captureWindowOperation({
         titlePart: args.titlePart,
         timeoutMs: args.timeoutMs,
-      });
+      }, ticket));
       capture = captured.capture;
       imagePath = captured.capture.path;
     }
@@ -839,14 +866,13 @@ export class ComputerUseProviderRouter {
       fail("ocr_region.requires_imagePath_or_titlePart", "ocr_region requires either imagePath or titlePart");
     }
 
-    const response = await this.ocr.recognize({
+    const response = await this.awaitExternal(ticket, () => this.ocr.recognize({
       imagePath,
       crop: args.crop,
       languages: args.languages ?? ["zh", "en"],
       timeoutMs: args.timeoutMs ?? 15000,
       noCache: args.noCache,
-    });
-    this.assertOperationTicket(ticket);
+    }));
     const observation = normalizeOcrSidecarResponse(response, {
       observationId: `ocr-region-${Date.now()}`,
       window: capture ? { title: capture.title } : undefined,
@@ -868,11 +894,10 @@ export class ComputerUseProviderRouter {
   }
 
   async observeDiffOperation(args, ticket) {
-    const dirtyRegion = await computeDirtyRegion(args.baselinePath, args.changedPath, {
+    const dirtyRegion = await this.awaitExternal(ticket, () => computeDirtyRegion(args.baselinePath, args.changedPath, {
       threshold: args.threshold,
       padding: args.padding,
-    });
-    this.assertOperationTicket(ticket);
+    }));
     if (!dirtyRegion) {
       return {
         status: "ok",
@@ -885,13 +910,13 @@ export class ComputerUseProviderRouter {
     }
     const ocrRegion = expandRegionToBucket(dirtyRegion);
 
-    const ocr = await this.ocrRegion({
+    const ocr = await this.awaitExternal(ticket, () => this.ocrRegionOperation({
       imagePath: args.changedPath,
       crop: ocrRegion,
       languages: args.languages,
       timeoutMs: args.timeoutMs,
       noCache: true,
-    });
+    }, ticket));
 
     return {
       status: "ok",
@@ -1001,31 +1026,31 @@ export class ComputerUseProviderRouter {
   async ensureOcrResources(ticket) {
     if (this.ocrStarted) return;
     if (!this.ocrStartPromise) {
+      this.assertOperationTicket(ticket);
       this.ocrStartAttempted = true;
       this.ocrStartPromise = Promise.resolve(this.ocr.start());
     }
     const attempt = this.ocrStartPromise;
     try {
-      await attempt;
+      await this.awaitExternal(ticket, () => attempt);
     } finally {
       if (this.ocrStartPromise === attempt) this.ocrStartPromise = null;
     }
-    this.assertOperationTicket(ticket);
     this.ocrStarted = true;
   }
 
-  async prewarmOcrBuckets(buckets = DEFAULT_OCR_PREWARM_BUCKETS) {
+  async prewarmOcrBuckets(ticket, buckets = DEFAULT_OCR_PREWARM_BUCKETS) {
     const started = performance.now();
     const results = [];
     for (const bucket of buckets) {
       const before = performance.now();
-      const response = await this.ocr.recognize({
+      const response = await this.awaitExternal(ticket, () => this.ocr.recognize({
         fixture: "canvas-lab",
         crop: bucket.crop,
         languages: ["zh", "en"],
         timeoutMs: 15000,
         noCache: true,
-      });
+      }));
       results.push({
         size: bucket.size,
         crop: bucket.crop,
@@ -1040,21 +1065,27 @@ export class ComputerUseProviderRouter {
     };
   }
 
-  async createArtifactPath(name) {
+  async createArtifactPath(name, ticket) {
     if (!this.artifactRoot) {
-      this.artifactRoot = await mkdtemp(join(tmpdir(), "agent-computer-use-mcp-"));
+      this.artifactRoot = await this.awaitExternal(
+        ticket,
+        () => mkdtemp(join(tmpdir(), "agent-computer-use-mcp-")),
+      );
     }
     return join(this.artifactRoot, `${Date.now()}-${name}`);
   }
 
-  async requireActiveController() {
-    await this.expireActiveController({ throwOnExpire: true });
+  async requireActiveController(ticket) {
+    await this.awaitExternal(
+      ticket,
+      () => this.expireActiveController({ throwOnExpire: true }, ticket),
+    );
     if (!this.activeController) {
       fail("controller.required", "A Gateway-managed Computer Use controller is required.");
     }
   }
 
-  async expireActiveController({ throwOnExpire = false } = {}) {
+  async expireActiveController({ throwOnExpire = false } = {}, ticket) {
     const pending = this.pendingControlGrant;
     if (pending?.controller?.expiresAtMs && pending.controller.expiresAtMs <= this.clock.now()) {
       const error = this.invalidateControlGrant(
@@ -1067,7 +1098,7 @@ export class ComputerUseProviderRouter {
         },
       );
       this.lastCapture = null;
-      await this.stopControlVisuals();
+      await this.awaitExternal(ticket, () => this.stopControlVisuals(ticket));
       this.recordAudit("computer.controller.expired", {
         controllerId: pending.controller.controllerId,
         tier: pending.controller.tier,
@@ -1080,7 +1111,7 @@ export class ComputerUseProviderRouter {
     const previous = this.activeController;
     this.activeController = null;
     this.lastCapture = null;
-    await this.stopControlVisuals();
+    await this.awaitExternal(ticket, () => this.stopControlVisuals(ticket));
     this.recordAudit("computer.controller.expired", {
       controllerId: previous.controllerId,
       tier: previous.tier,
@@ -1129,7 +1160,7 @@ export class ComputerUseProviderRouter {
     };
   }
 
-  async grantAccessController({ tier, agentId, window, leaseTtlMs, approval, grant }) {
+  async grantAccessController({ tier, agentId, window, leaseTtlMs, approval, grant, ticket }) {
     const startedAtMs = this.clock.now();
     const expiresAtMs = startedAtMs + leaseTtlMs;
     const controller = {
@@ -1147,7 +1178,10 @@ export class ComputerUseProviderRouter {
     };
     grant.controller = controller;
     try {
-      await this.startControlVisuals({ grant, tier, window });
+      await this.awaitExternal(
+        ticket,
+        () => this.startControlVisuals({ grant, tier, window, ticket }),
+      );
       this.assertControlGrant(grant);
     } catch (error) {
       try {
@@ -1337,6 +1371,22 @@ export class ComputerUseProviderRouter {
     });
   }
 
+  async awaitExternal(ticket, start, { onInvalidResult } = {}) {
+    this.assertOperationTicket(ticket);
+    try {
+      const result = await start();
+      if (!this.isOperationTicketCurrent(ticket)) {
+        onInvalidResult?.(result);
+        throw lifecycleClosedError();
+      }
+      this.assertOperationTicket(ticket);
+      return result;
+    } catch (error) {
+      if (!this.isOperationTicketCurrent(ticket)) throw lifecycleClosedError();
+      throw error;
+    }
+  }
+
   acquireOperationTicket() {
     if (this.lifecycleState !== "open") return null;
     let settle;
@@ -1405,69 +1455,91 @@ export class ComputerUseProviderRouter {
     }
   }
 
-  startControlVisuals({ grant, tier, window }) {
+  startControlVisuals({ grant, tier, window, ticket }) {
     return this.runControlVisualLifecycle(async () => {
       this.assertControlGrant(grant);
       if (tier !== "observe" && this.driver?.startCursor) {
         this.cursorStartAttempted = true;
-        await this.driver.startCursor();
+        await this.awaitExternal(ticket, () => this.driver.startCursor());
         this.cursorActive = true;
         this.assertControlGrant(grant);
       }
       if (this.overlayRuntime?.start) {
-        const handle = await this.overlayRuntime.start({ targetRect: window.bounds ? {
-          windowId: window.windowId,
-          title: window.title,
-          x: window.bounds.x,
-          y: window.bounds.y,
-          width: window.bounds.width,
-          height: window.bounds.height,
-        } : undefined });
+        const handle = await this.awaitExternal(
+          ticket,
+          () => this.overlayRuntime.start({ targetRect: window.bounds ? {
+            windowId: window.windowId,
+            title: window.title,
+            x: window.bounds.x,
+            y: window.bounds.y,
+            width: window.bounds.width,
+            height: window.bounds.height,
+          } : undefined }),
+          { onInvalidResult: (lateHandle) => { this.overlayHandle = lateHandle; } },
+        );
         this.overlayHandle = handle;
         this.assertControlGrant(grant);
       }
-    });
+    }, ticket);
   }
 
-  async stopOverlay() {
+  async stopOverlay(ticket) {
     if (!this.overlayHandle) return;
     const handle = this.overlayHandle;
     if (this.overlayRuntime?.stop) {
-      await this.overlayRuntime.stop(handle);
+      if (ticket) {
+        await this.awaitExternal(ticket, () => this.overlayRuntime.stop(handle));
+      } else {
+        await this.overlayRuntime.stop(handle);
+      }
     } else if (handle.stop) {
-      await handle.stop();
+      if (ticket) {
+        await this.awaitExternal(ticket, () => handle.stop());
+      } else {
+        await handle.stop();
+      }
     }
     if (this.overlayHandle === handle) this.overlayHandle = null;
   }
 
-  stopControlVisuals() {
+  stopControlVisuals(ticket) {
     return this.runControlVisualLifecycle(async () => {
       let firstError;
       try {
-        await this.stopOverlay();
+        await this.stopOverlay(ticket);
       } catch (error) {
+        if (ticket) this.assertOperationTicket(ticket);
         firstError = error;
       }
       if (this.cursorStartAttempted || this.cursorActive) {
         try {
-          await this.driver?.stopCursor?.();
+          if (ticket) {
+            await this.awaitExternal(ticket, () => this.driver?.stopCursor?.());
+          } else {
+            await this.driver?.stopCursor?.();
+          }
           this.cursorStartAttempted = false;
           this.cursorActive = false;
         } catch (error) {
+          if (ticket) this.assertOperationTicket(ticket);
           firstError ??= error;
         }
       }
       if (firstError) throw firstError;
-    });
+    }, ticket);
   }
 
-  async runControlVisualLifecycle(operation) {
+  async runControlVisualLifecycle(operation, ticket) {
     const previous = this.controlVisualTail;
     let release;
     this.controlVisualTail = new Promise((resolve) => {
       release = resolve;
     });
-    await previous;
+    if (ticket) {
+      await this.awaitExternal(ticket, () => previous);
+    } else {
+      await previous;
+    }
     try {
       return await operation();
     } finally {

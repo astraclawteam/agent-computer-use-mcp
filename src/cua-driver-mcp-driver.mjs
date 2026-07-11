@@ -267,6 +267,7 @@ export class CuaDriverMcpClient {
     this.startPromise = null;
     this.closePromise = null;
     this.lifecycleState = "open";
+    this.callTickets = new Set();
     this.stderr = "";
   }
 
@@ -293,10 +294,36 @@ export class CuaDriverMcpClient {
     });
   }
 
-  async callTool(name, args) {
+  callTool(name, args) {
+    const ticket = this.acquireCallTicket();
+    if (!ticket) return Promise.reject(lifecycleClosedError());
+    let operation;
+    try {
+      operation = this.callToolOperation(ticket, name, args);
+    } catch (error) {
+      this.finishCallTicket(ticket);
+      throw error;
+    }
+    return Promise.resolve(operation).then(
+      (result) => {
+        this.assertCallTicket(ticket);
+        return result.structuredContent ?? result;
+      },
+      (error) => {
+        if (!this.isCallTicketCurrent(ticket)) throw lifecycleClosedError();
+        throw error;
+      },
+    ).finally(() => {
+      this.finishCallTicket(ticket);
+    });
+  }
+
+  async callToolOperation(ticket, name, args) {
     await this.start();
+    this.assertCallTicket(ticket);
     const result = await this.client.callTool({ name, arguments: args });
-    return result.structuredContent ?? result;
+    this.assertCallTicket(ticket);
+    return result;
   }
 
   close() {
@@ -304,6 +331,7 @@ export class CuaDriverMcpClient {
     if (this.closePromise) return this.closePromise;
     this.lifecycleState = "closing";
     this.closePromise = (async () => {
+      await this.waitForAdmittedCalls();
       if (this.startPromise) {
         try {
           await this.startPromise;
@@ -327,6 +355,35 @@ export class CuaDriverMcpClient {
     return attempt.finally(() => {
       if (this.closePromise === attempt) this.closePromise = null;
     });
+  }
+
+  acquireCallTicket() {
+    if (this.lifecycleState !== "open") return null;
+    let settle;
+    const settled = new Promise((resolve) => {
+      settle = resolve;
+    });
+    const ticket = { settled, settle };
+    this.callTickets.add(ticket);
+    return ticket;
+  }
+
+  finishCallTicket(ticket) {
+    if (!this.callTickets.delete(ticket)) return;
+    ticket.settle();
+  }
+
+  isCallTicketCurrent(ticket) {
+    return this.lifecycleState === "open" && this.callTickets.has(ticket);
+  }
+
+  assertCallTicket(ticket) {
+    if (!this.isCallTicketCurrent(ticket)) throw lifecycleClosedError();
+  }
+
+  async waitForAdmittedCalls() {
+    const admitted = [...this.callTickets];
+    await Promise.all(admitted.map((ticket) => ticket.settled));
   }
 
   async rejectAfterClose(attempt) {
