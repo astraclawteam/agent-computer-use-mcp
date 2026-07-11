@@ -12,13 +12,18 @@ import { ComputerUseProviderRouter } from "./computer-use-provider-router.mjs";
 import { CuaDriverMcpDriver } from "./cua-driver-mcp-driver.mjs";
 import { startGatewayManagedOverlay, stopGatewayManagedOverlay } from "./gateway-overlay-session.mjs";
 
-export async function runComputerUseMcpServer() {
+export async function runComputerUseMcpServer(options = {}) {
   const assetRepairRuntime = createAssetRepairRuntime();
   const router = new ComputerUseProviderRouter({
     ...assetRepairRuntime,
-    driver: new CuaDriverMcpDriver(),
+    driver: new CuaDriverMcpDriver({
+      driverPath: options.platformRuntime?.paths?.cuaDriverExecutable,
+    }),
     overlayRuntime: {
-      start: (args) => startGatewayManagedOverlay(args),
+      start: (args) => startGatewayManagedOverlay({
+        ...args,
+        executablePath: options.platformRuntime?.paths?.overlayExecutable,
+      }),
       stop: (handle) => {
         handle?.stop?.();
         stopGatewayManagedOverlay();

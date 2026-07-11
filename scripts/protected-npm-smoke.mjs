@@ -1,5 +1,6 @@
 import { spawn } from "node:child_process";
-import { resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
+import { mkdir, writeFile } from "node:fs/promises";
 import { pathToFileURL } from "node:url";
 
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
@@ -9,10 +10,12 @@ import {
   DEFAULT_PROTECTED_NPM_ROOT,
   buildProtectedNpmPackage,
 } from "./build-protected-npm-package.mjs";
+import { buildWindowsPlatformPackage } from "../src/windows-platform-package.mjs";
 
 export async function runProtectedNpmSmoke(options = {}) {
   const outputRoot = resolve(options.outputRoot ?? DEFAULT_PROTECTED_NPM_ROOT);
   const build = await buildProtectedNpmPackage({ outputRoot });
+  await buildSmokePlatformPackage(outputRoot, build.integrity.packageVersion);
   const verification = await runProtectedLauncher({ outputRoot, args: ["--verify-only"] });
   if (verification.exitCode !== 0) {
     throw new Error(`release.integrity_verification_failed: ${verification.stderr || verification.stdout}`);
@@ -50,6 +53,7 @@ export async function runProtectedNpmSmoke(options = {}) {
       packageName: integrity.packageName,
       packageVersion: integrity.packageVersion,
       integrityVerified: integrity.status === "passed" && integrity.fileCount === build.integrity.files.length,
+      platformVerified: integrity.platformVerified === true,
       toolNames: tools.tools.map((tool) => tool.name),
       health: healthResult.structuredContent,
       installationEntry: installationResult.structuredContent?.manifest?.entry?.args?.[0] ?? null,
@@ -61,6 +65,27 @@ export async function runProtectedNpmSmoke(options = {}) {
   } finally {
     await client.close();
   }
+}
+
+async function buildSmokePlatformPackage(outputRoot, version) {
+  const platformRoot = join(outputRoot, "node_modules", "@agent-computer-use", "win32-x64");
+  await buildWindowsPlatformPackage({
+    outputRoot: platformRoot,
+    version,
+    sourceCommit: "a".repeat(40),
+    materialize: async (stageRoot) => {
+      await writeFixture(stageRoot, "cua-driver/cua-driver.exe", "smoke-driver");
+      await writeFixture(stageRoot, "overlay/GatewayComputerUseOverlay.exe", "smoke-overlay");
+      await writeFixture(stageRoot, "ocr-runtime/onnxruntime.dll", "smoke-runtime");
+      await writeFixture(stageRoot, "models/pp-ocr-v6/det.onnx", "smoke-det");
+    },
+  });
+}
+
+async function writeFixture(root, path, contents) {
+  const fullPath = join(root, ...path.split("/"));
+  await mkdir(dirname(fullPath), { recursive: true });
+  await writeFile(fullPath, contents);
 }
 
 export function runProtectedLauncher(options = {}) {
