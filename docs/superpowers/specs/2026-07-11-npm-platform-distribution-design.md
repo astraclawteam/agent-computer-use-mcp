@@ -11,6 +11,10 @@
 1. Public npm is the primary channel.
 2. GitHub Release provides a complete platform ZIP for offline and manual use.
 
+Gitee Release is a read-only regional mirror of the GitHub Release. It is not an
+independent build or source of record and does not add a third authoritative
+distribution channel.
+
 The project does not ship or require a Windows installer. Users install only
 `agent-computer-use-mcp`; npm automatically selects the compatible platform
 package. The first supported target is Windows x64. Other platform packages
@@ -28,6 +32,8 @@ remain unpublished until they pass native validation.
 - Make npm versioning the installation, upgrade, downgrade, and rollback model.
 - Keep npm provenance, exact hashes, SBOM, licenses, and reproducible package
   inventories as release gates.
+- Automatically mirror published GitHub Release artifacts to Gitee without
+  rebuilding or changing their bytes.
 
 ## Non-goals
 
@@ -268,12 +274,84 @@ A `v*` tag triggers one release workflow:
     Windows directory and run the standard MCP smoke.
 12. Publish the GitHub Release only after both npm packages and both smoke paths
     pass.
+13. Mirror the published tag, release notes, ZIP, checksums, and SBOM to Gitee.
+14. Download or query the mirrored attachments and verify their names, sizes,
+    and SHA-256 values against the GitHub release inventory.
 
 The platform package is published before the core package so a newly visible
 core version never references an unavailable platform version.
 
 There is no Windows installer build, installer signing job, Azure Artifact
 Signing dependency, or installer smoke in the release graph.
+
+## Gitee Regional Mirror
+
+The Gitee repository is a read-only regional mirror intended to improve access
+to the complete ZIP from networks where GitHub downloads are unreliable.
+
+Gitee's repository mirror feature synchronizes branches, tags, and commits but
+does not define release-attachment synchronization. The release workflow
+therefore performs explicit release API operations after the GitHub Release is
+published.
+
+The mirror job:
+
+1. Uses the published GitHub Release inventory as its only input.
+2. Ensures the same `vX.Y.Z` tag exists in the Gitee repository.
+3. Creates or updates the Gitee Release for that exact tag.
+4. Uploads the complete Windows x64 ZIP, checksums, SBOM, and release inventory.
+5. Lists the uploaded attachments and compares file names and sizes.
+6. Downloads each attachment when the API permits deterministic download and
+   compares SHA-256; otherwise it verifies the API-reported identity and records
+   the limitation as explicit evidence.
+7. Writes a sanitized mirror report containing no access token or local path.
+
+The job is idempotent:
+
+- an existing release for the same tag is reused;
+- an attachment with the expected name and hash is retained;
+- an attachment with the expected name but different bytes is replaced;
+- unrelated releases and attachments are never deleted;
+- rerunning the workflow converges to the GitHub release inventory.
+
+GitHub and npm publication are not rolled back when Gitee is unavailable. A
+failed mirror job leaves the authoritative release published, marks the workflow
+failed or degraded, and can be rerun independently. Gitee must never become a
+prerequisite for local MCP startup or npm installation.
+
+The workflow accepts only these host-owned settings:
+
+```text
+GitHub release environment secret: GITEE_TOKEN
+GitHub release environment variable: GITEE_OWNER
+GitHub release environment variable: GITEE_REPO
+```
+
+One-time operator setup:
+
+1. Create a public Gitee repository for the mirror. The recommended repository
+   path is `<GITEE_OWNER>/agent-computer-use-mcp`.
+2. Leave release construction to GitHub Actions. Do not create independent
+   Gitee-only tags or upload locally rebuilt artifacts.
+3. In GitHub repository settings, open `Environments`, create or reuse the
+   protected `release` environment, and add `GITEE_TOKEN` as an environment
+   secret.
+4. Add `GITEE_OWNER` and `GITEE_REPO` as environment variables, not secrets.
+5. Confirm the automation identity can push a tag and create, list, update, and
+   attach files to a release in only that repository.
+6. Keep production approval rules on the `release` environment so pull-request
+   workflows cannot access the token.
+7. Run the mirror validation command before the first `v*` release; it performs
+   authenticated API capability checks without creating a release.
+
+`GITEE_TOKEN` must belong to a dedicated automation identity and have only the
+target repository permissions needed to read the repository, create or update a
+release, and manage that release's attachments. It must not be placed in source,
+workflow arguments, artifacts, logs, release notes, or npm packages.
+
+The mirror repository README identifies GitHub as upstream, prohibits direct
+release construction, and links every mirrored release back to the authoritative
+GitHub tag and checksums.
 
 ## Integrity and Supply-chain Policy
 
@@ -336,6 +414,7 @@ For the ZIP:
   storage, removable media, or an enterprise artifact proxy, and then used
   offline;
 - GitHub Release remains the only official ZIP publication channel;
+- Gitee Release exposes a byte-identical regional mirror of that official ZIP;
 - the project does not promise direct GitHub reachability or throughput from
   every network.
 
@@ -359,6 +438,10 @@ The implementation is complete only when automated tests prove:
 - neither MCP startup nor first Computer Use activation performs a download;
 - the complete ZIP runs without npm or network access;
 - npm platform payload bytes and ZIP platform payload bytes are identical;
+- Gitee mirror attachments match the published GitHub release inventory and a
+  rerun does not create duplicate releases or attachments;
+- a simulated Gitee outage does not mutate or revoke npm or GitHub publication;
+- logs and mirror reports never contain `GITEE_TOKEN`;
 - public npm post-publish installation resolves the platform package;
 - standard MCP initialize, tools/list, health, disconnect, and cleanup pass from
   both channels;
@@ -376,4 +459,14 @@ The implementation is complete only when automated tests prove:
   architecture.
 - No first-use asset download occurs.
 - Public npm and GitHub Release remain the only official channels.
+- Gitee provides a byte-identical, automatically maintained regional mirror and
+  never builds or versions artifacts independently.
 - Runtime works fully offline after package acquisition.
+
+## References
+
+- Gitee repository mirror scope: <https://gitee.com/help/articles/4336>
+- Gitee release attachment API SDK documentation:
+  <https://gitee.com/sdk/gitee5j/blob/main/docs/RepositoriesApi.md>
+- Gitee release CLI attachment behavior:
+  <https://gitee.com/gitee-frontend/gitee-release-cli/blob/master/README.md>
