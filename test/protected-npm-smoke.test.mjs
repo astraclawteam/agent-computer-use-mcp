@@ -5,6 +5,7 @@ import { afterEach, test } from "node:test";
 
 import { buildProtectedNpmPackage } from "../scripts/build-protected-npm-package.mjs";
 import {
+  PROTECTED_LAUNCHER_TIMEOUT_MS,
   runProtectedLauncher,
   runProtectedNpmSmoke,
 } from "../scripts/protected-npm-smoke.mjs";
@@ -13,6 +14,10 @@ const fixtureRoots = [];
 
 afterEach(async () => {
   await Promise.all(fixtureRoots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
+});
+
+test("protected launcher allows a bounded slow-device integrity window", () => {
+  assert.equal(PROTECTED_LAUNCHER_TIMEOUT_MS, 30_000);
 });
 
 test("protected package launcher verifies integrity and serves standard MCP", async () => {
@@ -67,3 +72,4 @@ async function fixtureRoot() {
   fixtureRoots.push(root);
   return root;
 }
+
