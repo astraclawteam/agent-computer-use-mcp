@@ -6,30 +6,9 @@ import test from "node:test";
 
 import { shouldShowGatewayComputerUseFrame } from "../public/computer-use-mode.mjs";
 import { buildProtectedNpmPackage } from "../scripts/build-protected-npm-package.mjs";
+import { assertBrowserKernelBoundary } from "../src/browser-kernel-boundary.mjs";
 import { COMPUTER_USE_MCP_TOOLS } from "../src/computer-use-mcp-tools.mjs";
-
-const RELEASE_SOURCE_ROOTS = [
-  "src",
-  "scripts",
-  "public",
-  "ocr-sidecar",
-  "gateway-overlay",
-  "native-lab",
-];
-
-const BROWSER_KERNEL_PATTERNS = [
-  /connectOverCDP/u,
-  /createCDPSession/u,
-  /CDPBrowserProxy/u,
-  /WebContentsView/u,
-  /electron\.debugger/u,
-  /remote-debugging-port/u,
-  /debuggerAddress/u,
-  /devtools:\/\//u,
-  /(?:from|require\s*\()\s*["'](?:playwright(?:-core)?|puppeteer(?:-core)?|chrome-remote-interface|electron)["']/u,
-];
-
-const BROWSER_KERNEL_DEPENDENCY = /^(?:playwright(?:-core)?|puppeteer(?:-core)?|chrome-remote-interface|chrome-launcher|devtools-protocol|electron|selenium-webdriver)$/u;
+import { buildWindowsPlatformPackage } from "../src/windows-platform-package.mjs";
 
 test("the complete protected npm runtime contains no Preview Browser kernel", async (t) => {
   const outputRoot = await mkdtemp(path.join(tmpdir(), "agent-computer-use-browser-boundary-"));
@@ -38,24 +17,23 @@ test("the complete protected npm runtime contains no Preview Browser kernel", as
   await buildProtectedNpmPackage({ outputRoot });
   const packageJson = JSON.parse(await readFile("package.json", "utf8"));
   const protectedPackageJson = JSON.parse(await readFile(path.join(outputRoot, "package.json"), "utf8"));
-  const releaseSource = await readRoots(RELEASE_SOURCE_ROOTS);
   const protectedRuntime = await readTree(path.join(outputRoot, "dist"));
 
-  assertBrowserKernelFree({
+  assertBrowserKernelBoundary({
     dependencies: {
       ...packageJson.dependencies,
       ...packageJson.optionalDependencies,
       ...protectedPackageJson.dependencies,
       ...protectedPackageJson.optionalDependencies,
     },
-    source: `${releaseSource}\n${protectedRuntime}`,
+    source: protectedRuntime,
   });
 });
 
-test("the browser-kernel gate detects alternate dependencies and raw CDP transports", () => {
+test("the browser-kernel gate detects direct and transitive dependencies plus raw CDP transports", () => {
   for (const dependency of ["playwright", "puppeteer-core", "chrome-remote-interface", "electron"]) {
     assert.throws(
-      () => assertBrowserKernelFree({ dependencies: { [dependency]: "1.0.0" }, source: "" }),
+      () => assertBrowserKernelBoundary({ dependencies: { [dependency]: "1.0.0" }, source: "" }),
       new RegExp(dependency, "u"),
     );
   }
@@ -65,8 +43,43 @@ test("the browser-kernel gate detects alternate dependencies and raw CDP transpo
     'session.createCDPSession();',
     'args.push("--remote-debugging-port=0");',
   ]) {
-    assert.throws(() => assertBrowserKernelFree({ dependencies: {}, source }), /browser kernel token/u);
+    assert.throws(() => assertBrowserKernelBoundary({ dependencies: {}, source }), /browser kernel token/u);
   }
+  assert.throws(
+    () => assertBrowserKernelBoundary({
+      dependencies: {},
+      source: "",
+      lockPackages: {
+        "node_modules/safe-parent": { version: "1.0.0" },
+        "node_modules/safe-parent/node_modules/playwright-core": { version: "1.0.0" },
+      },
+    }),
+    /playwright-core/u,
+  );
+});
+
+test("the Windows platform package builder rejects an embedded browser kernel", async (t) => {
+  const outputRoot = await mkdtemp(path.join(tmpdir(), "agent-computer-use-platform-boundary-"));
+  t.after(() => rm(outputRoot, { recursive: true, force: true }));
+
+  await assert.rejects(
+    buildWindowsPlatformPackage({
+      outputRoot,
+      version: "0.0.1",
+      sourceCommit: "a".repeat(40),
+      materialize: async (root) => {
+        await Promise.all([
+          fixture(root, "cua-driver/cua-driver.exe", "driver"),
+          fixture(root, "overlay/GatewayComputerUseOverlay.exe", "overlay"),
+          fixture(root, "ocr-runtime/onnxruntime.dll", "runtime"),
+          fixture(root, "models/pp-ocr-v6/det.onnx", "det"),
+          fixture(root, "models/pp-ocr-v6/rec.onnx", "rec"),
+          fixture(root, "overlay/fallback.mjs", 'session.createCDPSession();'),
+        ]);
+      },
+    }),
+    /browser kernel token/u,
+  );
 });
 
 test("the public contract names PreviewBrowserService as the sole owner with no fallback kernel", async () => {
@@ -79,7 +92,7 @@ test("the public contract names PreviewBrowserService as the sole owner with no 
   }
 });
 
-test("agent-native capabilities remain outside every Gateway-managed control surface", async () => {
+test("the public MCP exposes no agent-native interception surface", async () => {
   const contract = await readFile("docs/productization/public-mcp-contract-review.md", "utf8");
   const toolNames = COMPUTER_USE_MCP_TOOLS.map((tool) => tool.name);
 
@@ -87,19 +100,14 @@ test("agent-native capabilities remain outside every Gateway-managed control sur
   assert.equal(toolNames.every((name) => name.startsWith("computer.")), true);
   assert.equal(toolNames.some((name) => /agent|browser|preview/u.test(name)), false);
   assert.match(contract, /agent-native operations MUST NOT be routed through Gateway approval, target leases, or policy enforcement/u);
+  assert.match(contract, /End-to-end agent-native routing is a host-owned invariant and is not implemented by this MCP package/u);
 });
 
-function assertBrowserKernelFree({ dependencies, source }) {
-  for (const dependency of Object.keys(dependencies)) {
-    assert.equal(BROWSER_KERNEL_DEPENDENCY.test(dependency), false, `browser kernel dependency: ${dependency}`);
-  }
-  for (const pattern of BROWSER_KERNEL_PATTERNS) {
-    assert.equal(pattern.test(source), false, `browser kernel token: ${pattern.source}`);
-  }
-}
-
-async function readRoots(roots) {
-  return (await Promise.all(roots.map((root) => readTree(path.resolve(root))))).join("\n");
+async function fixture(root, relativePath, contents) {
+  const file = path.join(root, ...relativePath.split("/"));
+  const { mkdir, writeFile } = await import("node:fs/promises");
+  await mkdir(path.dirname(file), { recursive: true });
+  await writeFile(file, contents);
 }
 
 async function readTree(root) {
