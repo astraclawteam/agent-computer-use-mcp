@@ -31,4 +31,6 @@ This review records the public `computer.*` MCP contract that requires human PR 
 
 Third-party agent-native Computer Use remains agent-owned: agent-native operations MUST NOT be routed through Gateway approval, target leases, or policy enforcement. This package exposes only the OS-oriented `computer.*` contract and does not wrap, intercept, or replace third-party agent-native capabilities.
 
+End-to-end agent-native routing is a host-owned invariant and is not implemented by this MCP package. The XiaozhiClaw host runtime owns the executable routing test that proves agent-native calls bypass Gateway approval, target leases, policy enforcement, and Gateway-managed overlays.
+
 
