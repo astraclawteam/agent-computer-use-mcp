@@ -39,16 +39,20 @@ jobs:
             Tee-Object -FilePath artifacts/platform-validation/build-report.json
 
       - name: Report production artifact sizes
+        id: release-size
         shell: pwsh
         run: |
           node scripts/windows-release-size-report.mjs |
             Tee-Object -FilePath artifacts/platform-validation/size-report.json
+          $sizeReport = Get-Content artifacts/platform-validation/size-report.json -Raw | ConvertFrom-Json
+          "offline_bytes=$($sizeReport.offlineBundleSizeBytes)" |
+            Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
 
       - name: Upload validation evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: platform-release-validation
+          name: platform-release-validation-${{ steps.release-size.outputs.offline_bytes }}-bytes
           path: |
             artifacts/platform-release
             artifacts/platform-validation

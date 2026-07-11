@@ -15,6 +15,7 @@ test("platform release validation runs the networked production assembly without
   const checkout = job.steps.find(({ uses }) => uses?.startsWith("actions/checkout@"));
   const upload = job.steps.find(({ uses }) => uses?.startsWith("actions/upload-artifact@"));
   const build = job.steps.find(({ name }) => name === "Assemble production platform release");
+  const size = job.steps.find(({ name }) => name === "Report production artifact sizes");
   const actionUses = job.steps.flatMap(({ uses }) => uses ? [uses] : []);
 
   assert.deepEqual(Object.keys(workflow.on), ["workflow_dispatch"]);
@@ -36,8 +37,13 @@ test("platform release validation runs the networked production assembly without
     "actions/upload-artifact@v4",
   ]);
   assert.equal(checkout.with["persist-credentials"], false);
+  assert.equal(size.id, "release-size");
+  assert.match(size.run, /offline_bytes=[\s\S]*GITHUB_OUTPUT/u);
   assert.equal(upload.if, "always()");
-  assert.equal(upload.with.name, "platform-release-validation");
+  assert.equal(
+    upload.with.name,
+    "platform-release-validation-${{ steps.release-size.outputs.offline_bytes }}-bytes",
+  );
   assert.match(upload.with.path, /artifacts\/platform-release(?:\r?\n|$)/u);
   assert.match(upload.with.path, /artifacts\/platform-validation(?:\r?\n|$)/u);
   assert.equal(upload.with["if-no-files-found"], "error");

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, mkdir, readFile, realpath, rm, writeFile } from "node:fs/promises";
+import { lstat, mkdtemp, mkdir, readFile, realpath, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, test } from "node:test";
@@ -33,6 +33,63 @@ test("resolver returns native paths only after exact-version verification", asyn
   assert.equal(resolved.paths.overlayRoot, join(platformRoot, "overlay"));
   assert.equal(resolved.paths.ocrRuntimeRoot, join(platformRoot, "ocr-runtime"));
   assert.equal(resolved.paths.ocrModelRoot, join(platformRoot, "models", "pp-ocr-v6"));
+});
+
+test("resolver accepts a Windows short-path alias for the same unlinked directory", async () => {
+  const platformRoot = await platformFixture();
+  const canonicalAlias = `${platformRoot}-canonical-alias`;
+  const platformStat = await stat(platformRoot, { bigint: true });
+  const resolved = await resolveVerifiedPlatform({
+    platform: "win32",
+    arch: "x64",
+    coreVersion: "1.2.3",
+    resolvePackageJson: () => join(platformRoot, "package.json"),
+    realpath: async (path) => path === platformRoot ? canonicalAlias : realpath(path),
+    lstat,
+    stat: async (path, options) => path === canonicalAlias ? platformStat : stat(path, options),
+  });
+
+  assert.equal(resolved.packageRoot, platformRoot);
+  assert.equal(resolved.status, "verified");
+});
+
+test("resolver rejects a linked ancestor even when realpath preserves its spelling", async () => {
+  const platformRoot = await platformFixture();
+  const linkedAncestor = dirname(platformRoot);
+  await assert.rejects(
+    resolveVerifiedPlatform({
+      platform: "win32",
+      arch: "x64",
+      coreVersion: "1.2.3",
+      resolvePackageJson: () => join(platformRoot, "package.json"),
+      realpath,
+      lstat: async (path) => path === linkedAncestor
+        ? { isSymbolicLink: () => true }
+        : lstat(path),
+      stat,
+    }),
+    /platform\.linked_root/,
+  );
+});
+
+test("resolver rejects a real Windows junction package root", { skip: process.platform !== "win32" }, async () => {
+  const platformRoot = await platformFixture();
+  const linkParent = await fixtureRoot();
+  const linkedRoot = join(linkParent, "linked-platform");
+  await symlink(platformRoot, linkedRoot, "junction");
+
+  await assert.rejects(
+    resolveVerifiedPlatform({
+      platform: "win32",
+      arch: "x64",
+      coreVersion: "1.2.3",
+      resolvePackageJson: () => join(linkedRoot, "package.json"),
+      realpath,
+      lstat,
+      stat,
+    }),
+    /platform\.linked_root/,
+  );
 });
 
 test("resolver fails closed on core and platform version mismatch", async () => {

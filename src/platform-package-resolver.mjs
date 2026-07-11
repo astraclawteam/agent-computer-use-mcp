@@ -1,4 +1,9 @@
-import { readFile, realpath as fsRealpath, stat } from "node:fs/promises";
+import {
+  lstat as fsLstat,
+  readFile,
+  realpath as fsRealpath,
+  stat as fsStat,
+} from "node:fs/promises";
 import { createRequire } from "node:module";
 import { dirname, join, resolve } from "node:path";
 
@@ -11,6 +16,8 @@ export async function resolveVerifiedPlatform(options = {}) {
   const coreVersion = required(options.coreVersion, "platform.version_invalid");
   const resolvePackageJson = options.resolvePackageJson ?? defaultPackageResolver(packageName);
   const realpath = options.realpath ?? fsRealpath;
+  const lstat = options.lstat ?? fsLstat;
+  const stat = options.stat ?? fsStat;
 
   let packageJsonPath;
   try {
@@ -22,7 +29,9 @@ export async function resolveVerifiedPlatform(options = {}) {
   const physicalRoot = await realpath(packageRoot).catch((cause) => {
     throw platformError("platform.package_missing", packageName, cause);
   });
-  if (!samePath(packageRoot, physicalRoot)) {
+  if (await containsLinkedPath(packageRoot, lstat)
+    || (!samePath(packageRoot, physicalRoot)
+      && !await sameFileIdentity(packageRoot, physicalRoot, stat))) {
     throw platformError("platform.linked_root", packageRoot);
   }
 
@@ -124,6 +133,27 @@ function arraysEqual(left, right) {
 function samePath(left, right) {
   const normalize = (value) => process.platform === "win32" ? resolve(value).toLowerCase() : resolve(value);
   return normalize(left) === normalize(right);
+}
+
+async function containsLinkedPath(path, lstat) {
+  let current = resolve(path);
+  while (true) {
+    const entry = await lstat(current).catch(() => null);
+    if (!entry || entry.isSymbolicLink()) return true;
+    const parent = dirname(current);
+    if (parent === current) return false;
+    current = parent;
+  }
+}
+
+async function sameFileIdentity(left, right, stat) {
+  const [leftStat, rightStat] = await Promise.all([
+    stat(left, { bigint: true }).catch(() => null),
+    stat(right, { bigint: true }).catch(() => null),
+  ]);
+  return leftStat !== null && rightStat !== null
+    && leftStat.dev === rightStat.dev
+    && leftStat.ino === rightStat.ino;
 }
 
 function required(value, code) {
