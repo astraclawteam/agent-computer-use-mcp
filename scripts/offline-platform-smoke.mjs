@@ -6,7 +6,7 @@ import { pathToFileURL } from "node:url";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 
-import { expandVerifiedZip } from "../src/windows-release-payload.mjs";
+import { expandVerifiedZip } from "../src/verified-zip.mjs";
 import { runProtectedLauncher } from "./protected-npm-smoke.mjs";
 
 export async function smokeOfflineBundle(options = {}) {

@@ -65,7 +65,6 @@ export const ALPHA_RELEASE_COMMANDS = [
   "npm run package:foundation",
   "npm run package:dry-run",
   "npm run assets:manifest",
-  "npm run doctor:install-cache",
 ];
 
 export const REQUIRED_RELEASE_INVARIANTS = [
@@ -96,7 +95,6 @@ export const REQUIRED_RELEASE_EVIDENCE = [
   ["package-foundation", "npm run package:foundation"],
   ["package-dry-run", "npm run package:dry-run"],
   ["offline-asset-manifest", "npm run assets:manifest"],
-  ["offline-install-cache-doctor", "npm run doctor:install-cache"],
   ["permission-policy-engine", "npm run phase:1.9"],
   ["controller-timeout-cleanup", "npm run phase:1.10"],
   ["policy-deny-proof", "npm run phase:1.11"],
@@ -139,8 +137,8 @@ export const REQUIRED_RELEASE_EVIDENCE = [
   ["first-enable-safety", "npm run phase:7.5"],
   ["repair-entrypoint-catalog", "npm run phase:7.6"],
   ["clean-install-degraded-proof", "npm run phase:7.7"],
-  ["windows-installer-transaction", "npm run phase:7.8"],
-  ["trusted-asset-cache-materializer", "npm run phase:7.9"],
+  ["platform-package-integrity", "npm run phase:7.8"],
+  ["offline-package-identity", "npm run phase:7.9"],
   ["runtime-soak", "npm run phase:8.0"],
 ];
 

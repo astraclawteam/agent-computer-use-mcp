@@ -5,7 +5,7 @@ import { dirname, join, relative, resolve } from "node:path";
 
 import { releaseAssetNames } from "./platform-package-contract.mjs";
 import { verifyPlatformInventory } from "./platform-payload-inventory.mjs";
-import { createDeterministicZip } from "./windows-offline-bundle.mjs";
+import { createDeterministicZip } from "./deterministic-zip.mjs";
 
 export async function assemblePlatformRelease(options = {}) {
   const version = required(options.version, "release.version_missing");

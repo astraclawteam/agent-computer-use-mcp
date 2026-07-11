@@ -32,7 +32,6 @@ test("release readiness gate captures the alpha release command contract", async
     "npm run package:foundation",
     "npm run package:dry-run",
     "npm run assets:manifest",
-    "npm run doctor:install-cache",
   ]);
   assert.equal(gate.invariants.every((invariant) => invariant.required === true), true);
   assert.ok(gate.evidence.some((item) => item.id === "release-metadata-changelog"));
@@ -40,13 +39,12 @@ test("release readiness gate captures the alpha release command contract", async
   assert.ok(gate.evidence.some((item) => item.id === "signed-helper-inventory"));
   assert.ok(gate.evidence.some((item) => item.id === "protected-npm-release"));
   assert.ok(gate.evidence.some((item) => item.id === "real-release-assembly" && item.command === "npm run phase:0.15"));
-  assert.ok(gate.evidence.some((item) => item.id === "offline-install-cache-doctor"));
   assert.ok(gate.evidence.some((item) => item.id === "offline-install-proof"));
   assert.ok(gate.evidence.some((item) => item.id === "first-enable-safety"));
   assert.ok(gate.evidence.some((item) => item.id === "repair-entrypoint-catalog"));
   assert.ok(gate.evidence.some((item) => item.id === "clean-install-degraded-proof"));
-  assert.ok(gate.evidence.some((item) => item.id === "windows-installer-transaction"));
-  assert.ok(gate.evidence.some((item) => item.id === "trusted-asset-cache-materializer"));
+  assert.ok(gate.evidence.some((item) => item.id === "platform-package-integrity"));
+  assert.ok(gate.evidence.some((item) => item.id === "offline-package-identity"));
   assert.ok(gate.evidence.some((item) => item.id === "policy-deny-proof"));
   assert.ok(gate.evidence.some((item) => item.id === "control-approval-state"));
   assert.ok(gate.evidence.some((item) => item.id === "mcp-approval-compatibility"));
@@ -64,20 +62,20 @@ test("release readiness gate captures the alpha release command contract", async
 test("release readiness validation fails closed when a required script or invariant is missing", async () => {
   const { buildReleaseReadinessGate, validateReleaseReadinessGate } = await import("../src/release-readiness-gate.mjs");
   const packageJson = JSON.parse(readFileSync("package.json", "utf8"));
-  const packageWithoutDoctor = structuredClone(packageJson);
-  delete packageWithoutDoctor.scripts["doctor:install-cache"];
+  const packageWithoutIntegrity = structuredClone(packageJson);
+  delete packageWithoutIntegrity.scripts["phase:7.8"];
 
   const gate = buildReleaseReadinessGate({ packageJson });
   gate.invariants = gate.invariants.filter((invariant) => invariant.id !== "overlay-excluded-from-observation");
 
-  const validation = validateReleaseReadinessGate(gate, { packageJson: packageWithoutDoctor });
+  const validation = validateReleaseReadinessGate(gate, { packageJson: packageWithoutIntegrity });
 
   assert.equal(validation.status, "failed");
   assert.deepEqual(validation.violations.map((violation) => violation.code), [
     "missing-script",
     "missing-invariant",
   ]);
-  assert.equal(validation.violations[0].script, "doctor:install-cache");
+  assert.equal(validation.violations[0].script, "phase:7.8");
   assert.equal(validation.violations[1].id, "overlay-excluded-from-observation");
 });
 
@@ -118,7 +116,6 @@ function requiredCommandSubset(gate) {
     "npm run package:foundation",
     "npm run package:dry-run",
     "npm run assets:manifest",
-    "npm run doctor:install-cache",
   ].filter((command) => commands.has(command));
 }
 

@@ -34,8 +34,8 @@ test("live cua-driver asset contract pins official release identity and hashes",
   assert.equal(manifest.assets[0].provenance.upstreamSha256, OFFICIAL_CUA_DRIVER_WINDOWS_X64.sha256);
 });
 
-test("live cua-driver command is explicit and never part of deterministic CI", () => {
+test("cua-driver acquisition occurs only inside the locked platform package build", () => {
   const packageJson = JSON.parse(readFileSync("package.json", "utf8"));
-  assert.equal(packageJson.scripts["assets:live:cua-driver"], "node scripts/live-cua-driver-asset.mjs");
-  assert.equal(packageJson.scripts.test.includes("assets:live:cua-driver"), false);
+  assert.equal(Object.hasOwn(packageJson.scripts, "assets:live:cua-driver"), false);
+  assert.equal(packageJson.scripts["release:npm:build:win32-x64"], "node scripts/build-windows-platform-package.mjs");
 });

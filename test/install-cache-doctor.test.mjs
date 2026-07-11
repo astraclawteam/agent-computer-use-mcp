@@ -1,5 +1,4 @@
 import assert from "node:assert/strict";
-import { spawn } from "node:child_process";
 import { test } from "node:test";
 
 import {
@@ -90,36 +89,3 @@ test("repair plan never performs downloads or installs implicitly", () => {
   assert.equal(plan.requiresApproval, true);
   assert.equal(plan.actions.every((action) => action.executesImmediately === false), true);
 });
-
-test("install cache doctor script emits JSON without starting desktop control", async () => {
-  const result = await runNode(["scripts/install-cache-doctor.mjs", "--json"]);
-  assert.equal(result.exitCode, 0, result.stderr);
-  const report = JSON.parse(result.stdout);
-
-  assert.equal(["healthy", "degraded", "unavailable"].includes(report.status), true);
-  assert.equal(report.includeUserOverlay, false);
-  assert.equal(report.startsDesktopControl, false);
-  assert.equal(Array.isArray(report.repairPlan.actions), true);
-});
-
-function runNode(args) {
-  return new Promise((resolve, reject) => {
-    const child = spawn(process.execPath, args, {
-      cwd: process.cwd(),
-      stdio: ["ignore", "pipe", "pipe"],
-      windowsHide: true,
-    });
-    let stdout = "";
-    let stderr = "";
-    child.stdout.on("data", (chunk) => {
-      stdout += chunk.toString("utf8");
-    });
-    child.stderr.on("data", (chunk) => {
-      stderr += chunk.toString("utf8");
-    });
-    child.on("error", reject);
-    child.on("close", (exitCode) => {
-      resolve({ exitCode, stdout, stderr });
-    });
-  });
-}

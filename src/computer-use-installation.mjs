@@ -1,7 +1,6 @@
 import { resolveCuaDriverCandidate } from "./driver-health.mjs";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
-import { getAssetDeliveryConfig } from "./asset-installer-host.mjs";
 
 export const COMPUTER_USE_MODULE_NAME = "agent-computer-use-mcp";
 export const COMPUTER_USE_MCP_SERVER_ID = "agent-computer-use";
@@ -18,11 +17,6 @@ const OPTIONAL_ENV_OVERRIDES = [
   "XIAOZHICLAW_OCR_SIDECAR_PATH",
   "AGENT_COMPUTER_USE_ARTIFACT_ROOT",
   "AGENT_COMPUTER_USE_OCR_MODEL_ROOT",
-  "AGENT_COMPUTER_USE_WINDOWS_INSTALLER",
-  "AGENT_COMPUTER_USE_ASSET_MANIFEST",
-  "AGENT_COMPUTER_USE_ASSET_SIGNATURE",
-  "AGENT_COMPUTER_USE_ASSET_TRUST_KEYRING",
-  "AGENT_COMPUTER_USE_OFFLINE_ASSET_ROOT",
   "XIAOZHICLAW_COMPUTER_USE_ARTIFACT_ROOT",
   "XIAOZHICLAW_OCR_MODEL_ROOT",
 ];
@@ -37,7 +31,6 @@ export function getComputerUseInstallationManifest(options = {}) {
     ?? env.XIAOZHICLAW_OCR_MODEL_ROOT
     ?? defaultLocalDataPath(env, "models");
   const driverPath = resolveCuaDriverCandidate(env) ?? defaultCuaDriverPath(env);
-  const assetDelivery = getAssetDeliveryConfig({ env, platform: options.platform });
   const entryPath = resolveComputerUseMcpEntry({
     packageRoot,
     pathExists: options.pathExists,
@@ -58,11 +51,6 @@ export function getComputerUseInstallationManifest(options = {}) {
       artifactRoot,
       modelRoot,
       driverPath,
-      windowsInstallerPath: assetDelivery.installerPath,
-      assetManifestPath: assetDelivery.manifestPath,
-      assetSignaturePath: assetDelivery.signaturePath,
-      assetTrustKeyringPath: assetDelivery.keyringPath,
-      offlineAssetRoot: assetDelivery.offlineRoot ?? null,
     },
     envOverrides: {
       required: [],
@@ -102,11 +90,6 @@ export function buildClientMcpConfig({ client, manifest }) {
           AGENT_COMPUTER_USE_ARTIFACT_ROOT: manifest.paths.artifactRoot,
           AGENT_COMPUTER_USE_OCR_MODEL_ROOT: manifest.paths.modelRoot,
           ...(manifest.paths.driverPath ? { AGENT_COMPUTER_USE_CUA_DRIVER: manifest.paths.driverPath } : {}),
-          AGENT_COMPUTER_USE_WINDOWS_INSTALLER: manifest.paths.windowsInstallerPath,
-          AGENT_COMPUTER_USE_ASSET_MANIFEST: manifest.paths.assetManifestPath,
-          AGENT_COMPUTER_USE_ASSET_SIGNATURE: manifest.paths.assetSignaturePath,
-          AGENT_COMPUTER_USE_ASSET_TRUST_KEYRING: manifest.paths.assetTrustKeyringPath,
-          ...(manifest.paths.offlineAssetRoot ? { AGENT_COMPUTER_USE_OFFLINE_ASSET_ROOT: manifest.paths.offlineAssetRoot } : {}),
           XIAOZHICLAW_COMPUTER_USE_ARTIFACT_ROOT: manifest.paths.artifactRoot,
           XIAOZHICLAW_OCR_MODEL_ROOT: manifest.paths.modelRoot,
           ...(manifest.paths.driverPath ? { XIAOZHICLAW_CUA_DRIVER: manifest.paths.driverPath } : {}),

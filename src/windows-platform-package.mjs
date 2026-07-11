@@ -81,7 +81,7 @@ export async function defaultWindowsPlatformMaterializer(stageRoot, options = {}
     import("./release-asset-acquirer.mjs"),
     import("./release-asset-lock.mjs"),
     import("./ocr-release-model-pack.mjs"),
-    import("./windows-release-payload.mjs"),
+    import("./verified-zip.mjs"),
     import("./gateway-overlay-build-host.mjs"),
   ]);
   const lock = await loadReleaseAssetLock(options.assetLockPath ?? "release/windows-x64-assets.lock.json");
