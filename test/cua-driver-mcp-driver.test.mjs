@@ -342,7 +342,9 @@ test("CuaDriverMcpClient coalesces concurrent start and close around one transpo
   const firstClose = client.close();
   const secondClose = client.close();
   connectGate.resolve();
-  await Promise.all([firstStart, secondStart, firstClose, secondClose]);
+  await assert.rejects(firstStart, { code: "lifecycle.closed" });
+  await assert.rejects(secondStart, { code: "lifecycle.closed" });
+  await Promise.all([firstClose, secondClose]);
 
   assert.deepEqual(calls, ["transport.create", "client.connect", "client.close"]);
   assert.equal(client.transport, null);
@@ -378,7 +380,9 @@ test("CuaDriverMcpDriver serializes cursor start, stop, and close", async () => 
   const stop = driver.stopCursor();
   const close = driver.close();
   enableGate.resolve();
-  await Promise.all([start, stop, close]);
+  await assert.rejects(start, { code: "lifecycle.closed" });
+  await assert.rejects(stop, { code: "lifecycle.closed" });
+  await close;
 
   assert.deepEqual(calls.map((call) => typeof call === "string" ? call : `${call.name}:${call.args?.enabled ?? ""}`), [
     "client.start",

@@ -65,7 +65,14 @@ test("router close revokes active control state after abnormal disconnect", asyn
   assert.equal((await router.listState()).status, "active");
 
   await router.close({ reason: "client-disconnect" });
-  const state = await router.listState();
+  await assert.rejects(() => router.listState(), { code: "lifecycle.closed" });
+  const state = {
+    status: router.activeController ? "active" : "idle",
+    activeController: router.activeController,
+    lastCapture: router.lastCapture,
+    pendingRepairApproval: router.pendingRepairApproval,
+    auditEvents: router.auditEvents,
+  };
 
   assert.equal(state.status, "idle");
   assert.equal(state.activeController, null);
@@ -267,6 +274,7 @@ test("Phase 5.2 has an executable disconnect cleanup smoke script", async () => 
   assert.equal(report.lastCaptureCleared, true);
   assert.equal(report.pendingApprovalCleared, true);
   assert.equal(report.overlayStopped, true);
+  assert.equal(report.rejectsNewWork, true);
   assert.equal(report.includeUserOverlay, false);
 });
 

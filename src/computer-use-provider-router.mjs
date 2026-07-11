@@ -29,6 +29,8 @@ export class ComputerUseProviderRouter {
     this.pendingControlGrant = null;
     this.controlVisualTail = Promise.resolve();
     this.ocrStarted = false;
+    this.ocrStartAttempted = false;
+    this.ocrStartPromise = null;
     this.artifactRoot = options.artifactRoot;
     this.clock = options.clock ?? {
       now: () => Date.now(),
@@ -45,6 +47,9 @@ export class ComputerUseProviderRouter {
     this.closePromise = null;
     this.closeComplete = false;
     this.closeContext = null;
+    this.lifecycleState = "open";
+    this.lifecycleGeneration = 0;
+    this.operationTickets = new Set();
     this.assetDeliveryConfig = options.assetDeliveryConfig ?? null;
     this.installCacheDoctor = options.installCacheDoctor ?? runInstallCacheDoctor;
     this.auditEvents = [];
@@ -52,7 +57,11 @@ export class ComputerUseProviderRouter {
     this.actionPolicy = this.policy.describe();
   }
 
-  async health(options = {}) {
+  health(options = {}) {
+    return this.runOperation((ticket) => this.healthOperation(options, ticket));
+  }
+
+  async healthOperation(options = {}) {
     const result = {
       status: "ready",
       module: "agent-computer-use-mcp",
@@ -150,7 +159,11 @@ export class ComputerUseProviderRouter {
     return result;
   }
 
-  async doctor(options = {}) {
+  doctor(options = {}) {
+    return this.runOperation((ticket) => this.doctorOperation(options, ticket));
+  }
+
+  async doctorOperation(options = {}) {
     const runtime = await this.health({
       fast: options.fast ?? true,
       prewarm: false,
@@ -196,7 +209,11 @@ export class ComputerUseProviderRouter {
     };
   }
 
-  async repair(options = {}) {
+  repair(options = {}) {
+    return this.runOperation((ticket) => this.repairOperation(options, ticket));
+  }
+
+  async repairOperation(options = {}) {
     const operation = options.operation ?? "plan";
     if (operation === "status") {
       return this.assetOperationResult({
@@ -425,11 +442,16 @@ export class ComputerUseProviderRouter {
     };
   }
 
-  async requestAccess(args) {
+  requestAccess(args) {
+    return this.runOperation((ticket) => this.requestAccessOperation(args, ticket));
+  }
+
+  async requestAccessOperation(args, ticket) {
     if (!this.driver?.findWindow) {
       fail("provider.unavailable", "cua-driver is not available", { provider: "cua-driver" });
     }
     await this.expireActiveController({ throwOnExpire: false });
+    this.assertOperationTicket(ticket);
     if (this.controllerRequestInProgress) {
       fail("controller.request_in_progress", "A Gateway-managed Computer Use controller request is already in progress.", {
         includeUserOverlay: false,
@@ -505,8 +527,13 @@ export class ComputerUseProviderRouter {
     }
   }
 
-  async approveAccess(args = {}) {
+  approveAccess(args = {}) {
+    return this.runOperation((ticket) => this.approveAccessOperation(args, ticket));
+  }
+
+  async approveAccessOperation(args = {}, ticket) {
     await this.expireActiveController({ throwOnExpire: false });
+    this.assertOperationTicket(ticket);
     const pending = this.pendingAccessApproval;
     if (!args.approvalToken || !pending || pending.token !== args.approvalToken) {
       return {
@@ -588,7 +615,11 @@ export class ComputerUseProviderRouter {
     }
   }
 
-  async capture(args = {}) {
+  capture(args = {}) {
+    return this.runOperation((ticket) => this.captureOperation(args, ticket));
+  }
+
+  async captureOperation(args = {}, ticket) {
     await this.requireActiveController();
     const mode = args.mode ?? "semantic";
     let observation;
@@ -614,6 +645,7 @@ export class ComputerUseProviderRouter {
       fail("capture.mode_unsupported", `Unsupported capture mode: ${mode}`);
     }
 
+    this.assertOperationTicket(ticket);
     this.lastCapture = {
       ...observation,
       provider: observation.provider ?? "gateway-managed",
@@ -627,7 +659,11 @@ export class ComputerUseProviderRouter {
     return this.lastCapture;
   }
 
-  async act(args = {}) {
+  act(args = {}) {
+    return this.runOperation((ticket) => this.actOperation(args, ticket));
+  }
+
+  async actOperation(args = {}, ticket) {
     await this.requireActiveController();
     const action = args.action;
     this.validateAction(action);
@@ -666,6 +702,7 @@ export class ComputerUseProviderRouter {
       throw error;
     }
 
+    this.assertOperationTicket(ticket);
     const actionResult = {
       status: result.status ?? "ok",
       provider: "gateway-managed",
@@ -685,7 +722,11 @@ export class ComputerUseProviderRouter {
     return actionResult;
   }
 
-  async cancel(args = {}) {
+  cancel(args = {}) {
+    return this.runOperation((ticket) => this.cancelOperation(args, ticket));
+  }
+
+  async cancelOperation(args = {}) {
     this.invalidateControlGrant(
       "controller.cancelled",
       "The Gateway-managed Computer Use controller request was cancelled.",
@@ -703,7 +744,11 @@ export class ComputerUseProviderRouter {
     return { status: "cancelled", previousController: previous, previousApproval, includeUserOverlay: false };
   }
 
-  async revoke(args = {}) {
+  revoke(args = {}) {
+    return this.runOperation((ticket) => this.revokeOperation(args, ticket));
+  }
+
+  async revokeOperation(args = {}) {
     this.invalidateControlGrant(
       "controller.revoked",
       "The Gateway-managed Computer Use controller request was revoked.",
@@ -734,8 +779,13 @@ export class ComputerUseProviderRouter {
     return { status: "revoked", previousController: previous, previousApproval, includeUserOverlay: false };
   }
 
-  async listState() {
+  listState() {
+    return this.runOperation((ticket) => this.listStateOperation(ticket));
+  }
+
+  async listStateOperation(ticket) {
     await this.expireActiveController({ throwOnExpire: false });
+    this.assertOperationTicket(ticket);
     this.expireAccessApproval();
     return {
       status: this.activeController ? "active" : "idle",
@@ -748,11 +798,16 @@ export class ComputerUseProviderRouter {
     };
   }
 
-  async captureWindow(args) {
+  captureWindow(args) {
+    return this.runOperation((ticket) => this.captureWindowOperation(args, ticket));
+  }
+
+  async captureWindowOperation(args, ticket) {
     const outputPath = args.outputPath ?? await this.createArtifactPath("window.png");
     const capture = await captureWindowPngByTitle(args.titlePart, outputPath, {
       timeoutMs: args.timeoutMs,
     });
+    this.assertOperationTicket(ticket);
     return {
       status: "ok",
       provider: "gateway-managed",
@@ -763,8 +818,13 @@ export class ComputerUseProviderRouter {
     };
   }
 
-  async ocrRegion(args) {
+  ocrRegion(args) {
+    return this.runOperation((ticket) => this.ocrRegionOperation(args, ticket));
+  }
+
+  async ocrRegionOperation(args, ticket) {
     await this.ensureOcr();
+    this.assertOperationTicket(ticket);
     let imagePath = args.imagePath;
     let capture = null;
     if (!imagePath && args.titlePart) {
@@ -786,6 +846,7 @@ export class ComputerUseProviderRouter {
       timeoutMs: args.timeoutMs ?? 15000,
       noCache: args.noCache,
     });
+    this.assertOperationTicket(ticket);
     const observation = normalizeOcrSidecarResponse(response, {
       observationId: `ocr-region-${Date.now()}`,
       window: capture ? { title: capture.title } : undefined,
@@ -802,11 +863,16 @@ export class ComputerUseProviderRouter {
     };
   }
 
-  async observeDiff(args) {
+  observeDiff(args) {
+    return this.runOperation((ticket) => this.observeDiffOperation(args, ticket));
+  }
+
+  async observeDiffOperation(args, ticket) {
     const dirtyRegion = await computeDirtyRegion(args.baselinePath, args.changedPath, {
       threshold: args.threshold,
       padding: args.padding,
     });
+    this.assertOperationTicket(ticket);
     if (!dirtyRegion) {
       return {
         status: "ok",
@@ -841,16 +907,22 @@ export class ComputerUseProviderRouter {
   }
 
   close(args = {}) {
+    if (this.lifecycleState === "closed") return Promise.resolve();
+    if (this.lifecycleState === "open") {
+      this.lifecycleState = "closing";
+      this.lifecycleGeneration += 1;
+    }
     this.invalidateControlGrant(
-      "controller.closed",
-      "The Gateway-managed Computer Use controller request was closed.",
+      "lifecycle.closed",
+      "lifecycle.closed: The computer use provider is closing or closed.",
     );
-    if (this.closeComplete) return Promise.resolve();
     if (this.closePromise) return this.closePromise;
     this.closePromise = (async () => {
       try {
+        await this.waitForAdmittedOperations();
         await this.closeResources(args);
         this.closeComplete = true;
+        this.lifecycleState = "closed";
       } finally {
         this.closePromise = null;
       }
@@ -903,10 +975,18 @@ export class ComputerUseProviderRouter {
         firstError ??= error;
       }
     }
-    if (this.ocrStarted) {
+    if (this.ocrStartPromise) {
+      try {
+        await this.ocrStartPromise;
+      } catch {
+        // Startup failure still leaves the attempted sidecar available for cleanup.
+      }
+    }
+    if (this.ocrStarted || this.ocrStartAttempted) {
       try {
         await this.ocr.close();
         this.ocrStarted = false;
+        this.ocrStartAttempted = false;
       } catch (error) {
         firstError ??= error;
       }
@@ -914,9 +994,23 @@ export class ComputerUseProviderRouter {
     if (firstError) throw firstError;
   }
 
-  async ensureOcr() {
+  ensureOcr() {
+    return this.runOperation((ticket) => this.ensureOcrResources(ticket));
+  }
+
+  async ensureOcrResources(ticket) {
     if (this.ocrStarted) return;
-    await this.ocr.start();
+    if (!this.ocrStartPromise) {
+      this.ocrStartAttempted = true;
+      this.ocrStartPromise = Promise.resolve(this.ocr.start());
+    }
+    const attempt = this.ocrStartPromise;
+    try {
+      await attempt;
+    } finally {
+      if (this.ocrStartPromise === attempt) this.ocrStartPromise = null;
+    }
+    this.assertOperationTicket(ticket);
     this.ocrStarted = true;
   }
 
@@ -1219,6 +1313,64 @@ export class ComputerUseProviderRouter {
     };
   }
 
+  runOperation(operation) {
+    const ticket = this.acquireOperationTicket();
+    if (!ticket) return Promise.reject(lifecycleClosedError());
+    let result;
+    try {
+      result = operation(ticket);
+    } catch (error) {
+      this.finishOperationTicket(ticket);
+      throw error;
+    }
+    return Promise.resolve(result).then(
+      (value) => {
+        this.assertOperationTicket(ticket);
+        return value;
+      },
+      (error) => {
+        if (!this.isOperationTicketCurrent(ticket)) throw lifecycleClosedError();
+        throw error;
+      },
+    ).finally(() => {
+      this.finishOperationTicket(ticket);
+    });
+  }
+
+  acquireOperationTicket() {
+    if (this.lifecycleState !== "open") return null;
+    let settle;
+    const settled = new Promise((resolve) => {
+      settle = resolve;
+    });
+    const ticket = {
+      generation: this.lifecycleGeneration,
+      settled,
+      settle,
+    };
+    this.operationTickets.add(ticket);
+    return ticket;
+  }
+
+  finishOperationTicket(ticket) {
+    if (!this.operationTickets.delete(ticket)) return;
+    ticket.settle();
+  }
+
+  isOperationTicketCurrent(ticket) {
+    return this.lifecycleState === "open"
+      && ticket.generation === this.lifecycleGeneration;
+  }
+
+  assertOperationTicket(ticket) {
+    if (!this.isOperationTicketCurrent(ticket)) throw lifecycleClosedError();
+  }
+
+  async waitForAdmittedOperations() {
+    const admitted = [...this.operationTickets];
+    await Promise.all(admitted.map((ticket) => ticket.settled));
+  }
+
   beginControlGrant() {
     const grant = {
       generation: ++this.controlGeneration,
@@ -1322,6 +1474,14 @@ export class ComputerUseProviderRouter {
       release();
     }
   }
+}
+
+function lifecycleClosedError() {
+  return new ComputerUseMcpError(
+    "lifecycle.closed",
+    "lifecycle.closed: The computer use provider is closing or closed.",
+    { includeUserOverlay: false },
+  );
 }
 
 function deriveDoctorStatus(statuses) {
