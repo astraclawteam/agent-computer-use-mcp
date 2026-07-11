@@ -18,6 +18,13 @@ internal static class Program
     private static int Main()
     {
         var tests = new (string Name, Action Run)[] {
+            ("excludes virtual display adapter families by default", ExcludesVirtualDisplayFamiliesByDefault),
+            ("prefers the foreground physical display", PrefersForegroundPhysicalDisplay),
+            ("falls back to the primary physical display", FallsBackToPrimaryPhysicalDisplay),
+            ("allows a foreground virtual display only with host opt-in", AllowsForegroundVirtualDisplayWithHostOptIn),
+            ("returns no display when only excluded adapters are available", ReturnsNoDisplayWhenOnlyExcludedAdaptersAreAvailable),
+            ("uses the approved visibility envelope", UsesApprovedVisibilityEnvelope),
+            ("renders symmetric luminance on all four edges", RendersSymmetricLuminanceOnAllFourEdges),
             ("renders a closed river through all four corners", RendersClosedRiverThroughAllFourCorners),
             ("rejects non-premultiplied frames before native acquisition", RejectsNonPremultipliedFramesBeforeNativeAcquisition),
             ("handles acquisition failures without real native handles", HandlesAcquisitionFailuresWithoutRealNativeHandles),
@@ -44,6 +51,110 @@ internal static class Program
 
         return failures == 0 ? 0 : 1;
     }
+
+    private static void ExcludesVirtualDisplayFamiliesByDefault()
+    {
+        var physical = Candidate("physical", new Rectangle(0, 0, 1920, 1080));
+        var excluded = new[] {
+            Candidate("virtual", new Rectangle(1920, 0, 1920, 1080), isPrimary: true, isForeground: true, deviceString: "Contoso Virtual Display Adapter"),
+            Candidate("remote", new Rectangle(1920, 0, 1920, 1080), isPrimary: true, isForeground: true, isRemote: true),
+            Candidate("mirroring", new Rectangle(1920, 0, 1920, 1080), isPrimary: true, isForeground: true, isMirroring: true),
+            Candidate("indirect", new Rectangle(1920, 0, 1920, 1080), isPrimary: true, isForeground: true, deviceString: "Indirect Display Adapter"),
+            Candidate("vdd", new Rectangle(1920, 0, 1920, 1080), isPrimary: true, isForeground: true, deviceId: "ROOT\\VDD\\0000"),
+            Candidate("remote-desktop", new Rectangle(1920, 0, 1920, 1080), isPrimary: true, isForeground: true, deviceKey: "Remote Desktop Display Driver"),
+        };
+
+        foreach (var virtualDisplay in excluded)
+        {
+            var selected = OverlayDisplaySelector.Select([virtualDisplay, physical], allowVirtualDisplays: false);
+            Require(selected?.DeviceName == physical.DeviceName, $"{virtualDisplay.DeviceName} must be excluded by default.");
+        }
+    }
+
+    private static void PrefersForegroundPhysicalDisplay()
+    {
+        var primary = Candidate("primary", new Rectangle(0, 0, 1920, 1080), isPrimary: true);
+        var foreground = Candidate("foreground", new Rectangle(1920, 0, 2560, 1440), isForeground: true);
+
+        var selected = OverlayDisplaySelector.Select([primary, foreground], allowVirtualDisplays: false);
+
+        Require(selected?.DeviceName == foreground.DeviceName, "The foreground physical display must win over the primary display.");
+    }
+
+    private static void FallsBackToPrimaryPhysicalDisplay()
+    {
+        var secondary = Candidate("secondary", new Rectangle(1920, 0, 1920, 1080));
+        var primary = Candidate("primary", new Rectangle(0, 0, 1920, 1080), isPrimary: true);
+
+        var selected = OverlayDisplaySelector.Select([secondary, primary], allowVirtualDisplays: false);
+
+        Require(selected?.DeviceName == primary.DeviceName, "The primary physical display must be the fallback.");
+    }
+
+    private static void AllowsForegroundVirtualDisplayWithHostOptIn()
+    {
+        var physical = Candidate("physical", new Rectangle(0, 0, 1920, 1080), isPrimary: true);
+        var virtualForeground = Candidate(
+            "virtual",
+            new Rectangle(1920, 0, 1920, 1080),
+            isForeground: true,
+            deviceString: "Virtual Display Adapter");
+
+        var selected = OverlayDisplaySelector.Select([physical, virtualForeground], allowVirtualDisplays: true);
+
+        Require(selected?.DeviceName == virtualForeground.DeviceName, "Host opt-in must permit the foreground virtual display.");
+    }
+
+    private static void ReturnsNoDisplayWhenOnlyExcludedAdaptersAreAvailable()
+    {
+        var virtualPrimary = Candidate(
+            "virtual",
+            new Rectangle(0, 0, 1920, 1080),
+            isPrimary: true,
+            isForeground: true,
+            deviceString: "Virtual Display Adapter");
+
+        var selected = OverlayDisplaySelector.Select([virtualPrimary], allowVirtualDisplays: false);
+
+        Require(selected is null, "Selection must fail closed when no physical display is available.");
+    }
+
+    private static void UsesApprovedVisibilityEnvelope()
+    {
+        var minimum = OverlayTheme.AtPhase(0);
+        var maximum = OverlayTheme.AtPhase(0.5);
+
+        Require(minimum.BaseThickness == 30, "Minimum base thickness must be 30px.");
+        Require(maximum.BaseThickness == 42, "Maximum base thickness must be 42px.");
+        Require(minimum.FillAlpha == 0.24, "Minimum fill alpha must be 0.24.");
+        Require(maximum.FillAlpha == 0.50, "Maximum fill alpha must be 0.50.");
+    }
+
+    private static void RendersSymmetricLuminanceOnAllFourEdges()
+    {
+        using var frame = OverlayRenderer.Render(new Size(320, 200), 0.25, null);
+        var edgeSamples = new[] {
+            frame.GetPixel(frame.Width / 2, 5),
+            frame.GetPixel(frame.Width - 6, frame.Height / 2),
+            frame.GetPixel(frame.Width / 2, frame.Height - 6),
+            frame.GetPixel(5, frame.Height / 2),
+        };
+
+        Require(edgeSamples.All(color => color.ToArgb() == edgeSamples[0].ToArgb()), "Equivalent points on all four edges must have identical luminance and alpha.");
+    }
+
+    private static OverlayDisplayCandidate Candidate(
+        string deviceName,
+        Rectangle bounds,
+        bool isPrimary = false,
+        bool isForeground = false,
+        bool isActive = true,
+        bool isMirroring = false,
+        bool isRemote = false,
+        string deviceString = "Physical Display Adapter",
+        string deviceId = "PCI\\DISPLAY\\0000",
+        string deviceKey = "Physical Display Driver")
+        => new(bounds, isPrimary, isForeground, isActive, isMirroring, isRemote, deviceName, deviceString, deviceId, deviceKey);
 
     private static void RendersClosedRiverThroughAllFourCorners()
     {

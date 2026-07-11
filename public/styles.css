@@ -8,17 +8,17 @@
   --computer-use-wave-rgb: var(--clay-rgb);
   --computer-use-wave-deep-rgb: var(--clay-deep-rgb);
   --computer-use-wave-soft-rgb: var(--clay-soft-rgb);
-  --computer-use-wave-min-alpha: .14;
-  --computer-use-wave-max-alpha: .32;
-  --computer-use-wave-fill-alpha: .32;
-  --computer-use-wave-mid-alpha: .14;
-  --computer-use-wave-current-primary-alpha: .064;
-  --computer-use-wave-current-secondary-alpha: .0384;
+  --computer-use-wave-min-alpha: .24;
+  --computer-use-wave-max-alpha: .50;
+  --computer-use-wave-fill-alpha: .50;
+  --computer-use-wave-mid-alpha: .24;
+  --computer-use-wave-current-primary-alpha: .10;
+  --computer-use-wave-current-secondary-alpha: .06;
   --panel: #f5f4ec;
   --border: #e6e1d3;
-  --wave-depth-min: 18px;
-  --wave-depth-rest: 27px;
-  --wave-depth-max: 36px;
+  --wave-depth-min: 24px;
+  --wave-depth-rest: 36px;
+  --wave-depth-max: 48px;
 }
 
 * {

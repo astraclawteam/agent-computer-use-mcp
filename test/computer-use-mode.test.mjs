@@ -41,19 +41,22 @@ test("Computer Use frame CSS animates ocean wave edges with reduced-motion fallb
   assert.match(css, /prefers-reduced-motion:\s*reduce[\s\S]*opacity:\s*\.82/);
 });
 
-test("Computer Use closed river follows the native 18-36px breathing envelope", async () => {
+test("Computer Use closed river follows the native 24-48px breathing envelope", async () => {
   const css = await readFile(new URL("../public/styles.css", import.meta.url), "utf8");
   const wave = await readFile(new URL("../public/wave-overlay.mjs", import.meta.url), "utf8");
 
-  assert.match(css, /--wave-depth-min:\s*18px/);
-  assert.match(css, /--wave-depth-max:\s*36px/);
-  assert.match(css, /--wave-depth-rest:\s*27px/);
-  assert.match(css, /--computer-use-wave-min-alpha:\s*\.14/);
-  assert.match(css, /--computer-use-wave-max-alpha:\s*\.32/);
-  assert.deepEqual(WAVE_THICKNESS, { min: 18, rest: 27, max: 36 });
+  assert.match(css, /--wave-depth-min:\s*24px/);
+  assert.match(css, /--wave-depth-max:\s*48px/);
+  assert.match(css, /--wave-depth-rest:\s*36px/);
+  assert.match(css, /--computer-use-wave-min-alpha:\s*\.24/);
+  assert.match(css, /--computer-use-wave-max-alpha:\s*\.50/);
+  assert.deepEqual(WAVE_THICKNESS, { min: 24, rest: 36, max: 48 });
   assert.equal(waveReference.WAVE_BREATH_PERIOD_MS, 3200);
-  assert.deepEqual(waveReference.WAVE_ALPHA, { min: 0.14, max: 0.32 });
+  assert.deepEqual(waveReference.WAVE_ALPHA, { min: 0.24, max: 0.50 });
   assert.match(wave, /Math\.cos\(TAU \* phase\)/);
+  assert.match(wave, /30 \+ \(42 - 30\) \* breathAt\(time\)/);
+  assert.match(wave, /waveAt\(index, time, phase\) \* 6/);
+  assert.doesNotMatch(wave, /createLinearGradient/);
 });
 
 test("Computer Use closed river uses shared brand color tokens", async () => {

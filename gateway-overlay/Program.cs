@@ -107,7 +107,9 @@ internal sealed class OverlayForm : Form
         FormBorderStyle = FormBorderStyle.None;
         ShowInTaskbar = false;
         TopMost = true;
-        Bounds = SystemInformation.VirtualScreen;
+        var allowVirtualDisplays = IsEnabled(Environment.GetEnvironmentVariable("AGENT_COMPUTER_USE_OVERLAY_ALLOW_VIRTUAL_DISPLAYS"))
+            || IsEnabled(Environment.GetEnvironmentVariable("XIAOZHICLAW_CUA_OVERLAY_ALLOW_VIRTUAL_DISPLAYS"));
+        Bounds = OverlayDisplaySelector.SelectDesktopBounds(allowVirtualDisplays);
         StartPosition = FormStartPosition.Manual;
 
         _targetRectFile = Environment.GetEnvironmentVariable("AGENT_COMPUTER_USE_OVERLAY_TARGET_RECT_FILE")
@@ -117,6 +119,9 @@ internal sealed class OverlayForm : Form
         _targetRectTimer = new System.Windows.Forms.Timer { Interval = 120 };
         _targetRectTimer.Tick += (_, _) => SyncTargetRect();
     }
+
+    private static bool IsEnabled(string? value)
+        => value is not null && (value == "1" || value.Equals("true", StringComparison.OrdinalIgnoreCase));
 
     protected override CreateParams CreateParams
     {

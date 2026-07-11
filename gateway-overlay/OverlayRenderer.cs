@@ -20,18 +20,20 @@ internal static class OverlayRenderer
         graphics.PixelOffsetMode = PixelOffsetMode.HighQuality;
         graphics.Clear(Color.Transparent);
 
-        using var river = CreateClosedRiverPath(width, height, phase, state);
-        DrawRiver(graphics, river, new Rectangle(0, 0, width, height), state);
+        var innerBoundary = BuildInnerBoundary(width, height, phase, state);
+        using var river = CreateClosedRiverPath(width, height, innerBoundary);
+        DrawRiver(graphics, river, state);
+        DrawInnerRim(graphics, innerBoundary, state);
         DrawCurrents(graphics, width, height, phase, state);
         DrawTargetFrame(graphics, targetRect, state);
         return bitmap;
     }
 
-    private static GraphicsPath CreateClosedRiverPath(int width, int height, double phase, OverlayFrameState state)
+    private static GraphicsPath CreateClosedRiverPath(int width, int height, PointF[] innerBoundary)
     {
         var path = new GraphicsPath(FillMode.Alternate);
         path.AddRectangle(new Rectangle(0, 0, width, height));
-        path.AddPolygon(BuildInnerBoundary(width, height, phase, state));
+        path.AddPolygon(innerBoundary);
         return path;
     }
 
@@ -40,7 +42,7 @@ internal static class OverlayRenderer
         var points = new List<PointF>();
         var horizontalCount = Math.Max(8, (int)Math.Ceiling((double)width / PointStep));
         var verticalCount = Math.Max(8, (int)Math.Ceiling((double)height / PointStep));
-        var cornerInset = Math.Min(36f, Math.Min(width, height) / 3f);
+        var cornerInset = Math.Min((float)OverlayTheme.MaxWaveThickness, Math.Min(width, height) / 3f);
         var horizontalSpan = Math.Max(0, width - cornerInset * 2);
         var verticalSpan = Math.Max(0, height - cornerInset * 2);
 
@@ -72,30 +74,30 @@ internal static class OverlayRenderer
         var localWave = Math.Sin(index * 0.72 + phase * 2 * Math.PI + offset) * 0.55
             + Math.Sin(index * 1.37 - phase * 2 * Math.PI * 0.61 + offset * 0.7) * 0.32
             + Math.Sin(index * 2.41 + phase * 2 * Math.PI * 0.39 + offset * 1.9) * 0.13;
-        return (float)Math.Clamp(state.BaseThickness + localWave * 5, 18, 36);
+        return (float)Math.Clamp(state.BaseThickness + localWave * 6, 24, 48);
     }
 
-    private static void DrawRiver(Graphics graphics, GraphicsPath river, Rectangle bounds, OverlayFrameState state)
+    private static void DrawRiver(Graphics graphics, GraphicsPath river, OverlayFrameState state)
     {
         using var clay = new SolidBrush(WithAlpha(OverlayTheme.Clay, state.FillAlpha));
-        using var deep = new LinearGradientBrush(
-            bounds,
-            WithAlpha(OverlayTheme.ClayDeep, state.FillAlpha * 0.4),
-            Color.Transparent,
-            35f);
-        using var soft = new LinearGradientBrush(
-            bounds,
-            Color.Transparent,
-            WithAlpha(OverlayTheme.ClaySoft, state.FillAlpha * 0.3),
-            125f);
+        using var deep = new SolidBrush(WithAlpha(OverlayTheme.ClayDeep, state.FillAlpha * 0.16));
+        using var soft = new SolidBrush(WithAlpha(OverlayTheme.ClaySoft, state.FillAlpha * 0.12));
         graphics.FillPath(clay, river);
         graphics.FillPath(deep, river);
         graphics.FillPath(soft, river);
     }
 
+    private static void DrawInnerRim(Graphics graphics, PointF[] innerBoundary, OverlayFrameState state)
+    {
+        using var rim = new Pen(WithAlpha(OverlayTheme.ClayDeep, state.FillAlpha * 0.62), 1.5f) {
+            LineJoin = LineJoin.Round,
+        };
+        graphics.DrawPolygon(rim, innerBoundary);
+    }
+
     private static void DrawCurrents(Graphics graphics, int width, int height, double phase, OverlayFrameState state)
     {
-        var inset = (float)Math.Max(18, state.BaseThickness - 3);
+        var inset = (float)Math.Max(24, state.BaseThickness - 3);
         var alpha = Math.Max(8, (int)Math.Round(255 * state.FillAlpha * 0.2));
         using var highlight = new Pen(Color.FromArgb(alpha, Color.White), 1.2f) { DashPattern = [12, 15, 4, 13] };
         highlight.DashOffset = (float)(-phase * 44);

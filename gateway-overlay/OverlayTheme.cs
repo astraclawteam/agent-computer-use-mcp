@@ -10,8 +10,10 @@ internal static class OverlayTheme
     public static readonly Color ClayDeep = Color.FromArgb(184, 89, 59);
     public static readonly Color ClaySoft = Color.FromArgb(247, 210, 195);
 
-    public const double MinFillAlpha = 0.14;
-    public const double MaxFillAlpha = 0.32;
+    public const double MinWaveThickness = 24;
+    public const double MaxWaveThickness = 48;
+    public const double MinFillAlpha = 0.24;
+    public const double MaxFillAlpha = 0.50;
     public const double BreathPeriodMilliseconds = 3200;
 
     public static double PhaseAtElapsedMilliseconds(double elapsedMilliseconds)
@@ -34,7 +36,7 @@ internal static class OverlayTheme
     {
         var normalized = phase - Math.Floor(phase);
         var breath = 0.5 - 0.5 * Math.Cos(2 * Math.PI * normalized);
-        var baseThickness = 23 + (31 - 23) * breath;
+        var baseThickness = 30 + (42 - 30) * breath;
         var fillAlpha = MinFillAlpha + (MaxFillAlpha - MinFillAlpha) * breath;
         return new OverlayFrameState(breath, baseThickness, fillAlpha);
     }

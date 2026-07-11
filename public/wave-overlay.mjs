@@ -1,13 +1,13 @@
 export const WAVE_THICKNESS = Object.freeze({
-  min: 18,
-  rest: 27,
-  max: 36,
+  min: 24,
+  rest: 36,
+  max: 48,
 });
 
 export const WAVE_BREATH_PERIOD_MS = 3200;
 export const WAVE_ALPHA = Object.freeze({
-  min: 0.14,
-  max: 0.32,
+  min: 0.24,
+  max: 0.50,
 });
 
 const POINT_STEP = 18;
@@ -78,10 +78,10 @@ function waveAt(index, time, phase) {
 }
 
 function thicknessAt(index, time, phase) {
-  const baseThickness = 23 + (31 - 23) * breathAt(time);
+  const baseThickness = 30 + (42 - 30) * breathAt(time);
   return Math.max(
     WAVE_THICKNESS.min,
-    Math.min(WAVE_THICKNESS.max, baseThickness + waveAt(index, time, phase) * 5),
+    Math.min(WAVE_THICKNESS.max, baseThickness + waveAt(index, time, phase) * 6),
   );
 }
 
@@ -189,7 +189,7 @@ export function createWaveOverlay(canvas) {
     ctx.clearRect(0, 0, width, height);
     const breath = breathAt(time);
     const fillAlpha = theme.minAlpha + (theme.maxAlpha - theme.minAlpha) * breath;
-    const baseThickness = 23 + (31 - 23) * breath;
+    const baseThickness = 30 + (42 - 30) * breath;
 
     createWaveBandPath(ctx, width, height, time);
     ctx.fillStyle = `rgb(${theme.rgb} / ${fillAlpha})`;
@@ -199,11 +199,9 @@ export function createWaveOverlay(canvas) {
     createWaveBandPath(ctx, width, height, time);
     ctx.clip("evenodd");
 
-    const sheen = ctx.createLinearGradient(0, 0, width, height);
-    sheen.addColorStop(0, `rgb(${theme.softRgb} / ${fillAlpha * 0.3})`);
-    sheen.addColorStop(0.45, `rgb(${theme.rgb} / ${fillAlpha * 0.4})`);
-    sheen.addColorStop(1, `rgb(${theme.deepRgb} / ${fillAlpha * 0.4})`);
-    ctx.fillStyle = sheen;
+    ctx.fillStyle = `rgb(${theme.deepRgb} / ${fillAlpha * 0.16})`;
+    ctx.fillRect(0, 0, width, height);
+    ctx.fillStyle = `rgb(${theme.softRgb} / ${fillAlpha * 0.12})`;
     ctx.fillRect(0, 0, width, height);
 
     drawCurrent(ctx, width, height, time, Math.max(WAVE_THICKNESS.min, baseThickness - 3), fillAlpha * 0.2, 0);
