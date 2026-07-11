@@ -48,6 +48,8 @@
     "test": "node --test",
     "prepublishOnly": "node scripts/block-source-publish.mjs",
     "release:npm:build": "node scripts/build-protected-npm-package.mjs",
+    "release:npm:build:core": "node scripts/build-protected-npm-package.mjs",
+    "release:npm:build:win32-x64": "node scripts/build-windows-platform-package.mjs",
     "release:npm:smoke": "node scripts/protected-npm-smoke.mjs",
     "release:npm:pack": "node scripts/pack-protected-npm-package.mjs",
     "mcp": "node src/computer-use-mcp-server.mjs",
