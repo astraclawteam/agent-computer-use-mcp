@@ -11,9 +11,9 @@
 ## Global Constraints
 
 - Windows x64 is the only release target enabled in this phase.
-- Visible wave thickness is always between 18 and 36 logical pixels.
+- Visible wave thickness is always between 24 and 48 logical pixels.
 - The breathing period is exactly 3.2 seconds.
-- Fill alpha is always between 0.14 and 0.32.
+- Fill alpha is always between 0.24 and 0.50.
 - Family colors are clay `#D97757`, clay deep `#B8593B`, and clay soft `#F7D2C3`.
 - White is allowed only as a low-alpha current highlight, never as a dominant gradient endpoint.
 - Overlay pixels remain excluded from agent observation independently of visual alpha.
@@ -291,11 +291,11 @@ git commit -m "fix: enforce terminal computer use lifecycle"
 
 **Interfaces:**
 - Consumes: approved native constants and family tokens.
-- Produces: reference demo constants `{ min: 18, rest: 27, max: 36 }`, 3.2s cycle, and 0.14-0.32 alpha envelope.
+- Produces: reference demo constants `{ min: 24, rest: 36, max: 48 }`, 3.2s cycle, and 0.24-0.50 alpha envelope.
 
 - [ ] **Step 1: Update the browser contract test first**
 
-Change expected thickness values to 18/27/36 and require the 3.2s breathing period and approved alpha endpoints.
+Change expected thickness values to 24/36/48 and require the 3.2s breathing period and approved alpha endpoints.
 
 - [ ] **Step 2: Run and verify RED**
 
@@ -327,6 +327,26 @@ dotnet run --project gateway-overlay/GatewayComputerUseOverlay.csproj -- --snaps
 git add public/wave-overlay.mjs public/styles.css test/computer-use-mode.test.mjs
 git commit -m "feat: align overlay reference with breathing theme"
 ```
+
+- [ ] **Step 7: Add physical-display selection RED tests**
+
+Use synthetic adapter descriptors to require virtual, remote, mirroring,
+indirect, VDD, and remote-desktop displays to be excluded by default. Require
+foreground physical display preference, primary physical fallback, and an
+explicit host opt-in for virtual displays.
+
+- [ ] **Step 8: Implement physical-display selection**
+
+Add a pure selection policy plus a Win32 `EnumDisplayDevices` adapter probe.
+Set the overlay form bounds to the selected display rather than the combined
+virtual desktop. Do not add `System.Management` or another runtime dependency.
+
+- [ ] **Step 9: Make four-edge luminance symmetric**
+
+Replace directional full-canvas river gradients with uniform family-color
+layers and draw a translucent clay-deep inner rim. Keep white only as a
+low-alpha current highlight. Update the native theme to 24-48px and
+0.24-0.50, then regenerate and inspect min/mid/max snapshots.
 
 ### Task 6: Verify Desktop Runtime And Rebuild Release Evidence
 
@@ -368,7 +388,7 @@ Start a Gateway-managed control lease, verify overlay and branded cursor become 
 
 - [ ] **Step 5: Inspect the three PNGs and show the real animation**
 
-Use the local image viewer for min/mid/max snapshots, then launch the native overlay so the user can confirm the actual 18-36px, 3.2s, 0.14-0.32 breathing effect.
+Use the local image viewer for min/mid/max snapshots, then launch the native overlay so the user can confirm the actual 24-48px, 3.2s, 0.24-0.50 breathing effect.
 
 - [ ] **Step 6: Review diff and commit any verification-only fixes through RED/GREEN**
 

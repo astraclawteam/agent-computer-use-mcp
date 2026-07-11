@@ -24,10 +24,10 @@ driver-process state and can remain rendered after the MCP server exits.
 2. Keep `WS_EX_TRANSPARENT`, `WS_EX_TOOLWINDOW`, `WS_EX_NOACTIVATE`, topmost
    placement, virtual-screen coverage, and target-window no-activate behavior.
 3. Render one closed river path. Four independent edge bands are forbidden.
-4. Visible thickness stays within 18-36 logical pixels.
+4. Visible thickness stays within 24-48 logical pixels.
 5. One breathing cycle is 3.2 seconds. A smooth cosine envelope modulates both
    the mean thickness and opacity; local wave harmonics remain secondary.
-6. Fill opacity breathes between 0.14 and 0.32. This affects only the user's
+6. Fill opacity breathes between 0.24 and 0.50. This affects only the user's
    view; observation exclusion remains mandatory and must not depend on alpha.
 7. The family palette is fixed to the existing shared tokens:
    - clay: `#D97757`
@@ -67,6 +67,13 @@ driver-process state and can remain rendered after the MCP server exits.
     `start()` waits for an in-progress close and then rejects because the
     client is terminally closed; it never reports success for a removed
     transport.
+22. The user overlay selects the physical display containing the foreground
+    user window and falls back to the primary physical display. Active display
+    adapters identified as virtual, remote, mirroring, indirect, VDD, or
+    remote-desktop devices are excluded unless the host explicitly opts in.
+23. River fill luminance is symmetric on all four edges. Full-canvas linear
+    gradients that make one edge materially weaker are forbidden. A thin,
+    translucent clay-deep inner rim supplies contrast on light backgrounds.
 
 ## Rendering Model
 
@@ -74,9 +81,9 @@ For normalized breath phase `p`:
 
 ```text
 breath(p) = 0.5 - 0.5 * cos(2 * PI * p)
-baseThickness = lerp(23, 31, breath)
-thickness = clamp(baseThickness + localWave * 5, 18, 36)
-fillAlpha = lerp(0.14, 0.32, breath)
+baseThickness = lerp(30, 42, breath)
+thickness = clamp(baseThickness + localWave * 6, 24, 48)
+fillAlpha = lerp(0.24, 0.50, breath)
 ```
 
 `localWave` is the existing bounded three-frequency harmonic in `[-1, 1]`.
@@ -96,7 +103,7 @@ The overlay remains user-only:
 - traces and artifacts reject overlay payloads;
 - alpha is a visual affordance, not an observation safety mechanism.
 
-The enlarged 18-36px band therefore does not reduce agent recognition quality.
+The enlarged 24-48px band therefore does not reduce agent recognition quality.
 
 ## Cursor Lifecycle
 
@@ -151,7 +158,9 @@ new work remains forbidden. Concurrent close calls share the same attempt.
 
 ## Verification
 
-- Unit tests freeze 18-36px, 3.2s, 0.14-0.32, and the three family colors.
+- Unit tests freeze 24-48px, 3.2s, 0.24-0.50, and the three family colors.
+- Display-selection tests exclude synthetic and real virtual-display adapters
+  by default and retain a host opt-in for intentional virtual-display use.
 - Cursor tests require disable-before-end ordering, idempotent close, cleanup
   after a failed style call, and continued cleanup after a disable failure.
 - Router tests verify cancel, revoke, lease timeout, disconnect, and close stop
