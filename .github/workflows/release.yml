@@ -10,7 +10,7 @@ permissions:
 
 jobs:
   validate:
-    runs-on: ubuntu-latest
+    runs-on: windows-2025
     outputs:
       version: ${{ steps.release.outputs.version }}
       generated_at: ${{ steps.release.outputs.generated_at }}
