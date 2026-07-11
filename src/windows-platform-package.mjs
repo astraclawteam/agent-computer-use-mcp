@@ -4,6 +4,7 @@ import { dirname, join, resolve } from "node:path";
 
 import { createPlatformPackageJson, WINDOWS_X64_TARGET } from "./platform-package-contract.mjs";
 import { createPlatformInventory, verifyPlatformInventory } from "./platform-payload-inventory.mjs";
+import { assertBrowserKernelBoundaryInRoots } from "./browser-kernel-boundary.mjs";
 
 const REQUIRED_COMPONENTS = Object.freeze([
   "cua-driver/",
@@ -31,6 +32,7 @@ export async function buildWindowsPlatformPackage(options = {}) {
       "utf8",
     );
     await writeJson(join(stageRoot, "SBOM.cdx.json"), createPlatformSbom({ version, sourceCommit }));
+    await assertBrowserKernelBoundaryInRoots({ roots: ["gateway-overlay", stageRoot] });
 
     const inventory = await createPlatformInventory(stageRoot, {
       version,
@@ -136,8 +138,32 @@ function assertRequiredComponents(files) {
 }
 
 function assertAllowedEntries(files) {
-  const forbidden = files.find(({ path }) => FORBIDDEN_ENTRY.test(path));
+  const forbidden = files.find(({ path }) => FORBIDDEN_ENTRY.test(path) || !isAllowedPlatformPath(path));
   if (forbidden) throw platformError("platform.entry_forbidden", forbidden.path);
+}
+
+function isAllowedPlatformPath(path) {
+  if (["package.json", "THIRD_PARTY_LICENSES.txt", "SBOM.cdx.json"].includes(path)) return true;
+  const name = path.split("/").at(-1);
+  if (path.startsWith("cua-driver/")) {
+    return ["cua-driver.exe", "cua-driver-uia.exe"].includes(name);
+  }
+  if (path.startsWith("overlay/")) {
+    return /^GatewayComputerUseOverlay\.(?:exe|dll|pdb|deps\.json|runtimeconfig\.json)$/u.test(name);
+  }
+  if (path.startsWith("ocr-runtime/")) {
+    return ["DirectML.dll", "dxcompiler.dll", "dxil.dll", "onnxruntime.dll", "onnxruntime_binding.node"].includes(name);
+  }
+  if (path.startsWith("models/pp-ocr-v6/")) {
+    return [
+      "PP-OCRv6_det_small.onnx",
+      "PP-OCRv6_rec_small.onnx",
+      "ppocrv6_dict.txt",
+      "det.onnx",
+      "rec.onnx",
+    ].includes(name);
+  }
+  return false;
 }
 
 function componentRoots() {
@@ -198,3 +224,4 @@ function platformError(code, detail) {
   error.code = code;
   return error;
 }
+

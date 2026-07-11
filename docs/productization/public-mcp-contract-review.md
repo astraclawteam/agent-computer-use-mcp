@@ -27,7 +27,10 @@ This review records the public `computer.*` MCP contract that requires human PR 
 | computer.observe_diff | reviewed | compatible | overlay-free | reviewed | Dirty-region OCR diff path must exclude user overlay. |
 ## Browser Kernel Boundary
 
-`agent-computer-use-mcp` is an OS Computer Use MCP package. It does not own or embed XiaozhiClaw's built-in Preview Browser, Electron `WebContentsView`, CDP proxy, Playwright transport, or raw browser endpoint. Built-in preview automation remains an Electron-owned semantic provider reached through the host's high-level Preview contract.
+`agent-computer-use-mcp` is an OS Computer Use MCP package. `PreviewBrowserService` is the sole owner of the built-in Preview Browser and its CDP attachment. Gateway-managed components MUST NOT start or attach a fallback CDP, Playwright, or `WebContentsView` kernel. Built-in preview automation reaches that owner only through the host's high-level Preview semantic contract and never receives a raw CDP endpoint.
 
-Third-party agent-native Computer Use remains agent-owned and is not wrapped by this package's Gateway lease or approval policy.
+Third-party agent-native Computer Use remains agent-owned: agent-native operations MUST NOT be routed through Gateway approval, target leases, or policy enforcement. This package exposes only the OS-oriented `computer.*` contract and does not wrap, intercept, or replace third-party agent-native capabilities.
+
+End-to-end agent-native routing is a host-owned invariant and is not implemented by this MCP package. The XiaozhiClaw host runtime owns the executable routing test that proves agent-native calls bypass Gateway approval, target leases, policy enforcement, and Gateway-managed overlays.
+
 

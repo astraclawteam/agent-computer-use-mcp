@@ -58,8 +58,17 @@ test("builder fails closed before promotion when a required component is absent"
   assert.equal(await readFile(join(outputRoot, "sentinel.txt"), "utf8"), "previous");
 });
 
-test("builder rejects installer cache source map and linked entries", async () => {
-  for (const forbiddenPath of ["installer/setup.exe", "cache/blob", "overlay/debug.map", "src/runtime.mjs"]) {
+test("builder rejects installer cache source map browser payload and unknown binary entries", async () => {
+  for (const forbiddenPath of [
+    "installer/setup.exe",
+    "cache/blob",
+    "overlay/debug.map",
+    "src/runtime.mjs",
+    "overlay/app.asar",
+    "overlay/chrome.dll",
+    "ocr-runtime/unknown.dll",
+    "cua-driver/browser.exe",
+  ]) {
     const root = await fixtureRoot();
     await assert.rejects(
       buildWindowsPlatformPackage({
@@ -95,3 +104,4 @@ async function writeFixture(root, path, contents) {
   await mkdir(join(fullPath, ".."), { recursive: true });
   await writeFile(fullPath, contents);
 }
+

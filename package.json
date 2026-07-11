@@ -43,7 +43,7 @@
     "node": ">=20"
   },
   "scripts": {
-    "test": "node --test",
+    "test": "node --test --test-concurrency=1",
     "prepublishOnly": "node scripts/block-source-publish.mjs",
     "release:npm:build": "node scripts/build-protected-npm-package.mjs",
     "release:npm:build:core": "node scripts/build-protected-npm-package.mjs",
@@ -144,3 +144,4 @@
     "yaml": "2.9.0"
   }
 }
+

@@ -20,6 +20,7 @@ import {
   validateProtectedNpmEntries,
   validateProtectedRuntime,
 } from "../src/npm-release-policy.mjs";
+import { assertBrowserKernelBoundaryInRoots } from "../src/browser-kernel-boundary.mjs";
 import { createCoreOptionalDependencies } from "../src/platform-package-contract.mjs";
 
 export const DEFAULT_PROTECTED_NPM_ROOT = resolve("artifacts/npm-release/package");
@@ -79,6 +80,15 @@ export async function buildProtectedNpmPackage(options = {}) {
     const launcher = await buildProtectedRuntime("scripts/npm-release-launcher-template.mjs");
     await writeFile(join(stageRoot, "dist/launcher.mjs"), launcher, "utf8");
     await chmod(join(stageRoot, "dist/launcher.mjs"), 0o755);
+
+    await assertBrowserKernelBoundaryInRoots({
+      roots: [
+        ...RUNTIME_ENTRIES.map((entry) => entry.source),
+        "scripts/npm-release-launcher-template.mjs",
+        stageRoot,
+      ],
+      lockPath: "package-lock.json",
+    });
 
     const runtime = validateProtectedRuntime({
       files: await Promise.all([
@@ -239,3 +249,4 @@ if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1]
   const report = await buildProtectedNpmPackage();
   process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
 }
+

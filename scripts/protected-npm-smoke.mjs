@@ -12,6 +12,8 @@ import {
 } from "./build-protected-npm-package.mjs";
 import { buildWindowsPlatformPackage } from "../src/windows-platform-package.mjs";
 
+export const PROTECTED_LAUNCHER_TIMEOUT_MS = 30_000;
+
 export async function runProtectedNpmSmoke(options = {}) {
   const outputRoot = resolve(options.outputRoot ?? DEFAULT_PROTECTED_NPM_ROOT);
   const build = await buildProtectedNpmPackage({ outputRoot });
@@ -90,7 +92,7 @@ async function writeFixture(root, path, contents) {
 
 export function runProtectedLauncher(options = {}) {
   const outputRoot = resolve(options.outputRoot ?? DEFAULT_PROTECTED_NPM_ROOT);
-  const timeoutMs = options.timeoutMs ?? 5000;
+  const timeoutMs = options.timeoutMs ?? PROTECTED_LAUNCHER_TIMEOUT_MS;
   return new Promise((resolvePromise, reject) => {
     const child = spawn(
       process.execPath,
@@ -134,3 +136,4 @@ if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1]
   const report = await runProtectedNpmSmoke();
   process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
 }
+
