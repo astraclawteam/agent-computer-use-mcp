@@ -18,6 +18,7 @@ internal static class Program
     private static int Main()
     {
         var tests = new (string Name, Action Run)[] {
+            ("renders a closed river through all four corners", RendersClosedRiverThroughAllFourCorners),
             ("rejects non-premultiplied frames before native acquisition", RejectsNonPremultipliedFramesBeforeNativeAcquisition),
             ("handles acquisition failures without real native handles", HandlesAcquisitionFailuresWithoutRealNativeHandles),
             ("reports a false presentation operation after ordered cleanup", ReportsFalsePresentationAfterOrderedCleanup),
@@ -42,6 +43,30 @@ internal static class Program
         }
 
         return failures == 0 ? 0 : 1;
+    }
+
+    private static void RendersClosedRiverThroughAllFourCorners()
+    {
+        using var frame = OverlayRenderer.Render(new Size(320, 200), 0.25, null);
+        var cornerSamples = new[] {
+            frame.GetPixel(5, 5),
+            frame.GetPixel(frame.Width - 6, 5),
+            frame.GetPixel(5, frame.Height - 6),
+            frame.GetPixel(frame.Width - 6, frame.Height - 6),
+        };
+
+        Require(cornerSamples.All(color => color.A > 0), "The closed river must not leave transparent corner wedges.");
+        for (var x = 0; x < frame.Width; x++)
+        {
+            Require(frame.GetPixel(x, 2).A > 0, $"The top river boundary is open at x={x}.");
+            Require(frame.GetPixel(x, frame.Height - 3).A > 0, $"The bottom river boundary is open at x={x}.");
+        }
+        for (var y = 0; y < frame.Height; y++)
+        {
+            Require(frame.GetPixel(2, y).A > 0, $"The left river boundary is open at y={y}.");
+            Require(frame.GetPixel(frame.Width - 3, y).A > 0, $"The right river boundary is open at y={y}.");
+        }
+        Require(frame.GetPixel(frame.Width / 2, frame.Height / 2).A == 0, "The overlay center must remain transparent.");
     }
 
     private static void RejectsNonPremultipliedFramesBeforeNativeAcquisition()

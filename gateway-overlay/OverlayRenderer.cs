@@ -40,25 +40,28 @@ internal static class OverlayRenderer
         var points = new List<PointF>();
         var horizontalCount = Math.Max(8, (int)Math.Ceiling((double)width / PointStep));
         var verticalCount = Math.Max(8, (int)Math.Ceiling((double)height / PointStep));
+        var cornerInset = Math.Min(36f, Math.Min(width, height) / 3f);
+        var horizontalSpan = Math.Max(0, width - cornerInset * 2);
+        var verticalSpan = Math.Max(0, height - cornerInset * 2);
 
         for (var index = 0; index <= horizontalCount; index++)
         {
-            var x = width * index / (float)horizontalCount;
+            var x = cornerInset + horizontalSpan * index / horizontalCount;
             points.Add(new PointF(x, Thickness(index, phase, 0.1, state)));
         }
         for (var index = 0; index <= verticalCount; index++)
         {
-            var y = height * index / (float)verticalCount;
+            var y = cornerInset + verticalSpan * index / verticalCount;
             points.Add(new PointF(width - Thickness(index, phase, 1.4, state), y));
         }
         for (var index = horizontalCount; index >= 0; index--)
         {
-            var x = width * index / (float)horizontalCount;
+            var x = cornerInset + horizontalSpan * index / horizontalCount;
             points.Add(new PointF(x, height - Thickness(index, phase, 2.7, state)));
         }
         for (var index = verticalCount; index >= 0; index--)
         {
-            var y = height * index / (float)verticalCount;
+            var y = cornerInset + verticalSpan * index / verticalCount;
             points.Add(new PointF(Thickness(index, phase, 4.1, state), y));
         }
         return points.ToArray();
