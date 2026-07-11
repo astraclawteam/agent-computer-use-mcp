@@ -7,6 +7,7 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 
 import { expandVerifiedZip } from "../src/verified-zip.mjs";
+import { runOfflinePerceptionProbe } from "../src/offline-perception-probe.mjs";
 import { runProtectedLauncher } from "./protected-npm-smoke.mjs";
 
 export async function smokeOfflineBundle(options = {}) {
@@ -41,6 +42,7 @@ export async function smokeOfflineBundle(options = {}) {
       await client.connect(transport, requestOptions());
       const tools = await client.listTools(undefined, requestOptions());
       const health = await client.callTool({ name: "computer.health", arguments: { fast: true } }, undefined, requestOptions());
+      const perception = await (options.perceptionProbe ?? runOfflinePerceptionProbe)(client, requestOptions());
       const doctor = await client.callTool({
         name: "computer.doctor",
         arguments: { fast: true, includeInstallCache: false },
@@ -51,7 +53,9 @@ export async function smokeOfflineBundle(options = {}) {
         healthPassed: !health.isError,
         doctorPassed: !doctor.isError,
         platformVerified: verified.platformVerified === true,
-        networkDisabled: true,
+        networkDisabled: perception.networkDisabled === true,
+        ocrInitialized: perception.ocrInitialized === true,
+        ocrPrewarmCompleted: perception.prewarmCompleted === true,
         desktopControlStarted: false,
       };
     } finally {

@@ -5,6 +5,7 @@ import { join } from "node:path";
 
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
+import { runOfflinePerceptionProbe } from "../src/offline-perception-probe.mjs";
 
 const packageJson = JSON.parse(await readFile("package.json", "utf8"));
 const version = packageJson.version;
@@ -28,11 +29,13 @@ try {
     await client.connect(transport, timeout);
     const tools = await client.listTools(undefined, timeout);
     const health = await client.callTool({ name: "computer.health", arguments: { fast: true } }, undefined, timeout);
+    const perception = await runOfflinePerceptionProbe(client, timeout);
     const doctor = await client.callTool({
       name: "computer.doctor",
       arguments: { fast: true, includeInstallCache: false },
     }, undefined, timeout);
-    if (health.isError || doctor.isError || !tools.tools.some(({ name }) => name === "computer.health")) {
+    if (health.isError || doctor.isError || !perception.ocrInitialized
+      || !tools.tools.some(({ name }) => name === "computer.health")) {
       throw new Error("release.public_npm_mcp_smoke_failed");
     }
   } finally {
@@ -46,6 +49,8 @@ try {
     exactPlatformDependencyVerified: true,
     standardMcpSmokePassed: true,
     runtimeNetworkAllowed: false,
+    ocrInitialized: true,
+    ocrPrewarmCompleted: true,
     startsDesktopControl: false,
     includeUserOverlay: false,
   }, null, 2)}\n`);

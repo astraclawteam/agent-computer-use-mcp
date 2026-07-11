@@ -155,12 +155,18 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: gh release download "${GITHUB_REF_NAME}" --dir mirror-assets
+      - name: Download authoritative GitHub release notes
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release view "${GITHUB_REF_NAME}" --json body --jq .body > "${RUNNER_TEMP}/github-release-notes.md"
       - name: Mirror exact assets to Gitee
         env:
           GITEE_OWNER: ${{ vars.GITEE_OWNER }}
           GITEE_REPO: ${{ vars.GITEE_REPO }}
           GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}
           RELEASE_TAG: ${{ github.ref_name }}
+          RELEASE_SOURCE_COMMIT: ${{ github.sha }}
+          RELEASE_NOTES_PATH: ${{ runner.temp }}/github-release-notes.md
           RELEASE_ASSET_ROOT: mirror-assets
         run: node scripts/mirror-gitee-release.mjs
 
@@ -181,11 +187,17 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: gh release download "${GITHUB_REF_NAME}" --dir mirror-assets
+      - name: Download authoritative GitHub release notes
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release view "${GITHUB_REF_NAME}" --json body --jq .body > "${RUNNER_TEMP}/github-release-notes.md"
       - name: Verify Gitee attachment hashes
         env:
           GITEE_OWNER: ${{ vars.GITEE_OWNER }}
           GITEE_REPO: ${{ vars.GITEE_REPO }}
           GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}
           RELEASE_TAG: ${{ github.ref_name }}
+          RELEASE_SOURCE_COMMIT: ${{ github.sha }}
+          RELEASE_NOTES_PATH: ${{ runner.temp }}/github-release-notes.md
           RELEASE_ASSET_ROOT: mirror-assets
         run: node scripts/verify-gitee-release.mjs

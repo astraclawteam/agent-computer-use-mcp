@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
-import { dirname, resolve } from "node:path";
+import { delimiter, dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -50,6 +50,23 @@ export function resolveOcrSidecarPath(options = {}) {
   const protectedPath = resolve(moduleDirectory, "ocr-sidecar.mjs");
   if (pathExists(protectedPath)) return protectedPath;
   return resolve(moduleDirectory, "../ocr-sidecar/xiaozhiclaw_ocr_sidecar_native.mjs");
+}
+
+export function createPlatformOcrEnvironment(options = {}) {
+  const modelRoot = requiredPath(options.modelRoot, "ocr.model_root_missing");
+  const runtimeRoot = requiredPath(options.runtimeRoot, "ocr.runtime_root_missing");
+  const environment = { ...(options.baseEnvironment ?? process.env) };
+  const pathValue = Object.entries(environment)
+    .find(([name]) => name.toLowerCase() === "path")?.[1] ?? "";
+  for (const name of Object.keys(environment)) {
+    if (name.toLowerCase() === "path") delete environment[name];
+  }
+  const separator = options.platform === "win32" ? ";" : delimiter;
+  environment.PATH = pathValue ? `${runtimeRoot}${separator}${pathValue}` : runtimeRoot;
+  environment.AGENT_COMPUTER_USE_OCR_MODEL_DIR = modelRoot;
+  environment.AGENT_COMPUTER_USE_OCR_RUNTIME_DIR = runtimeRoot;
+  environment.AGENT_COMPUTER_USE_NETWORK_DISABLED = options.networkDisabled === false ? "0" : "1";
+  return environment;
 }
 
 export function selectOcrRuntime(availableProviders = []) {
@@ -143,6 +160,7 @@ export class OcrSidecarSession {
     this.node = options.node ?? { command: process.execPath, args: [], label: "node" };
     this.sidecarPath = options.sidecarPath ?? DEFAULT_SIDECAR_PATH;
     this.timeoutMs = options.timeoutMs ?? 30000;
+    this.environment = options.environment ?? process.env;
     this.child = null;
     this.nextId = 1;
     this.pending = new Map();
@@ -156,6 +174,7 @@ export class OcrSidecarSession {
       stdio: ["pipe", "pipe", "pipe"],
       shell: false,
       windowsHide: true,
+      env: this.environment,
     });
     this.child.stdout.setEncoding("utf8");
     this.child.stderr.setEncoding("utf8");
@@ -250,6 +269,11 @@ export class OcrSidecarSession {
     }
     this.pending.clear();
   }
+}
+
+function requiredPath(value, code) {
+  if (typeof value !== "string" || value.trim() === "") throw new Error(code);
+  return resolve(value);
 }
 
 function normalizeBounds(bounds) {

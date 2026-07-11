@@ -4,6 +4,45 @@ import { test } from "node:test";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { COMPUTER_USE_MCP_TOOLS } from "../src/computer-use-mcp-tools.mjs";
+import {
+  createPlatformOcrSession,
+  shouldAutoStartComputerUseMcpServer,
+} from "../src/computer-use-mcp-server.mjs";
+
+test("protected imports never auto-start a second stdio server", () => {
+  assert.equal(shouldAutoStartComputerUseMcpServer({
+    argv: [process.execPath, "D:\\package\\dist\\launcher.mjs"],
+    moduleUrl: "file:///D:/package/dist/computer-use-mcp-server.mjs",
+    environment: { AGENT_COMPUTER_USE_RELEASE_INTEGRITY_VERIFIED: "1" },
+  }), false);
+  assert.equal(shouldAutoStartComputerUseMcpServer({
+    argv: [process.execPath, "D:\\package\\dist\\computer-use-mcp-server.mjs"],
+    moduleUrl: "file:///D:/package/dist/computer-use-mcp-server.mjs",
+    environment: {},
+  }), true);
+});
+
+test("verified platform OCR paths are wired into the sidecar session", () => {
+  class FakeSession {
+    constructor(options) {
+      this.options = options;
+    }
+  }
+  const session = createPlatformOcrSession({
+    paths: {
+      ocrModelRoot: "D:\\platform\\models\\pp-ocr-v6",
+      ocrRuntimeRoot: "D:\\platform\\ocr-runtime",
+    },
+  }, {
+    Session: FakeSession,
+    baseEnvironment: { PATH: "C:\\Windows\\System32" },
+    platform: "win32",
+  });
+
+  assert.equal(session.options.environment.AGENT_COMPUTER_USE_OCR_MODEL_DIR, "D:\\platform\\models\\pp-ocr-v6");
+  assert.equal(session.options.environment.AGENT_COMPUTER_USE_OCR_RUNTIME_DIR, "D:\\platform\\ocr-runtime");
+  assert.equal(session.options.environment.AGENT_COMPUTER_USE_NETWORK_DISABLED, "1");
+});
 
 test("agent-computer-use-mcp freezes the local MCP tool contract", () => {
   const packageJson = JSON.parse(readFileSync("package.json", "utf8"));

@@ -4,7 +4,6 @@ import { readFile } from "node:fs/promises";
 const API_ROOT = "https://gitee.com/api/v5";
 
 export function planGiteeMirror({ githubAssets = [], giteeAssets = [] } = {}) {
-  const expected = new Map(githubAssets.map((asset) => [asset.name, asset]));
   const actual = new Map(giteeAssets.map((asset) => [asset.name, asset]));
   const plan = { keep: [], replace: [], upload: [], remove: [] };
   for (const asset of githubAssets) {
@@ -13,20 +12,18 @@ export function planGiteeMirror({ githubAssets = [], giteeAssets = [] } = {}) {
     else if (remote.sizeBytes === asset.sizeBytes && remote.sha256 === asset.sha256) plan.keep.push(asset.name);
     else plan.replace.push(asset.name);
   }
-  for (const asset of giteeAssets) {
-    if (!expected.has(asset.name)) plan.remove.push(asset.name);
-  }
   return plan;
 }
 
 export async function mirrorGiteeRelease(options = {}) {
   const context = releaseContext(options);
+  await assertTagIdentity(context);
   const release = await getOrCreateRelease(context);
   const listed = await listReleaseAssets(context, release.id);
-  const remoteAssets = await hydrateRemoteHashes(context, listed);
+  const remoteAssets = await hydrateRemoteHashes(context, managedAssets(context, listed));
   const plan = planGiteeMirror({ githubAssets: context.assets, giteeAssets: remoteAssets });
   const byName = new Map(listed.map((asset) => [asset.name, asset]));
-  for (const name of [...plan.replace, ...plan.remove]) {
+  for (const name of plan.replace) {
     await apiRequest(context, `/repos/${segment(context.owner)}/${segment(context.repo)}/releases/${release.id}/attach_files/${byName.get(name).id}`, {
       method: "DELETE",
     });
@@ -46,10 +43,12 @@ export async function mirrorGiteeRelease(options = {}) {
 
 export async function verifyGiteeRelease(options = {}) {
   const context = releaseContext({ ...options, assets: options.expectedAssets });
+  await assertTagIdentity(context);
   const release = await getReleaseByTag(context);
   if (!release) throw mirrorError("gitee.release_missing", context.tag);
+  assertReleaseMetadata(context, release);
   const listed = await listReleaseAssets(context, release.id);
-  const remote = await hydrateRemoteHashes(context, listed);
+  const remote = await hydrateRemoteHashes(context, managedAssets(context, listed));
   const plan = planGiteeMirror({ githubAssets: context.assets, giteeAssets: remote });
   if (plan.replace.length > 0 || plan.upload.length > 0 || plan.remove.length > 0) {
     throw mirrorError("gitee.asset_identity_mismatch", JSON.stringify(plan));
@@ -64,16 +63,58 @@ export async function verifyGiteeRelease(options = {}) {
 
 async function getOrCreateRelease(context) {
   const existing = await getReleaseByTag(context);
-  if (existing) return existing;
+  if (existing) {
+    if (releaseMetadataMatches(context, existing)) return existing;
+    return apiRequest(context, `/repos/${segment(context.owner)}/${segment(context.repo)}/releases/${existing.id}`, {
+      method: "PATCH",
+      json: releaseMetadata(context),
+    });
+  }
   return apiRequest(context, `/repos/${segment(context.owner)}/${segment(context.repo)}/releases`, {
     method: "POST",
-    json: {
-      tag_name: context.tag,
-      name: context.tag,
-      body: `Byte-identical mirror of GitHub Release ${context.tag}.`,
-      prerelease: false,
-    },
+    json: releaseMetadata(context),
   });
+}
+
+async function assertTagIdentity(context) {
+  const commit = await apiRequest(
+    context,
+    `/repos/${segment(context.owner)}/${segment(context.repo)}/commits/${segment(context.tag)}`,
+  );
+  if (commit?.sha !== context.sourceCommit) {
+    throw mirrorError("gitee.tag_commit_mismatch", `${commit?.sha ?? "missing"} != ${context.sourceCommit}`);
+  }
+}
+
+function releaseMetadata(context) {
+  return {
+    tag_name: context.tag,
+    target_commitish: context.sourceCommit,
+    name: context.tag,
+    body: context.releaseNotes,
+    prerelease: false,
+  };
+}
+
+function releaseMetadataMatches(context, release) {
+  return release?.tag_name === context.tag
+    && release?.name === context.tag
+    && normalizeNotes(release?.body) === normalizeNotes(context.releaseNotes);
+}
+
+function assertReleaseMetadata(context, release) {
+  if (!releaseMetadataMatches(context, release)) {
+    throw mirrorError("gitee.release_metadata_mismatch", context.tag);
+  }
+}
+
+function normalizeNotes(value) {
+  return typeof value === "string" ? value.replace(/\r\n/g, "\n").trimEnd() : null;
+}
+
+function managedAssets(context, assets) {
+  const names = new Set(context.assets.map(({ name }) => name));
+  return assets.filter(({ name }) => names.has(name));
 }
 
 async function getReleaseByTag(context) {
@@ -165,15 +206,21 @@ async function retryFetch(context, url, options, apiRequest) {
 }
 
 function releaseContext(options) {
-  for (const name of ["owner", "repo", "tag", "token"]) {
+  for (const name of ["owner", "repo", "tag", "token", "sourceCommit"]) {
     if (typeof options[name] !== "string" || options[name].trim() === "") throw mirrorError("gitee.config_missing", name);
   }
+  if (!/^[a-f0-9]{40}$/u.test(options.sourceCommit)) {
+    throw mirrorError("gitee.config_invalid", "sourceCommit");
+  }
+  if (typeof options.releaseNotes !== "string") throw mirrorError("gitee.config_missing", "releaseNotes");
   if (!Array.isArray(options.assets)) throw mirrorError("gitee.assets_invalid", "assets");
   return {
     owner: options.owner,
     repo: options.repo,
     tag: options.tag,
     token: options.token,
+    sourceCommit: options.sourceCommit,
+    releaseNotes: options.releaseNotes,
     assets: options.assets,
     fetch: options.fetch ?? globalThis.fetch,
     delay: options.delay ?? ((ms) => new Promise((resolveDelay) => setTimeout(resolveDelay, ms))),

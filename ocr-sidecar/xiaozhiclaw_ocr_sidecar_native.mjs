@@ -78,6 +78,7 @@ async function doctor() {
     executionProviders: selected.providers,
     modelFormat: modelPack.format,
     modelPaths: modelPack.paths,
+    networkDisabled: isNetworkDisabled(),
   };
 }
 
@@ -201,6 +202,7 @@ function createDaemon() {
         executionProviders: selected.providers,
         modelFormat: modelPack.format,
         modelPaths: modelPack.paths,
+        networkDisabled: isNetworkDisabled(),
         sessionMode: "daemon",
         initialized: true,
         initMs: Math.round((performance.now() - started) * 10) / 10,
@@ -394,11 +396,10 @@ function selectNativeRuntime(supportedBackends, modelPack) {
 }
 
 function resolveModelPack() {
-  const modelDir = resolve(
-    process.env.AGENT_COMPUTER_USE_OCR_MODEL_DIR
-    ?? process.env.XIAOZHICLAW_OCR_MODEL_DIR
-      ?? join(homedir(), ".cache", "agent-computer-use", "ocr", "pp-ocrv6-small"),
-  );
+  const configuredModelDir = process.env.AGENT_COMPUTER_USE_OCR_MODEL_DIR
+    ?? process.env.XIAOZHICLAW_OCR_MODEL_DIR;
+  const modelDir = resolve(configuredModelDir
+    ?? join(homedir(), ".cache", "agent-computer-use", "ocr", "pp-ocrv6-small"));
   const paths = {
     detection: join(modelDir, "PP-OCRv6_det_small.onnx"),
     recognition: join(modelDir, "PP-OCRv6_rec_small.onnx"),
@@ -413,11 +414,19 @@ function resolveModelPack() {
     };
   }
 
+  if (configuredModelDir || isNetworkDisabled()) {
+    throw new Error(`ocr.offline_model_pack_missing: ${modelDir}`);
+  }
+
   return {
     format: "ort-default",
     model: {},
     paths: {},
   };
+}
+
+function isNetworkDisabled() {
+  return process.env.AGENT_COMPUTER_USE_NETWORK_DISABLED === "1";
 }
 
 function toArrayBuffer(buffer) {

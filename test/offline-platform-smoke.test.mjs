@@ -15,7 +15,7 @@ afterEach(async () => {
   await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
 });
 
-test("complete ZIP starts an official MCP client without network or desktop control", { timeout: 240_000 }, async () => {
+test("complete ZIP fixture starts MCP and delegates the production perception gate", { timeout: 240_000 }, async () => {
   const root = await fixtureRoot();
   const coreRoot = join(root, "core");
   const platformRoot = join(root, "platform");
@@ -37,6 +37,11 @@ test("complete ZIP starts an official MCP client without network or desktop cont
 
   const result = await smokeOfflineBundle({
     zipPath: release.assets.find(({ name }) => name.endsWith("windows-x64.zip")).path,
+    perceptionProbe: async () => ({
+      ocrInitialized: true,
+      networkDisabled: true,
+      prewarmCompleted: true,
+    }),
   });
 
   assert.equal(result.status, "passed");
@@ -45,6 +50,8 @@ test("complete ZIP starts an official MCP client without network or desktop cont
   assert.equal(result.doctorPassed, true);
   assert.equal(result.platformVerified, true);
   assert.equal(result.networkDisabled, true);
+  assert.equal(result.ocrInitialized, true);
+  assert.equal(result.ocrPrewarmCompleted, true);
   assert.equal(result.desktopControlStarted, false);
 });
 

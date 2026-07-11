@@ -44,6 +44,9 @@ test("Phase 0.15 orchestrates exact packages complete ZIP and offline SDK smoke"
         healthPassed: true,
         doctorPassed: true,
         platformVerified: true,
+        networkDisabled: true,
+        ocrInitialized: true,
+        ocrPrewarmCompleted: true,
       };
     },
   });
@@ -54,6 +57,7 @@ test("Phase 0.15 orchestrates exact packages complete ZIP and offline SDK smoke"
   assert.equal(report.platformInventoryIdentical, true);
   assert.equal(report.standardMcpSmokePassed, true);
   assert.equal(report.platformVerifiedBeforeMcp, true);
+  assert.equal(report.offlineOcrVerified, true);
   assert.equal(report.firstEnableDownloadCount, 0);
   assert.equal(report.runtimeNetworkAllowed, false);
   assert.equal(report.offlineBundleMaxBytes, 310 * 1024 * 1024);

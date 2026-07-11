@@ -45,9 +45,13 @@ export async function runRealReleaseAssemblyPhase(options = {}) {
     throw new Error(`release.offline_bundle_too_large: ${offlineBundleSizeBytes}`);
   }
   const offlineSmoke = await smoke({ zipPath: offlineAsset.path });
+  const offlineOcrVerified = offlineSmoke.networkDisabled === true
+    && offlineSmoke.ocrInitialized === true
+    && offlineSmoke.ocrPrewarmCompleted === true;
   const passed = release.status === "passed"
     && release.inventoryComparison.status === "identical"
-    && offlineSmoke.status === "passed";
+    && offlineSmoke.status === "passed"
+    && offlineOcrVerified;
   return {
     status: passed ? "passed" : "failed",
     phase: "0.15",
@@ -61,6 +65,7 @@ export async function runRealReleaseAssemblyPhase(options = {}) {
     offlineBundleMaxBytes: WINDOWS_X64_OFFLINE_MAX_BYTES,
     standardMcpSmokePassed: offlineSmoke.toolsListed && offlineSmoke.healthPassed && offlineSmoke.doctorPassed,
     platformVerifiedBeforeMcp: offlineSmoke.platformVerified,
+    offlineOcrVerified,
     firstEnableDownloadCount: 0,
     runtimeNetworkAllowed: false,
     startsDesktopControl: false,
