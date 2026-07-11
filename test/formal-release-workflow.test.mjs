@@ -20,6 +20,7 @@ test("release workflow is tag-only draft-first with two npm provenance publishes
     "mirror-gitee-release",
     "verify-gitee-release",
   ]);
+  assert.equal(jobs.validate["runs-on"], "windows-2025");
   assert.equal(jobs["build-release"].needs, "validate");
   assert.deepEqual(jobs["draft-github-release"].needs, ["validate", "build-release"]);
   assert.deepEqual(jobs["publish-platform-npm"].needs, ["validate", "draft-github-release"]);
