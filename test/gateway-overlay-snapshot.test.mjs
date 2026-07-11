@@ -5,8 +5,8 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { spawn } from "node:child_process";
 import { test } from "node:test";
+import { buildGatewayOverlay } from "../src/gateway-overlay-build-host.mjs";
 
-const overlayProject = resolve("gateway-overlay/GatewayComputerUseOverlay.csproj");
 const overlayExe = resolve("gateway-overlay/bin/Debug/net10.0-windows/GatewayComputerUseOverlay.exe");
 
 test("native overlay snapshots render valid, dimensioned, distinct PNGs", async () => {
@@ -41,7 +41,7 @@ test("native overlay snapshots render valid, dimensioned, distinct PNGs", async 
   assert.ok(program.indexOf("ApplicationConfiguration.Initialize()") > program.indexOf("SnapshotCompositor.Render(snapshot)"));
   assert.ok(program.indexOf("Application.Run(new OverlayForm())") > program.indexOf("SnapshotCompositor.Render(snapshot)"));
 
-  await run("dotnet", ["build", overlayProject, "--nologo"]);
+  await buildGatewayOverlay();
   const outputDirectory = await mkdtemp(join(tmpdir(), "gateway-overlay-snapshot-"));
 
   try {

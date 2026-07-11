@@ -5,6 +5,7 @@ import { dirname, join, relative, resolve } from "node:path";
 
 import { buildProtectedNpmPackage } from "../scripts/build-protected-npm-package.mjs";
 import { materializeReleaseBundle } from "./release-bundle.mjs";
+import { publishGatewayOverlay } from "./gateway-overlay-build-host.mjs";
 import { selectProductionRuntime } from "./release-runtime-selector.mjs";
 import { WINDOWS_X64_RELEASE_TARGET, assertReleaseTarget } from "./release-target.mjs";
 import { ensureWindowsInstallerPublished } from "./windows-installer-host.mjs";
@@ -49,15 +50,7 @@ export async function buildWindowsReleasePayload(options = {}) {
     const nativeRoot = join(stageRoot, "native");
     const overlayOutput = join(nativeRoot, "overlay");
     const installerPublication = await ensureWindowsInstallerPublished();
-    await runChecked("dotnet", [
-      "publish",
-      "gateway-overlay/GatewayComputerUseOverlay.csproj",
-      "--configuration", "Release",
-      "--runtime", "win-x64",
-      "--self-contained", "true",
-      "--output", overlayOutput,
-      "--nologo",
-    ], "release.overlay_publish_failed");
+    await publishGatewayOverlay({ outputRoot: overlayOutput });
     await copyPublishOutput(dirname(installerPublication.exePath), join(sourceRoot, "bin"));
     await copyPublishOutput(overlayOutput, join(sourceRoot, "helpers", "overlay"));
 
