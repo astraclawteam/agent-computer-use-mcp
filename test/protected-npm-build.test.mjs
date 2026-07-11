@@ -80,6 +80,10 @@ test("protected npm staging package has a release-only manifest", async () => {
     "onnxruntime-node": "^1.27.0",
     "ppu-paddle-ocr": "^6.0.0",
   });
+  assert.deepEqual(packageJson.optionalDependencies, {
+    "@agent-computer-use/win32-x64": "0.0.1",
+  });
+  assert.equal(packageJson.files.some((entry) => /cua-driver|overlay|ocr-runtime|models/u.test(entry)), false);
 });
 
 test("protected runtime removes first-party module names and Source Map references", async () => {

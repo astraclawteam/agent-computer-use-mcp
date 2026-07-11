@@ -1,8 +1,9 @@
 #!/usr/bin/env node
 import { createHash } from "node:crypto";
-import { readFileSync, statSync } from "node:fs";
-import { dirname, resolve, sep } from "node:path";
+import { existsSync, readFileSync, statSync } from "node:fs";
+import { basename, dirname, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
+import { resolveVerifiedPlatform } from "../src/platform-package-resolver.mjs";
 
 const packageRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const allowedRuntimePaths = new Set([
@@ -12,16 +13,37 @@ const allowedRuntimePaths = new Set([
 
 try {
   const result = verifyReleaseIntegrity();
+  const platformRuntime = await resolveVerifiedPlatform({
+    platform: process.platform,
+    arch: process.arch,
+    coreVersion: result.packageVersion,
+    resolvePackageJson: offlinePlatformResolver(),
+  });
   process.env.AGENT_COMPUTER_USE_RELEASE_INTEGRITY_VERIFIED = "1";
   if (process.argv.includes("--verify-only")) {
-    process.stdout.write(`${JSON.stringify(result)}\n`);
+    process.stdout.write(`${JSON.stringify({
+      ...result,
+      platformVerified: platformRuntime.status === "verified",
+      platformPackage: platformRuntime.packageName,
+    })}\n`);
   } else {
     const serverUrl = new URL("./computer-use-mcp-server.mjs", import.meta.url);
-    await import(serverUrl.href);
+    const serverModule = await import(serverUrl.href);
+    await serverModule.runComputerUseMcpServer({ platformRuntime });
   }
 } catch (error) {
   process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
   process.exitCode = 1;
+}
+
+function offlinePlatformResolver() {
+  const runtimeRoot = dirname(packageRoot);
+  const platformPackageJson = resolve(runtimeRoot, "platform", "package.json");
+  if (basename(packageRoot) === "core" && basename(runtimeRoot) === "runtime"
+    && existsSync(platformPackageJson) && statSync(platformPackageJson).isFile()) {
+    return () => platformPackageJson;
+  }
+  return undefined;
 }
 
 function verifyReleaseIntegrity() {

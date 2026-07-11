@@ -1,40 +1,17 @@
 import { buildReleaseArtifactVerification, validateReleaseArtifactVerification } from "./release-artifact-verification.mjs";
+import { releaseAssetNames } from "./platform-package-contract.mjs";
 
 const report = buildReleaseArtifactVerification({
-  generatedAt: "2026-07-10T00:00:00.000Z",
-  artifacts: [
-    {
-      id: "npm-pack-tarball",
-      kind: "npm-tarball",
-      path: "agent-computer-use-mcp-0.0.1.tgz",
-      bytes: "package-bytes",
-    },
-    {
-      id: "gateway-overlay-windows",
-      kind: "windows-helper",
-      path: "gateway-overlay/GatewayComputerUseOverlay.exe",
-      bytes: "overlay-helper",
-      signature: { status: "valid", verifiedBy: "signtool verify /pa", timestamped: true },
-    },
-    {
-      id: "cua-driver-windows-x64",
-      kind: "windows-helper",
-      path: "cua-driver/cua-driver.exe",
-      bytes: "driver-helper",
-      signature: { status: "valid", verifiedBy: "signtool verify /pa", timestamped: true },
-    },
-  ],
+  generatedAt: "2026-07-11T00:00:00.000Z",
+  artifacts: releaseAssetNames("0.0.1").map((name) => ({ name, bytes: `fixture:${name}` })),
 });
 const validation = validateReleaseArtifactVerification(report);
-
 process.stdout.write(`${JSON.stringify({
   status: validation.status,
   phase: "0.12",
   benchmark: "release-artifact-verification",
   artifactCount: validation.artifactCount,
-  requiredHelperCount: validation.requiredHelperCount,
-  validSignedHelperCount: validation.validSignedHelperCount,
-  unsignedDistributionBlocked: report.unsignedDistributionBlocked,
+  hashVerifiedArtifactCount: validation.hashVerifiedArtifactCount,
   violations: validation.violations,
   startsDesktopControl: validation.startsDesktopControl,
   includeUserOverlay: validation.includeUserOverlay,

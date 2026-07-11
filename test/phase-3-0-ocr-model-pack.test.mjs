@@ -66,9 +66,9 @@ test("OCR model pack doctor reports missing required model files", async () => {
 test("install cache doctor uses OCR model pack file-level health", async () => {
   const { runInstallCacheDoctor } = await import("../src/install-cache-doctor.mjs");
   const present = new Set([
-    "C:\\Users\\demo\\AppData\\Local\\AgentComputerUse\\models\\pp-ocrv6-small\\PP-OCRv6_det_small.onnx",
-    "C:\\Users\\demo\\AppData\\Local\\AgentComputerUse\\models\\pp-ocrv6-small\\PP-OCRv6_rec_small.onnx",
-    "C:\\Users\\demo\\AppData\\Local\\AgentComputerUse\\models\\pp-ocrv6-small\\ppocrv6_dict.txt",
+    "C:\\Users\\demo\\AppData\\Local\\AgentComputerUse\\cache\\models\\pp-ocrv6-small\\PP-OCRv6_det_small.onnx",
+    "C:\\Users\\demo\\AppData\\Local\\AgentComputerUse\\cache\\models\\pp-ocrv6-small\\PP-OCRv6_rec_small.onnx",
+    "C:\\Users\\demo\\AppData\\Local\\AgentComputerUse\\cache\\models\\pp-ocrv6-small\\ppocrv6_dict.txt",
   ]);
   const doctor = await runInstallCacheDoctor({
     platform: "win32",

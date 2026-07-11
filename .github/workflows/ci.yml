@@ -46,17 +46,5 @@ jobs:
       - name: Verify official MCP SDK server transport
         run: npm run phase:1.8
 
-      - name: Verify transactional Windows installer
-        run: npm run phase:7.8
-
-      - name: Verify trusted asset delivery
-        run: npm run phase:7.9
-
-      - name: Assemble and install real Windows release candidate
-        run: npm run phase:0.15
-
-      - name: Verify Windows release size and target inventory
-        run: npm run release:windows:size-report
-
       - name: Run short runtime soak
         run: npm run phase:8.0 -- --duration-ms 60000 --clients 2 --concurrency 2 --fault-every-rounds 20

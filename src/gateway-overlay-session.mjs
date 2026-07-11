@@ -29,7 +29,7 @@ export function createGatewayOverlaySessionHost(dependencies = {}) {
         };
       }
 
-      await ensureExecutable();
+      await ensureExecutable(options);
       const overlayRuntimeDir = createRuntimeDirectory();
       const targetRectFile = join(overlayRuntimeDir, "target-rect.json");
       const readinessMarker = join(overlayRuntimeDir, "ready");
@@ -44,7 +44,7 @@ export function createGatewayOverlaySessionHost(dependencies = {}) {
           AGENT_COMPUTER_USE_OVERLAY_READY_FILE: readinessMarker,
           XIAOZHICLAW_CUA_OVERLAY_READY_FILE: readinessMarker,
         };
-        processHandle = spawnOverlay({ env: childEnvironment });
+        processHandle = spawnOverlay({ env: childEnvironment, executablePath: options.executablePath });
         await waitForOverlayReadiness(processHandle, readinessMarker, {
           markerExists,
           startupTimeoutMs: options.startupTimeoutMs ?? 5_000,
@@ -165,14 +165,18 @@ function terminateOverlayProcess(processHandle, timeoutMs) {
   });
 }
 
-async function defaultEnsureExecutable() {
+async function defaultEnsureExecutable(options = {}) {
+  if (options.executablePath) {
+    if (!existsSync(options.executablePath)) throw new Error("overlay.executable_missing");
+    return;
+  }
   if (!existsSync(overlayExe)) {
     await run("dotnet", ["build", overlayProject], { windowsHide: true });
   }
 }
 
-function defaultSpawnOverlay({ env }) {
-  return spawn(overlayExe, [], {
+function defaultSpawnOverlay({ env, executablePath }) {
+  return spawn(executablePath ?? overlayExe, [], {
     stdio: ["ignore", "ignore", "pipe"],
     windowsHide: false,
     detached: false,

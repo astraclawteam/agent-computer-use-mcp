@@ -5,20 +5,24 @@ import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
 import { COMPUTER_USE_MCP_TOOLS, MCP_RESULT_SCHEMA_VERSION } from "./computer-use-mcp-tools.mjs";
-import { createAssetRepairRuntime } from "./asset-installer-host.mjs";
 import { serializeToolError } from "./computer-use-errors.mjs";
 import { getComputerUseInstallation } from "./computer-use-installation.mjs";
 import { ComputerUseProviderRouter } from "./computer-use-provider-router.mjs";
 import { CuaDriverMcpDriver } from "./cua-driver-mcp-driver.mjs";
 import { startGatewayManagedOverlay, stopGatewayManagedOverlay } from "./gateway-overlay-session.mjs";
+import { createPlatformOcrEnvironment, OcrSidecarSession } from "./ocr-sidecar.mjs";
 
-export async function runComputerUseMcpServer() {
-  const assetRepairRuntime = createAssetRepairRuntime();
+export async function runComputerUseMcpServer(options = {}) {
   const router = new ComputerUseProviderRouter({
-    ...assetRepairRuntime,
-    driver: new CuaDriverMcpDriver(),
+    ocrSession: createPlatformOcrSession(options.platformRuntime),
+    driver: new CuaDriverMcpDriver({
+      driverPath: options.platformRuntime?.paths?.cuaDriverExecutable,
+    }),
     overlayRuntime: {
-      start: (args) => startGatewayManagedOverlay(args),
+      start: (args) => startGatewayManagedOverlay({
+        ...args,
+        executablePath: options.platformRuntime?.paths?.overlayExecutable,
+      }),
       stop: (handle) => {
         handle?.stop?.();
         stopGatewayManagedOverlay();
@@ -55,6 +59,21 @@ export async function runComputerUseMcpServer() {
   });
   unregisterShutdownHandlers = registerServerShutdownHandlers({ shutdown });
   await server.connect(new StdioServerTransport());
+}
+
+export function createPlatformOcrSession(platformRuntime, options = {}) {
+  const Session = options.Session ?? OcrSidecarSession;
+  const paths = platformRuntime?.paths;
+  if (!paths?.ocrModelRoot || !paths?.ocrRuntimeRoot) return new Session();
+  return new Session({
+    environment: createPlatformOcrEnvironment({
+      modelRoot: paths.ocrModelRoot,
+      runtimeRoot: paths.ocrRuntimeRoot,
+      baseEnvironment: options.baseEnvironment ?? process.env,
+      networkDisabled: true,
+      platform: options.platform ?? process.platform,
+    }),
+  });
 }
 
 async function callTool(router, name, args) {
@@ -218,8 +237,12 @@ export function registerServerShutdownHandlers({
   };
 }
 
-const isDirectEntry = process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url);
-const isVerifiedProtectedRuntime = process.env.AGENT_COMPUTER_USE_RELEASE_INTEGRITY_VERIFIED === "1";
-if (isDirectEntry || isVerifiedProtectedRuntime) {
+export function shouldAutoStartComputerUseMcpServer(options = {}) {
+  const argv = options.argv ?? process.argv;
+  const moduleUrl = options.moduleUrl ?? import.meta.url;
+  return Boolean(argv[1]) && resolve(argv[1]) === fileURLToPath(moduleUrl);
+}
+
+if (shouldAutoStartComputerUseMcpServer()) {
   await runComputerUseMcpServer();
 }

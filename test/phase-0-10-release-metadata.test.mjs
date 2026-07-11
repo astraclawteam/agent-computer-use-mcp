@@ -22,8 +22,8 @@ test("release metadata matches package version, tag, changelog, and upgrade poli
   assert.equal(metadata.releaseTag, `v${packageJson.version}`);
   assert.equal(metadata.channel, "0.x-preview");
   assert.equal(metadata.publicContract, "computer.* MCP tools and structuredContent schemas");
-  assert.equal(metadata.upgradeStrategy, "side-by-side-assets-in-place-package");
-  assert.equal(metadata.rollbackStrategy, "retain previous asset manifest until next successful doctor run");
+  assert.equal(metadata.upgradeStrategy, "npm-install-exact-core-and-platform-version");
+  assert.equal(metadata.rollbackStrategy, "npm-install-previous-exact-version");
   assert.equal(metadata.changelog.path, "CHANGELOG.md");
   assert.equal(metadata.changelog.requiredHeading, `## ${packageJson.version}`);
   assert.deepEqual(metadata.artifacts.map((artifact) => artifact.name), [
@@ -32,7 +32,7 @@ test("release metadata matches package version, tag, changelog, and upgrade poli
     "package-foundation-report",
     "release-readiness-gate",
     "release-artifact-verification",
-    "signed-helper-inventory",
+    "platform-native-inventory",
     "protected-npm-release",
     "real-release-assembly",
     "offline-install-proof",

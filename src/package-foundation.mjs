@@ -9,7 +9,6 @@ export const FORBIDDEN_PACKAGE_PATHS = [
   "gateway-overlay/",
   "native-lab/",
   "ocr-sidecar/",
-  "windows-installer/",
   "docs/",
   "node_modules/",
   "artifacts/",
@@ -22,19 +21,20 @@ export function getInstallLayout(options = {}) {
 
   if (platform === "win32") {
     const localAppData = env.LOCALAPPDATA ?? "%LOCALAPPDATA%";
-    const programCacheRoot = `${localAppData}\\Programs\\AgentComputerUse`;
     const dataRoot = `${localAppData}\\AgentComputerUse`;
     return {
       platform,
       dataRoot,
       artifactRoot: `${dataRoot}\\artifacts`,
-      modelRoot: `${dataRoot}\\models`,
+      modelRoot: `${dataRoot}\\cache\\models`,
       logRoot: `${dataRoot}\\logs`,
       traceRoot: `${dataRoot}\\traces`,
-      cacheRoot: programCacheRoot,
-      driverRoot: `${programCacheRoot}\\cua-driver`,
-      overlayRoot: `${programCacheRoot}\\overlay`,
-      runtimeRoot: `${programCacheRoot}\\runtime`,
+      sessionRoot: `${dataRoot}\\sessions`,
+      cacheRoot: `${dataRoot}\\cache`,
+      driverRoot: `${dataRoot}\\cache\\cua-driver`,
+      overlayRoot: `${dataRoot}\\cache\\overlay`,
+      runtimeRoot: `${dataRoot}\\cache\\runtime`,
+      authoritativeProgramState: false,
     };
   }
 
@@ -47,10 +47,12 @@ export function getInstallLayout(options = {}) {
     modelRoot: `${dataRoot}/models`,
     logRoot: `${dataRoot}/logs`,
     traceRoot: `${dataRoot}/traces`,
+    sessionRoot: `${dataRoot}/sessions`,
     cacheRoot: `${dataRoot}/cache`,
     driverRoot: `${dataRoot}/cache/cua-driver`,
     overlayRoot: `${dataRoot}/cache/overlay`,
     runtimeRoot: `${dataRoot}/cache/runtime`,
+    authoritativeProgramState: false,
   };
 }
 
@@ -59,8 +61,8 @@ export function getVersionPolicy() {
     versionSource: "package.json",
     channel: "0.x-preview",
     publicContract: "computer.* MCP tools and structuredContent schemas",
-    upgradeStrategy: "side-by-side-assets-in-place-package",
-    rollbackStrategy: "retain previous asset manifest until next successful doctor run",
+    upgradeStrategy: "npm-install-exact-core-and-platform-version",
+    rollbackStrategy: "npm-install-previous-exact-version",
     compatibilityAliases: ["XIAOZHICLAW_*"],
     semverRules: {
       patch: "bug fixes and internal implementation changes with no MCP contract change",
@@ -72,36 +74,29 @@ export function getVersionPolicy() {
 
 export function getSigningPolicy() {
   return {
+    npm: {
+      provenanceRequired: true,
+      publishOrder: ["@agent-computer-use/win32-x64", "agent-computer-use-mcp"],
+    },
     windowsHelpers: {
-      firstPartyAuthenticodeRequired: true,
-      firstPartyFiles: [
-        "gateway-overlay",
-        "windows-installer",
-        "future-native-sidecars",
-      ],
-      certificateSource: "release-secret-or-hardware-backed-code-signing",
-      timestampRequired: true,
-      verification: "signtool verify /pa",
+      firstPartyAuthenticodeRequired: false,
+      firstPartyFiles: ["gateway-overlay"],
+      timestampRequired: false,
+      verification: "platform-manifest-sha256",
       thirdPartyUnsigned: {
         files: ["cua-driver"],
         requiredVerification: [
-          "signed-asset-manifest",
           "upstream-release-sha256",
           "extracted-file-sha256",
         ],
-        authenticode: "vendor-unsigned-explicit",
-      },
-      microsoftSystemRuntime: {
-        files: ["webview2-runtime"],
-        publisher: "Microsoft Corporation",
-        authenticodeRequired: true,
       },
     },
-    unsignedDevelopmentBuilds: {
-      allowed: true,
-      distribution: "blocked",
-      marker: "development-only",
+    releaseArtifacts: {
+      sha256Required: true,
+      sbomRequired: true,
+      checksumsRequired: true,
     },
+    unsignedDevelopmentBuilds: { allowed: true, distribution: "npm-preview" },
   };
 }
 
@@ -114,61 +109,48 @@ export function buildOfflineAssetManifest(options = {}) {
     packageName: "agent-computer-use-mcp",
     packageVersion,
     generatedAt,
-    installRoots: {
-      windows: {
-        dataRoot: "%LOCALAPPDATA%\\AgentComputerUse",
-        cacheRoot: "%LOCALAPPDATA%\\Programs\\AgentComputerUse",
-      },
-      unix: {
-        dataRoot: "$XDG_DATA_HOME/agent-computer-use",
-        cacheRoot: "$XDG_DATA_HOME/agent-computer-use/cache",
-      },
+    distribution: {
+      corePackage: `agent-computer-use-mcp@${packageVersion}`,
+      platformPackage: `@agent-computer-use/win32-x64@${packageVersion}`,
+      offlineZip: `agent-computer-use-mcp-${packageVersion}-windows-x64.zip`,
+      runtimeDownloadAllowed: false,
     },
     assets: [
       {
         id: "cua-driver-windows-x64",
         kind: "driver",
         platform: "win32-x64",
-        targetRoot: "cacheRoot/cua-driver",
+        targetRoot: "platform-package/cua-driver",
         offlineRequired: true,
-        acquisition: "bundle-or-install-cache",
+        acquisition: "npm-platform-package-or-complete-zip",
         version: "pinned-by-release",
       },
       {
         id: "gateway-overlay-windows",
         kind: "overlay-shell",
         platform: "win32",
-        targetRoot: "cacheRoot/overlay",
+        targetRoot: "platform-package/overlay",
         offlineRequired: true,
-        acquisition: "build-or-signed-bundle",
+        acquisition: "npm-platform-package-or-complete-zip",
         version: packageVersion,
       },
       {
         id: "ocr-runtime-onnxruntime-node",
         kind: "runtime",
-        platform: "all",
-        targetRoot: "package/node_modules/onnxruntime-node",
+        platform: "win32-x64",
+        targetRoot: "platform-package/ocr-runtime",
         offlineRequired: true,
-        acquisition: "npm-package-cache",
+        acquisition: "npm-platform-package-or-complete-zip",
         version: "from-package-lock",
       },
       {
         id: "ocr-model-pp-ocrv6-small",
         kind: "model-pack",
-        platform: "all",
-        targetRoot: "modelRoot/pp-ocrv6-small",
-        offlineRequired: false,
-        acquisition: "bundle-or-approved-install-cache",
+        platform: "win32-x64",
+        targetRoot: "platform-package/models/pp-ocr-v6",
+        offlineRequired: true,
+        acquisition: "npm-platform-package-or-complete-zip",
         version: "pinned-by-manifest",
-      },
-      {
-        id: "webview2-runtime",
-        kind: "system-runtime",
-        platform: "win32",
-        targetRoot: "system",
-        offlineRequired: false,
-        acquisition: "system-installed-or-offline-evergreen-bootstrapper",
-        version: "system-detected",
       },
     ],
   };

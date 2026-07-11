@@ -21,6 +21,7 @@ test("protected package launcher verifies integrity and serves standard MCP", as
 
   assert.equal(report.status, "passed");
   assert.equal(report.integrityVerified, true);
+  assert.equal(report.platformVerified, true);
   assert.ok(report.toolNames.includes("computer.health"));
   assert.ok(report.toolNames.includes("computer.installation"));
   assert.equal(report.health.status, "ready");
@@ -31,6 +32,17 @@ test("protected package launcher verifies integrity and serves standard MCP", as
   assert.equal(report.sourceMapCount, 0);
   assert.equal(report.startsDesktopControl, false);
   assert.equal(report.includeUserOverlay, false);
+});
+
+test("protected package launcher refuses to initialize without its exact platform package", async () => {
+  const outputRoot = await fixtureRoot();
+  await buildProtectedNpmPackage({ outputRoot });
+
+  const result = await runProtectedLauncher({ outputRoot, args: ["--verify-only"] });
+
+  assert.equal(result.exitCode, 1);
+  assert.match(result.stderr, /platform\.package_missing/);
+  assert.equal(result.stdout, "");
 });
 
 test("protected package launcher rejects tampered runtime before MCP initialization", async () => {

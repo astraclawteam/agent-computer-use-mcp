@@ -20,6 +20,7 @@ import {
   validateProtectedNpmEntries,
   validateProtectedRuntime,
 } from "../src/npm-release-policy.mjs";
+import { createCoreOptionalDependencies } from "../src/platform-package-contract.mjs";
 
 export const DEFAULT_PROTECTED_NPM_ROOT = resolve("artifacts/npm-release/package");
 
@@ -185,6 +186,7 @@ function createReleasePackageJson(packageJson) {
       "LICENSE",
     ],
     dependencies: packageJson.dependencies,
+    optionalDependencies: createCoreOptionalDependencies(packageJson.version),
     publishConfig: {
       access: "public",
       provenance: true,

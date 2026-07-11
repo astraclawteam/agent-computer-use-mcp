@@ -105,7 +105,7 @@ function runCommand(command, args) {
 }
 
 function isSourceEntry(entry) {
-  return /^(src|test|scripts|windows-installer|gateway-overlay|native-lab|ocr-sidecar)\//.test(entry)
+  return /^(src|test|scripts|gateway-overlay|native-lab|ocr-sidecar)\//.test(entry)
     || /\.(?:cs|csproj|py|ts|tsx)$/.test(entry);
 }
 

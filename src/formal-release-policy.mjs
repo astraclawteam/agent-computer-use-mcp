@@ -24,31 +24,28 @@ export function validateFormalReleaseIdentity(input = {}) {
   return result(violations);
 }
 
-export function validateAuthenticodeEvidence({ evidence = [], expectedPublisher, requiredPaths = [] } = {}) {
+export function validatePlatformReleasePlan(plan = {}) {
   const violations = [];
-  const byPath = new Map(evidence.map((item) => [normalizePath(item.path), item]));
-  for (const requiredPath of requiredPaths) {
-    if (!byPath.has(normalizePath(requiredPath))) {
-      violations.push(violation("release.signature_missing", `Missing Authenticode evidence: ${requiredPath}`, requiredPath));
-    }
+  const expectedAssets = [
+    `agent-computer-use-mcp-${plan.version}.tgz`,
+    `agent-computer-use-win32-x64-${plan.version}.tgz`,
+    `agent-computer-use-mcp-${plan.version}-windows-x64.zip`,
+    "checksums.txt",
+    "release-manifest.json",
+    "SBOM.cdx.json",
+  ];
+  if (JSON.stringify(plan.assets) !== JSON.stringify(expectedAssets)) {
+    violations.push(violation("release.assets_invalid", "Release artifact inventory does not match the platform contract."));
   }
-  for (const item of evidence) {
-    if (/candidate|test|development/iu.test(`${item.path} ${item.profileType ?? ""}`)) {
-      violations.push(violation("release.candidate_signature_forbidden", "Candidate or test signing evidence is not distributable.", item.path));
-    }
-    if (item.status !== "Valid") {
-      violations.push(violation("release.authenticode_invalid", "Authenticode status is not Valid.", item.path));
-    }
-    if (item.profileType !== "PublicTrust") {
-      violations.push(violation("release.public_trust_required", "Production signing must use a PublicTrust profile.", item.path));
-    }
-    if (item.timestamped !== true || item.timestampStatus !== "Valid") {
-      violations.push(violation("release.timestamp_required", "A valid trusted timestamp is required.", item.path));
-    }
-    if (!expectedPublisher || item.publisher !== expectedPublisher) {
-      violations.push(violation("release.publisher_mismatch", "Authenticode publisher does not match policy.", item.path));
-    }
+  if (JSON.stringify(plan.npmPublishOrder) !== JSON.stringify([
+    "@agent-computer-use/win32-x64",
+    "agent-computer-use-mcp",
+  ])) {
+    violations.push(violation("release.npm_order_invalid", "Platform npm package must publish before core."));
   }
+  if (plan.provenance !== true) violations.push(violation("release.provenance_required", "npm provenance is required."));
+  if (plan.githubDraftFirst !== true) violations.push(violation("release.github_draft_required", "GitHub draft must exist before npm publication."));
+  if (plan.runtimeDownloadAllowed !== false) violations.push(violation("release.runtime_download_forbidden", "Runtime downloads are forbidden."));
   return result(violations);
 }
 
@@ -58,10 +55,6 @@ function result(violations) {
 
 function violation(code, message, path) {
   return { code, message, ...(path ? { path } : {}) };
-}
-
-function normalizePath(value) {
-  return String(value ?? "").replaceAll("\\", "/").toLowerCase();
 }
 
 function escapeRegExp(value) {
