@@ -128,9 +128,8 @@
     "release:windows:assets": "node scripts/fetch-windows-release-assets.mjs",
     "release:windows:assemble": "node scripts/build-platform-release.mjs",
     "release:windows:size-report": "node scripts/windows-release-size-report.mjs",
-    "release:formal:validate": "node scripts/validate-formal-release.mjs",
-    "release:formal:assemble": "node scripts/assemble-formal-release.mjs",
-    "release:formal:smoke": "node scripts/post-publish-smoke.mjs",
+    "release:validate": "node scripts/validate-formal-release.mjs",
+    "release:npm:post-publish-smoke": "node scripts/post-publish-smoke.mjs",
     "governance:protect-main": "node scripts/configure-branch-protection.mjs",
     "serve": "node src/server.mjs"
   },
