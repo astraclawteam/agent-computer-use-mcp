@@ -82,7 +82,11 @@ export async function buildProtectedNpmPackage(options = {}) {
     await chmod(join(stageRoot, "dist/launcher.mjs"), 0o755);
 
     await assertBrowserKernelBoundaryInRoots({
-      roots: ["src", "scripts", "public", "ocr-sidecar", stageRoot],
+      roots: [
+        ...RUNTIME_ENTRIES.map((entry) => entry.source),
+        "scripts/npm-release-launcher-template.mjs",
+        stageRoot,
+      ],
       lockPath: "package-lock.json",
     });
 
