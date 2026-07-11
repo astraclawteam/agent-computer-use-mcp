@@ -10,6 +10,7 @@
       "capabilitySources": ["uia-som"],
       "flow": "Open a generated temporary text file, write through an accessibility element, save, and verify normalized disk text.",
       "required": true,
+      "maxAttempts": 2,
       "timeoutMs": 30000
     },
     {

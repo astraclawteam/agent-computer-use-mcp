@@ -33,7 +33,13 @@ export async function runRealAppSmokeCatalog(options = {}) {
         if (entry.required !== false) violations.push({ code: "app.required_smoke_blocked", appId: entry.appId });
         continue;
       }
-      const execution = await execute(entry, executable, { targetRectFile: overlay?.targetRectFile });
+      const maxAttempts = entry.maxAttempts ?? 1;
+      let attemptCount = 0;
+      let execution;
+      do {
+        attemptCount += 1;
+        execution = await execute(entry, executable, { targetRectFile: overlay?.targetRectFile });
+      } while (attemptCount < maxAttempts && isRetryableExecution(execution));
       const report = execution.report ?? {};
       let status = execution.exitCode === 0 && report.status === "passed" ? "pass" : "insufficient";
       let reason = status === "pass" ? null : report.reason ?? "observation.insufficient";
@@ -54,6 +60,7 @@ export async function runRealAppSmokeCatalog(options = {}) {
         evidenceKind: report.evidenceKind ?? "missing",
         observationProvider: report.observationProvider ?? null,
         durationMs: execution.durationMs ?? null,
+        attemptCount,
       });
       results.push(result);
       const expectedInsufficient = entry.expectedStatus === "insufficient"
@@ -115,7 +122,11 @@ function executeSmoke(entry, executable, context) {
     });
     let stdout = "";
     let stderr = "";
-    const timeout = setTimeout(() => child.kill(), entry.timeoutMs ?? 30_000);
+    let timedOut = false;
+    const timeout = setTimeout(() => {
+      timedOut = true;
+      child.kill();
+    }, entry.timeoutMs ?? 30_000);
     child.stdout.on("data", (chunk) => { stdout += chunk; });
     child.stderr.on("data", (chunk) => { stderr += chunk; });
     child.on("error", reject);
@@ -123,11 +134,20 @@ function executeSmoke(entry, executable, context) {
       clearTimeout(timeout);
       resolvePromise({
         exitCode,
+        timedOut,
         durationMs: Math.round(performance.now() - startedAt),
-        report: parseReport(exitCode === 0 ? stdout : stderr || stdout),
+        report: timedOut
+          ? { status: "failed", reason: "app.smoke_timeout" }
+          : parseReport(exitCode === 0 ? stdout : stderr || stdout),
       });
     });
   });
+}
+
+function isRetryableExecution(execution) {
+  return execution.timedOut === true
+    || ["app.smoke_timeout", "driver.transport_interrupted", "window.transient_unavailable"]
+      .includes(execution.report?.reason);
 }
 
 function parseReport(text) {

@@ -73,3 +73,39 @@ test("real app evidence is exposed through the standard health phase catalog", a
   const health = await new ComputerUseProviderRouter().health({ fast: true });
   assert.equal(health.phases["6.2"], "real-app-perception-smoke");
 });
+
+test("real app smoke retries one transport timeout but never weakens evidence validation", async () => {
+  let attempts = 0;
+  const report = await runRealAppSmokeCatalog({
+    catalog: [{
+      appId: "win32-notepad",
+      appName: "Notepad",
+      category: "Win32",
+      executableCandidates: ["notepad.exe"],
+      script: "x",
+      capabilitySources: ["uia-som"],
+      flow: "safe fixture",
+      maxAttempts: 2,
+    }],
+    resolveExecutable: async () => ({ path: "notepad.exe", sha256: "c".repeat(64), sizeBytes: 1 }),
+    execute: async () => ++attempts === 1
+      ? { exitCode: null, timedOut: true, report: { status: "failed", reason: "app.smoke_timeout" } }
+      : { exitCode: 0, timedOut: false, report: { status: "passed", evidenceKind: "real-app", observationProvider: "uia-som", includeUserOverlay: false } },
+  });
+  assert.equal(report.status, "passed");
+  assert.equal(report.results[0].attemptCount, 2);
+  assert.equal(attempts, 2);
+});
+
+test("Notepad smoke owns and terminates every process it creates", async () => {
+  const source = await readFile("src/real-cua-notepad-file-sequence.mjs", "utf8");
+  assert.match(source, /callTool\("launch_app", \{/u);
+  assert.match(source, /Microsoft\.WindowsNotepad_8wekyb3d8bbwe!App/u);
+  assert.match(source, /Date\.now\(\) - started < 20_000/u);
+  assert.match(source, /async function waitForEditorState/u);
+  assert.match(source, /Number\.isInteger\(item\.pid\)/u);
+  assert.match(source, /const ownedPids = new Set\(\);/u);
+  assert.match(source, /ownedPids\.add\(window\.pid\)/u);
+  assert.match(source, /callTool\("kill_app", \{ pid \}\)/u);
+  assert.doesNotMatch(source, /spawn\("notepad\.exe"/u);
+});

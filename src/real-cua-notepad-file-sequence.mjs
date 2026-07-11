@@ -1,4 +1,3 @@
-import { spawn } from "node:child_process";
 import { mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
@@ -16,6 +15,7 @@ const mcp = new CuaDriverMcpClient({ driverPath });
 const dir = await mkdtemp(join(tmpdir(), "agent-computer-use-notepad-"));
 const filePath = join(dir, `${basename(dir)}-native-file.txt`);
 await writeFile(filePath, "", "utf8");
+const ownedPids = new Set();
 
 function getStructured(result) {
   return result.structuredContent ?? result;
@@ -25,11 +25,10 @@ function textFromResult(result) {
   return (result.content ?? []).map((item) => item.text ?? "").join("\n");
 }
 
-async function waitForWindow(titlePart, pid = null) {
+async function waitForWindow(titlePart) {
   const started = Date.now();
-  while (Date.now() - started < 8000) {
-    const args = pid == null ? { on_screen_only: false } : { pid, on_screen_only: false };
-    const windowsResult = await mcp.callTool("list_windows", args);
+  while (Date.now() - started < 20_000) {
+    const windowsResult = await mcp.callTool("list_windows", { on_screen_only: false });
     const windows = getStructured(windowsResult).windows ?? [];
     const window = windows.find((item) => item.title?.includes(titlePart));
     if (window) return window;
@@ -45,15 +44,50 @@ function findEditor(elements) {
     ?? elements.find((element) => element.role === "Edit");
 }
 
+async function waitForEditorState({ pid, windowId }) {
+  const started = Date.now();
+  let lastElements = [];
+  let lastState = {};
+  while (Date.now() - started < 10_000) {
+    const result = await mcp.callTool("get_window_state", {
+      pid,
+      window_id: windowId,
+      include_screenshot: false,
+      max_elements: 1000,
+      max_depth: 30,
+      session,
+    });
+    const state = getStructured(result);
+    lastState = state;
+    lastElements = state.elements ?? [];
+    const editor = findEditor(lastElements);
+    if (editor) return { state, editor };
+    await new Promise((resolve) => setTimeout(resolve, 250));
+  }
+  const summary = lastElements.slice(0, 30).map((element) => ({
+    role: element.role,
+    label: element.label,
+    actions: element.actions,
+  }));
+  throw new Error(`element.not_found: Notepad editor; state=${JSON.stringify({
+    keys: Object.keys(lastState),
+    content: lastState.content,
+    isError: lastState.isError,
+    elements: summary,
+  })}`);
+}
+
 try {
   await mcp.start();
-  const notepad = spawn("notepad.exe", [filePath], {
-    detached: false,
-    stdio: "ignore",
-    windowsHide: true,
-  });
-  const window = await waitForWindow(basename(filePath));
+  const launch = getStructured(await mcp.callTool("launch_app", {
+    aumid: "Microsoft.WindowsNotepad_8wekyb3d8bbwe!App",
+    additional_arguments: [filePath],
+  }));
+  if (launch.pid != null) ownedPids.add(launch.pid);
+  const window = launch.windows?.find((item) => Number.isInteger(item.pid) && item.title?.includes(basename(filePath)))
+    ?? await waitForWindow(basename(filePath));
   const pid = window.pid;
+  ownedPids.add(window.pid);
   if (overlayTargetRectFile && window.bounds) {
     await writeFile(overlayTargetRectFile, JSON.stringify({
       windowId: window.window_id,
@@ -65,17 +99,7 @@ try {
     }), "utf8");
   }
 
-  const beforeResult = await mcp.callTool("get_window_state", {
-    pid,
-    window_id: window.window_id,
-    include_screenshot: false,
-    max_elements: 1000,
-    max_depth: 30,
-    session,
-  });
-  const before = getStructured(beforeResult);
-  const editor = findEditor(before.elements ?? []);
-  if (!editor) throw new Error("element.not_found: Notepad editor");
+  const { state: before, editor } = await waitForEditorState({ pid, windowId: window.window_id });
 
   const typeResult = await mcp.callTool("set_value", {
     pid,
@@ -107,14 +131,6 @@ try {
   }, null, 2));
   process.exitCode = passed ? 0 : 1;
 
-  await mcp.callTool("hotkey", {
-    pid,
-    window_id: window.window_id,
-    keys: ["alt", "f4"],
-    delivery_mode: "background",
-    session,
-  }).catch(() => {});
-  notepad.kill();
 } catch (error) {
   console.error(JSON.stringify({
     status: "failed",
@@ -128,6 +144,9 @@ try {
   }, null, 2));
   process.exitCode = 1;
 } finally {
+  for (const pid of ownedPids) {
+    await mcp.callTool("kill_app", { pid }).catch(() => {});
+  }
   await mcp.close();
 }
 
