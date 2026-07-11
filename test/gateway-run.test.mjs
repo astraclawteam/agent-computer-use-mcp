@@ -1,11 +1,8 @@
 import assert from "node:assert/strict";
-import { execFile } from "node:child_process";
 import { readFile } from "node:fs/promises";
 import { test } from "node:test";
-import { fileURLToPath } from "node:url";
-import { promisify } from "node:util";
 
-const execFileAsync = promisify(execFile);
+import { runGatewayOverlayBehaviorHarness } from "../src/gateway-overlay-build-host.mjs";
 
 test("Gateway run script starts desktop overlay before real CUA and always stops it", async () => {
   const script = await readFile(new URL("../src/gateway-run-winforms.mjs", import.meta.url), "utf8");
@@ -112,11 +109,7 @@ test("Desktop gateway overlay freezes the layered native rendering contract", as
 });
 
 test("Layered presenter behavior harness exercises cleanup through Present", async () => {
-  const { stdout } = await execFileAsync(
-    "dotnet",
-    ["run", "--project", "gateway-overlay-tests/GatewayComputerUseOverlay.Tests.csproj"],
-    { cwd: fileURLToPath(new URL("..", import.meta.url)), windowsHide: true },
-  );
+  const { stdout } = await runGatewayOverlayBehaviorHarness();
 
   assert.match(stdout, /PASS: preserves presentation exceptions across every thrown cleanup operation/);
   assert.match(stdout, /PASS: deletes a deselected bitmap when memory DC destruction fails/);

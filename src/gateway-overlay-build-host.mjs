@@ -57,6 +57,13 @@ export function publishGatewayOverlay(options = {}) {
   ], "release.overlay_publish_failed"), options);
 }
 
+export function runGatewayOverlayBehaviorHarness(options = {}) {
+  return withGatewayOverlayBuildLock(() => runChecked("dotnet", [
+    "run",
+    "--project", "gateway-overlay-tests/GatewayComputerUseOverlay.Tests.csproj",
+  ], "overlay.behavior_harness_failed"), options);
+}
+
 async function isStaleLock(lockPath, graceMs) {
   const lockStat = await stat(lockPath).catch(() => null);
   if (!lockStat || Date.now() - lockStat.mtimeMs <= graceMs) return false;
