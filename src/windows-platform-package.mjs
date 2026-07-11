@@ -4,6 +4,7 @@ import { dirname, join, resolve } from "node:path";
 
 import { createPlatformPackageJson, WINDOWS_X64_TARGET } from "./platform-package-contract.mjs";
 import { createPlatformInventory, verifyPlatformInventory } from "./platform-payload-inventory.mjs";
+import { assertBrowserKernelBoundaryInRoots } from "./browser-kernel-boundary.mjs";
 
 const REQUIRED_COMPONENTS = Object.freeze([
   "cua-driver/",
@@ -31,6 +32,7 @@ export async function buildWindowsPlatformPackage(options = {}) {
       "utf8",
     );
     await writeJson(join(stageRoot, "SBOM.cdx.json"), createPlatformSbom({ version, sourceCommit }));
+    await assertBrowserKernelBoundaryInRoots({ roots: [stageRoot] });
 
     const inventory = await createPlatformInventory(stageRoot, {
       version,
@@ -198,3 +200,4 @@ function platformError(code, detail) {
   error.code = code;
   return error;
 }
+
