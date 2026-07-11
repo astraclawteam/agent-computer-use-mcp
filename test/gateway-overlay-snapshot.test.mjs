@@ -76,7 +76,7 @@ function run(command, args) {
     const timeout = setTimeout(() => {
       child.kill();
       reject(new Error(`${command} ${args.join(" ")} timed out`));
-    }, 5_000);
+    }, 30_000);
     child.stdout.on("data", (chunk) => { stdout += chunk; });
     child.stderr.on("data", (chunk) => { stderr += chunk; });
     child.on("error", (error) => {

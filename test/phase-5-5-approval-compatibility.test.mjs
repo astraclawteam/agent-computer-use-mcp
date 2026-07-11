@@ -3,7 +3,7 @@ import { spawn } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
 
-test("pending access approval is visible in list_state schema and cleared on disconnect", async () => {
+test("pending access approval is visible before disconnect and terminally inaccessible after close", async () => {
   const { COMPUTER_USE_MCP_TOOLS } = await import("../src/computer-use-mcp-tools.mjs");
   const listState = COMPUTER_USE_MCP_TOOLS.find((tool) => tool.name === "computer.list_state");
   assert.equal(listState.outputSchema.properties.pendingAccessApproval.anyOf.length, 2);
@@ -44,20 +44,16 @@ test("pending access approval is visible in list_state schema and cleared on dis
   );
 
   await router.close({ reason: "client-disconnect" });
-  const stateAfterClose = await router.listState();
-
-  assert.equal(stateAfterClose.status, "idle");
-  assert.equal(stateAfterClose.activeController, null);
-  assert.equal(stateAfterClose.pendingAccessApproval, null);
-  assert.equal(stateAfterClose.lastCapture, null);
-  assert.ok(stateAfterClose.auditEvents.some((event) => event.type === "computer.access.approval_closed"));
-
-  const afterCloseApproval = await router.approveAccess({
-    approvalToken: pending.approval.token,
-    approved: true,
-  });
-  assert.equal(afterCloseApproval.status, "approval_invalid");
-  assert.equal(afterCloseApproval.startsDesktopControl, false);
+  assert.equal(router.pendingAccessApproval, null);
+  assert.ok(router.auditEvents.some((event) => event.type === "computer.access.approval_closed"));
+  await assert.rejects(() => router.listState(), { code: "lifecycle.closed" });
+  await assert.rejects(
+    () => router.approveAccess({
+      approvalToken: pending.approval.token,
+      approved: true,
+    }),
+    { code: "lifecycle.closed" },
+  );
 });
 
 test("Phase 5.5 has an executable approval compatibility smoke script", async () => {
@@ -78,7 +74,7 @@ test("Phase 5.5 has an executable approval compatibility smoke script", async ()
   assert.equal(report.pendingVisibleInState, true);
   assert.equal(report.duplicatePendingRejected, true);
   assert.equal(report.pendingClearedOnClose, true);
-  assert.equal(report.approvalInvalidAfterClose, true);
+  assert.equal(report.closedOperationsRejected, true);
   assert.equal(report.startsDesktopControlBeforeApproval, false);
   assert.equal(report.includeUserOverlay, false);
 });
