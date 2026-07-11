@@ -1,33 +1,17 @@
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
 import { test } from "node:test";
 
-test("release distribution keeps one npm package and gates the Windows x64 GitHub asset", async () => {
-  const packageJson = JSON.parse(await readFile("package.json", "utf8"));
-  assert.equal(packageJson.name, "agent-computer-use-mcp");
-  assert.equal(
-    packageJson.scripts["release:windows:size-report"],
-    "node scripts/windows-release-size-report.mjs",
-  );
+import { releaseAssetNames } from "../src/platform-package-contract.mjs";
 
-  const ci = await readFile(".github/workflows/ci.yml", "utf8");
-  assert.match(
-    ci,
-    /run: npm run phase:0\.15[\s\S]*run: npm run release:windows:size-report/u,
-  );
+test("release distribution emits two npm packages and one complete Windows x64 ZIP", () => {
+  const names = releaseAssetNames("0.0.1");
 
-  const docs = await Promise.all([
-    "README.md",
-    "CHANGELOG.md",
-    "docs/productization/roadmap.md",
-    "docs/productization/real-release-pipeline-spec.md",
-    "docs/productization/release-gates.md",
-  ].map((path) => readFile(path, "utf8")));
-  const combined = docs.join("\n");
-  assert.match(combined, /one protected npm package/u);
-  assert.match(combined, /Windows x64 only/u);
-  assert.match(combined, /macOS and Linux[\s\S]*native validation/u);
-  assert.match(combined, /310 MiB/u);
-  assert.match(combined, /release:windows:size-report/u);
-  assert.doesNotMatch(combined, /about 455 MB/u);
+  assert.equal(names.filter((name) => name.endsWith(".tgz")).length, 2);
+  assert.deepEqual(names.filter((name) => name.endsWith(".zip")), [
+    "agent-computer-use-mcp-0.0.1-windows-x64.zip",
+  ]);
+  assert.equal(names.includes("checksums.txt"), true);
+  assert.equal(names.includes("release-manifest.json"), true);
+  assert.equal(names.includes("SBOM.cdx.json"), true);
+  assert.equal(names.some((name) => /installer|setup|\.(?:exe|msi|msix)$/iu.test(name)), false);
 });
