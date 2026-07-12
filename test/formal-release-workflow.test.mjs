@@ -34,9 +34,11 @@ test("release workflow is tag-only draft-first with two npm provenance publishes
   const coreRuns = stepRuns(jobs["publish-core-npm"]);
   const platformPublish = jobs["publish-platform-npm"].steps.find(({ run }) => run?.startsWith("npm publish"));
   const corePublish = jobs["publish-core-npm"].steps.find(({ run }) => run?.startsWith("npm publish"));
-  assert.deepEqual(platformPublish.env, { NODE_AUTH_TOKEN: "${{ secrets.NPM_TOKEN }}" });
-  assert.deepEqual(corePublish.env, { NODE_AUTH_TOKEN: "${{ secrets.NPM_TOKEN }}" });
-  assert.equal((source.match(/secrets\.NPM_TOKEN/gu) ?? []).length, 2);
+  assert.deepEqual(platformPublish.env, { NODE_AUTH_TOKEN: "${{ secrets.NPM_PLATFORM_TOKEN }}" });
+  assert.deepEqual(corePublish.env, { NODE_AUTH_TOKEN: "${{ secrets.NPM_CORE_TOKEN }}" });
+  assert.equal((source.match(/secrets\.NPM_PLATFORM_TOKEN/gu) ?? []).length, 1);
+  assert.equal((source.match(/secrets\.NPM_CORE_TOKEN/gu) ?? []).length, 1);
+  assert.doesNotMatch(source, /secrets\.NPM_TOKEN\b/u);
   assert.match(platformRuns, /npm publish "\.\/release-assets\/agent-computer-use-win32-x64-/u);
   assert.match(coreRuns, /npm publish "\.\/release-assets\/agent-computer-use-mcp-/u);
   assert.match(platformRuns, /npm publish[\s\S]*agent-computer-use-win32-x64[\s\S]*--access public --provenance/u);
