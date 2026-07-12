@@ -46,7 +46,15 @@ export function buildGatewayOverlay(options = {}) {
 
 export function publishGatewayOverlay(options = {}) {
   const outputRoot = resolve(options.outputRoot);
-  return withGatewayOverlayBuildLock(() => runChecked("dotnet", [
+  return withGatewayOverlayBuildLock(() => runChecked(
+    "dotnet",
+    createGatewayOverlayPublishArgs(outputRoot, options),
+    "release.overlay_publish_failed",
+  ), options);
+}
+
+export function createGatewayOverlayPublishArgs(outputRoot, options = {}) {
+  return [
     "publish",
     "gateway-overlay/GatewayComputerUseOverlay.csproj",
     "--configuration", "Release",
@@ -54,7 +62,11 @@ export function publishGatewayOverlay(options = {}) {
     "--self-contained", "true",
     "--output", outputRoot,
     "--nologo",
-  ], "release.overlay_publish_failed"), options);
+    "-p:PublishSingleFile=true",
+    "-p:IncludeNativeLibrariesForSelfExtract=true",
+    "-p:EnableCompressionInSingleFile=true",
+    "-p:DebugType=None",
+  ];
 }
 
 export function runGatewayOverlayBehaviorHarness(options = {}) {
