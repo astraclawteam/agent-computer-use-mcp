@@ -24,7 +24,6 @@ jobs:
         with:
           node-version: "24.12.0"
           package-manager-cache: false
-      - run: npm ci
       - id: release
         name: Bind repair to an immutable published release
         shell: bash
