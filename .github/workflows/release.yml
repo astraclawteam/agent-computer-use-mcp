@@ -95,6 +95,8 @@ jobs:
           name: platform-release-assets
           path: release-assets
       - run: npm publish "./release-assets/agent-computer-use-win32-x64-${{ needs.validate.outputs.version }}.tgz" --access public --provenance
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
   publish-core-npm:
     needs: [validate, publish-platform-npm]
@@ -114,6 +116,8 @@ jobs:
           name: platform-release-assets
           path: release-assets
       - run: npm publish "./release-assets/agent-computer-use-mcp-${{ needs.validate.outputs.version }}.tgz" --access public --provenance
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
   post-publish-npm-smoke:
     needs: [validate, publish-core-npm]
