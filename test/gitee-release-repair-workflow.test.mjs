@@ -14,7 +14,7 @@ test("Gitee repair workflow reuses an immutable published GitHub release", async
   assert.deepEqual(workflow.permissions, { contents: "read" });
   assert.deepEqual(Object.keys(jobs), ["repair-gitee-release"]);
   const job = jobs["repair-gitee-release"];
-  assert.equal(job.environment, "release");
+  assert.equal(job.environment, "gitee-release-repair");
   assert.equal(job["runs-on"], "ubuntu-latest");
   const runs = job.steps.map(({ run }) => run ?? "").join("\n");
 

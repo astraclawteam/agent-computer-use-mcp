@@ -47,6 +47,6 @@ npm uses trusted publishing with OIDC provenance. Gitee uses the `GITEE_TOKEN` s
 
 - Build or npm smoke failure: leave GitHub Release as draft and publish nothing further.
 - Core npm failure after platform publication: keep the draft, correct the release, and publish the matching core version before publishing GitHub Release.
-- Gitee failure after GitHub publication: run `.github/workflows/gitee-release-repair.yml` for the immutable published tag. It downloads the existing GitHub bytes and never rebuilds, republishes npm, or moves the tag.
+- Gitee failure after GitHub publication: run `.github/workflows/gitee-release-repair.yml` for the immutable published tag. It uses the main-only `gitee-release-repair` environment with no npm credentials, downloads the existing GitHub bytes, and never rebuilds, republishes npm, or moves the tag.
 - Any checksum mismatch: fail closed and do not mark mirror verification successful.
 - Missing or mismatched Gitee tag/source commit: fail closed before release attachment mutation.
