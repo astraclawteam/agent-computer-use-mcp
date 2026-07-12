@@ -61,7 +61,7 @@ export async function assemblePlatformRelease(options = {}) {
       },
       components: [
         { type: "application", name: "agent-computer-use-mcp", version },
-        { type: "application", name: "@agent-computer-use/win32-x64", version },
+        { type: "application", name: "@xiaozhiclaw/agent-computer-use-win32-x64", version },
       ],
     };
     const sbomPath = join(assetRoot, names[5]);

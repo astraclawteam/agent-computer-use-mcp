@@ -4,16 +4,16 @@
 
 **Goal:** Replace the Windows installer and runtime asset updater with an exact-version core npm package, an immutable Windows x64 platform npm package, a complete offline ZIP, and byte-identical GitHub/Gitee release delivery.
 
-**Architecture:** One canonical Windows x64 platform stage owns every native byte. The stage is verified once, then copied unchanged into `@agent-computer-use/win32-x64` and the complete offline ZIP; the protected core package resolves and verifies that exact platform package before starting MCP. A tag-only workflow publishes the platform package before the core package, validates a clean public-npm install, publishes GitHub Release, and mirrors the exact release assets to Gitee without rebuilding.
+**Architecture:** One canonical Windows x64 platform stage owns every native byte. The stage is verified once, then copied unchanged into `@xiaozhiclaw/agent-computer-use-win32-x64` and the complete offline ZIP; the protected core package resolves and verifies that exact platform package before starting MCP. A tag-only workflow publishes the platform package before the core package, validates a clean public-npm install, publishes GitHub Release, and mirrors the exact release assets to Gitee without rebuilding.
 
 **Tech Stack:** Node.js 20+ ESM, `node:test`, official `@modelcontextprotocol/sdk`, npm package tarballs with provenance, PowerShell deterministic ZIP tooling, CycloneDX JSON SBOM, GitHub Actions, GitHub CLI, and Gitee v5 REST API.
 
 ## Global Constraints
 
 - The only public install name is `agent-computer-use-mcp`; users never install a platform package directly.
-- The core package declares `@agent-computer-use/win32-x64` in `optionalDependencies` with the exact same `X.Y.Z` version; ranges and tags are forbidden.
+- The core package declares `@xiaozhiclaw/agent-computer-use-win32-x64` in `optionalDependencies` with the exact same `X.Y.Z` version; ranges and tags are forbidden.
 - The first and only published native target is `win32-x64`; macOS and Linux stay unpublished until separately validated.
-- The platform package name is `@agent-computer-use/win32-x64` with `os: ["win32"]` and `cpu: ["x64"]`.
+- The platform package name is `@xiaozhiclaw/agent-computer-use-win32-x64` with `os: ["win32"]` and `cpu: ["x64"]`.
 - Native payloads are complete at install time. Runtime download, postinstall download, private updater, installer, administrator privilege, and self-update are forbidden.
 - `platform-manifest.json` covers every platform payload file with sorted relative paths, byte sizes, media types, and SHA-256 hashes; links, traversal, duplicate paths, and Windows case-fold collisions fail closed.
 - The complete ZIP is `agent-computer-use-mcp-X.Y.Z-windows-x64.zip`, requires Node.js 20+, and runs without npm, network access, or installation.
@@ -43,10 +43,10 @@
 ```js
 test("core and Windows platform manifests use one exact release version", () => {
   assert.deepEqual(createCoreOptionalDependencies("1.2.3"), {
-    "@agent-computer-use/win32-x64": "1.2.3",
+    "@xiaozhiclaw/agent-computer-use-win32-x64": "1.2.3",
   });
   assert.deepEqual(createPlatformPackageJson({ version: "1.2.3" }), {
-    name: "@agent-computer-use/win32-x64",
+    name: "@xiaozhiclaw/agent-computer-use-win32-x64",
     version: "1.2.3",
     private: false,
     license: "MIT",
@@ -81,13 +81,13 @@ export const WINDOWS_X64_TARGET = Object.freeze({ platform: "win32", arch: "x64"
 
 export function createCoreOptionalDependencies(version) {
   assertReleaseVersion(version);
-  return { "@agent-computer-use/win32-x64": version };
+  return { "@xiaozhiclaw/agent-computer-use-win32-x64": version };
 }
 
 export function createPlatformPackageJson({ version }) {
   assertReleaseVersion(version);
   return {
-    name: "@agent-computer-use/win32-x64",
+    name: "@xiaozhiclaw/agent-computer-use-win32-x64",
     version,
     private: false,
     license: "MIT",
@@ -263,7 +263,7 @@ test("resolver returns native paths only after exact-version verification", asyn
     resolvePackageJson: () => join(platformRoot, "package.json"),
     realpath,
   });
-  assert.equal(resolved.packageName, "@agent-computer-use/win32-x64");
+  assert.equal(resolved.packageName, "@xiaozhiclaw/agent-computer-use-win32-x64");
   assert.equal(resolved.paths.overlayRoot, join(platformRoot, "overlay"));
 });
 
@@ -282,7 +282,7 @@ Expected: FAIL because the resolver does not exist.
 
 - [ ] **Step 3: Implement resolver and startup integration**
 
-Use `createRequire(import.meta.url).resolve("@agent-computer-use/win32-x64/package.json")`, compare the package root with `realpath`, parse both package and platform manifests, require exact versions, call complete inventory verification, and then derive paths. The protected launcher passes the verified result to the server through an explicit `platformRuntime` option; no environment variable or cache path may override verified package paths.
+Use `createRequire(import.meta.url).resolve("@xiaozhiclaw/agent-computer-use-win32-x64/package.json")`, compare the package root with `realpath`, parse both package and platform manifests, require exact versions, call complete inventory verification, and then derive paths. The protected launcher passes the verified result to the server through an explicit `platformRuntime` option; no environment variable or cache path may override verified package paths.
 
 Change `computer.repair` output for platform failures to a diagnosis plus exact reinstall command. Remove any branch that invokes npm, downloads assets, activates a cache generation, or mutates package files.
 
@@ -562,7 +562,7 @@ npx -y agent-computer-use-mcp@X.Y.Z
 node .\agent-computer-use-mcp-X.Y.Z-windows-x64\bin\agent-computer-use-mcp.mjs
 ```
 
-State that npm automatically installs `@agent-computer-use/win32-x64@X.Y.Z`, the offline ZIP is complete, Gitee mirrors GitHub bytes, and `computer.repair` never downloads or mutates installation files. Add maintainer steps for retrying only the Gitee mirror after an outage and for verifying `checksums.txt` before publication.
+State that npm automatically installs `@xiaozhiclaw/agent-computer-use-win32-x64@X.Y.Z`, the offline ZIP is complete, Gitee mirrors GitHub bytes, and `computer.repair` never downloads or mutates installation files. Add maintainer steps for retrying only the Gitee mirror after an outage and for verifying `checksums.txt` before publication.
 
 - [ ] **Step 2: Run documentation and architecture tests**
 

@@ -3,7 +3,7 @@
 ## Package Contract
 
 - Core package is `agent-computer-use-mcp@X.Y.Z`.
-- Windows package is `@agent-computer-use/win32-x64@X.Y.Z` with exact version, `os: ["win32"]`, and `cpu: ["x64"]`.
+- Windows package is `@xiaozhiclaw/agent-computer-use-win32-x64@X.Y.Z` with exact version, `os: ["win32"]`, and `cpu: ["x64"]`.
 - Core contains no native payload; platform contains no first-party source or source maps.
 - npm dry-run inventories, licenses, CycloneDX SBOM, and SHA-256 manifests pass.
 

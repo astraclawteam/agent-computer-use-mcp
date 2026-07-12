@@ -96,7 +96,7 @@ For release `X.Y.Z`, the core manifest declares:
 ```json
 {
   "optionalDependencies": {
-    "@agent-computer-use/win32-x64": "X.Y.Z"
+    "@xiaozhiclaw/agent-computer-use-win32-x64": "X.Y.Z"
   }
 }
 ```
@@ -109,7 +109,7 @@ generated release manifest.
 Package name:
 
 ```text
-@agent-computer-use/win32-x64
+@xiaozhiclaw/agent-computer-use-win32-x64
 ```
 
 Its release manifest includes:
@@ -125,7 +125,7 @@ Its release manifest includes:
 The package contains:
 
 ```text
-@agent-computer-use/win32-x64/
+@xiaozhiclaw/agent-computer-use-win32-x64/
 ├── package.json
 ├── platform-manifest.json
 ├── cua-driver/
@@ -270,7 +270,7 @@ A `v*` tag triggers one release workflow:
 6. Assemble and smoke the complete offline ZIP from the same staging bytes.
 7. Generate checksums, CycloneDX SBOM, and third-party license inventory.
 8. Create a draft GitHub Release and upload the ZIP, checksums, and SBOM.
-9. Publish `@agent-computer-use/win32-x64` to public npm with provenance.
+9. Publish `@xiaozhiclaw/agent-computer-use-win32-x64` to public npm with provenance.
 10. Publish `agent-computer-use-mcp` to public npm with provenance.
 11. Install the exact public core version from the npm registry in a clean
     Windows directory and run the standard MCP smoke.
@@ -461,7 +461,7 @@ The implementation is complete only when automated tests prove:
 ## Acceptance Criteria
 
 - A user installs only `agent-computer-use-mcp`.
-- npm automatically installs `@agent-computer-use/win32-x64` on Windows x64.
+- npm automatically installs `@xiaozhiclaw/agent-computer-use-win32-x64` on Windows x64.
 - GitHub Release publishes one complete Windows x64 ZIP built from the same
   platform bytes.
 - The ZIP starts with Node.js and no npm installation step.

@@ -6,7 +6,7 @@ export const WINDOWS_X64_TARGET = Object.freeze({
   id: "windows-x64",
 });
 
-const WINDOWS_X64_PACKAGE = "@agent-computer-use/win32-x64";
+const WINDOWS_X64_PACKAGE = "@xiaozhiclaw/agent-computer-use-win32-x64";
 
 export function platformPackageName(target) {
   if (target?.platform === WINDOWS_X64_TARGET.platform

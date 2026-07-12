@@ -76,7 +76,7 @@ export function getSigningPolicy() {
   return {
     npm: {
       provenanceRequired: true,
-      publishOrder: ["@agent-computer-use/win32-x64", "agent-computer-use-mcp"],
+      publishOrder: ["@xiaozhiclaw/agent-computer-use-win32-x64", "agent-computer-use-mcp"],
     },
     windowsHelpers: {
       firstPartyAuthenticodeRequired: false,
@@ -111,7 +111,7 @@ export function buildOfflineAssetManifest(options = {}) {
     generatedAt,
     distribution: {
       corePackage: `agent-computer-use-mcp@${packageVersion}`,
-      platformPackage: `@agent-computer-use/win32-x64@${packageVersion}`,
+      platformPackage: `@xiaozhiclaw/agent-computer-use-win32-x64@${packageVersion}`,
       offlineZip: `agent-computer-use-mcp-${packageVersion}-windows-x64.zip`,
       runtimeDownloadAllowed: false,
     },

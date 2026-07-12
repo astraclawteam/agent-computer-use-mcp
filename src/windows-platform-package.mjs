@@ -183,7 +183,7 @@ function createPlatformSbom({ version, sourceCommit }) {
     metadata: {
       component: {
         type: "application",
-        name: "@agent-computer-use/win32-x64",
+        name: "@xiaozhiclaw/agent-computer-use-win32-x64",
         version,
         properties: [{ name: "source.commit", value: sourceCommit }],
       },
