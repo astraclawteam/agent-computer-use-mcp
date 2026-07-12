@@ -94,7 +94,7 @@ jobs:
         with:
           name: platform-release-assets
           path: release-assets
-      - run: npm publish "release-assets/agent-computer-use-win32-x64-${{ needs.validate.outputs.version }}.tgz" --access public --provenance
+      - run: npm publish "./release-assets/agent-computer-use-win32-x64-${{ needs.validate.outputs.version }}.tgz" --access public --provenance
 
   publish-core-npm:
     needs: [validate, publish-platform-npm]
@@ -113,7 +113,7 @@ jobs:
         with:
           name: platform-release-assets
           path: release-assets
-      - run: npm publish "release-assets/agent-computer-use-mcp-${{ needs.validate.outputs.version }}.tgz" --access public --provenance
+      - run: npm publish "./release-assets/agent-computer-use-mcp-${{ needs.validate.outputs.version }}.tgz" --access public --provenance
 
   post-publish-npm-smoke:
     needs: [validate, publish-core-npm]

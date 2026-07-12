@@ -32,6 +32,8 @@ test("release workflow is tag-only draft-first with two npm provenance publishes
 
   const platformRuns = stepRuns(jobs["publish-platform-npm"]);
   const coreRuns = stepRuns(jobs["publish-core-npm"]);
+  assert.match(platformRuns, /npm publish "\.\/release-assets\/agent-computer-use-win32-x64-/u);
+  assert.match(coreRuns, /npm publish "\.\/release-assets\/agent-computer-use-mcp-/u);
   assert.match(platformRuns, /npm publish[\s\S]*agent-computer-use-win32-x64[\s\S]*--access public --provenance/u);
   assert.match(coreRuns, /npm publish[\s\S]*agent-computer-use-mcp-[\s\S]*?\.tgz[\s\S]*--access public --provenance/u);
   assert.equal(jobs["publish-platform-npm"].environment, "release");
