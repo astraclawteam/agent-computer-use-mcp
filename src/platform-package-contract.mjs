@@ -29,6 +29,10 @@ export function createPlatformPackageJson({ version } = {}) {
     version,
     private: false,
     license: "MIT",
+    repository: {
+      type: "git",
+      url: "git+https://github.com/astraclawteam/agent-computer-use-mcp.git",
+    },
     os: ["win32"],
     cpu: ["x64"],
     files: [
