@@ -8,6 +8,7 @@ Current normative documents:
 4. `app-smoke-matrix.md`
 5. `real-app-smoke-catalog.json`
 6. `../superpowers/specs/2026-07-11-npm-platform-distribution-design.md`
+7. `../superpowers/specs/2026-07-13-gitee-multipart-release-design.md`
 
 The distribution contract is public npm plus a complete GitHub platform ZIP. Gitee Release is a reversible regional transport mirror: small attachments remain identical and oversized attachments use verified 90 MiB parts that reconstruct to the GitHub SHA-256. Windows x64 is the only enabled native target.
 

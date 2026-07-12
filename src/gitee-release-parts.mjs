@@ -31,7 +31,11 @@ export async function prepareGiteeReleaseAssets(options = {}) {
       representation: attachments.length === 1 && attachments[0].name === asset.name ? "exact" : "chunked",
       attachments: attachments.map(identity),
     });
-    if (attachments[0]?.name === asset.name) deliveryAssets.push(asset);
+    if (attachments[0]?.name === asset.name) {
+      const exactPath = join(context.outputRoot, asset.name);
+      await copyFile(asset.path, exactPath);
+      deliveryAssets.push(await describeFile(asset.name, exactPath));
+    }
     else deliveryAssets.push(...attachments);
   }
 

@@ -12,7 +12,7 @@
 - Complete offline ZIP assembled from the same platform stage.
 - 310 MiB compressed ZIP gate and official MCP SDK offline smoke.
 - Tag-only draft-first GitHub/npm workflow with provenance and post-publish clean install smoke.
-- Idempotent Gitee Release byte mirror and remote hash verification.
+- Idempotent Gitee Release transport mirror with quota-safe parts, remote hashes, and reconstructed GitHub identity verification.
 
 ## Before Public 1.0
 

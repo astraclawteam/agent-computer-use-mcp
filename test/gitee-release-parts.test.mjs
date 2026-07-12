@@ -72,6 +72,8 @@ test("Gitee transport keeps boundary assets exact and deterministically splits l
     manifestAsset(first),
     recoveryAsset(first),
   ]);
+  assert.equal(first.assets[0].path, join(root, "first", "checksums.txt"));
+  assert.equal(await readFile(first.assets[0].path, "utf8"), "1234");
   assert.equal(await readFile(first.assets[1].path, "utf8"), "ABCD");
   assert.equal(await readFile(first.assets[3].path, "utf8"), "I");
 });
