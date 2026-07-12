@@ -75,7 +75,7 @@ jobs:
       - name: Create immutable draft boundary
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "${GITHUB_REF_NAME}" release-assets/* --draft --verify-tag --title "${GITHUB_REF_NAME}" --generate-notes
+        run: gh release create "${GITHUB_REF_NAME}" release-assets/* --repo "${GITHUB_REPOSITORY}" --draft --verify-tag --title "${GITHUB_REF_NAME}" --generate-notes
 
   publish-platform-npm:
     needs: [validate, draft-github-release]
@@ -136,7 +136,7 @@ jobs:
       - name: Publish only after public npm smoke passes
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release edit "${GITHUB_REF_NAME}" --draft=false
+        run: gh release edit "${GITHUB_REF_NAME}" --repo "${GITHUB_REPOSITORY}" --draft=false
 
   mirror-gitee-release:
     needs: publish-github-release
@@ -154,11 +154,11 @@ jobs:
       - name: Download published GitHub bytes
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release download "${GITHUB_REF_NAME}" --dir mirror-assets
+        run: gh release download "${GITHUB_REF_NAME}" --repo "${GITHUB_REPOSITORY}" --dir mirror-assets
       - name: Download authoritative GitHub release notes
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release view "${GITHUB_REF_NAME}" --json body --jq .body > "${RUNNER_TEMP}/github-release-notes.md"
+        run: gh release view "${GITHUB_REF_NAME}" --repo "${GITHUB_REPOSITORY}" --json body --jq .body > "${RUNNER_TEMP}/github-release-notes.md"
       - name: Mirror exact assets to Gitee
         env:
           GITEE_OWNER: ${{ vars.GITEE_OWNER }}
@@ -186,11 +186,11 @@ jobs:
       - name: Download authoritative GitHub bytes
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release download "${GITHUB_REF_NAME}" --dir mirror-assets
+        run: gh release download "${GITHUB_REF_NAME}" --repo "${GITHUB_REPOSITORY}" --dir mirror-assets
       - name: Download authoritative GitHub release notes
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release view "${GITHUB_REF_NAME}" --json body --jq .body > "${RUNNER_TEMP}/github-release-notes.md"
+        run: gh release view "${GITHUB_REF_NAME}" --repo "${GITHUB_REPOSITORY}" --json body --jq .body > "${RUNNER_TEMP}/github-release-notes.md"
       - name: Verify Gitee attachment hashes
         env:
           GITEE_OWNER: ${{ vars.GITEE_OWNER }}
