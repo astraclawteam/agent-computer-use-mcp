@@ -25,6 +25,20 @@ function Assert-SafeName {
     }
 }
 
+function Get-FrameworkSha256 {
+    param([string]$Path)
+    $stream = [IO.File]::OpenRead($Path)
+    $algorithm = [Security.Cryptography.SHA256]::Create()
+    try {
+        $bytes = $algorithm.ComputeHash($stream)
+        return ([BitConverter]::ToString($bytes)).Replace("-", "").ToLowerInvariant()
+    }
+    finally {
+        $algorithm.Dispose()
+        $stream.Dispose()
+    }
+}
+
 function Assert-FileIdentity {
     param($Identity, [string]$Path)
     Assert-SafeName ([string]$Identity.name)
@@ -32,7 +46,7 @@ function Assert-FileIdentity {
         Throw-RestoreError "gitee.attachment_missing" ([string]$Identity.name)
     }
     $item = Get-Item -LiteralPath $Path
-    $hash = (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash.ToLowerInvariant()
+    $hash = Get-FrameworkSha256 $Path
     if ($item.Length -ne [long]$Identity.sizeBytes -or $hash -ne [string]$Identity.sha256) {
         Throw-RestoreError "gitee.attachment_identity_mismatch" ([string]$Identity.name)
     }

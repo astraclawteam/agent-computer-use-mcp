@@ -15,6 +15,13 @@ afterEach(async () => {
   await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
 });
 
+test("Gitee recovery uses framework SHA-256 without optional PowerShell cmdlets", async () => {
+  const source = await readFile(script, "utf8");
+
+  assert.match(source, /Security\.Cryptography\.SHA256/u);
+  assert.doesNotMatch(source, /Get-FileHash/u);
+});
+
 test("Gitee recovery verifies exact assets and reconstructs chunked originals", async () => {
   const { input, output } = await fixture();
   await writeFile(join(input, "small.txt"), "small");
