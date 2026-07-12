@@ -26,15 +26,18 @@ runner path, or mutable download location.
 
 ## Mirror Flow
 
-1. Verify the Gitee tag resolves to the same source commit as GitHub.
-2. Materialize the deterministic Gitee transport inventory from downloaded
+1. Fast-forward Gitee `main` to the verified GitHub main commit and create the
+   release tag from the verified source commit. The push never uses force and
+   fails if Gitee diverged or the tag already has another identity.
+2. Verify the Gitee tag resolves to the same source commit as GitHub.
+3. Materialize the deterministic Gitee transport inventory from downloaded
    GitHub assets.
-3. Create or update the release notes for the existing tag.
-4. Retain identical managed attachments, replace mismatches, and upload missing
+4. Create or update the release notes for the existing tag.
+5. Retain identical managed attachments, replace mismatches, and upload missing
    attachments. Preserve unrelated operator attachments.
-5. Download managed attachments sequentially, using streaming SHA-256 to bound
+6. Download managed attachments sequentially, using streaming SHA-256 to bound
    memory.
-6. Verify each attachment and prove each multipart representation reconstructs
+7. Verify each attachment and prove each multipart representation reconstructs
    to the GitHub original size and SHA-256.
 
 The original oversized file is never uploaded to Gitee. Verification is not
@@ -56,6 +59,7 @@ publish npm packages, edit GitHub Release state, or move tags.
 ## Failure Policy
 
 - Missing or mismatched tag identity fails before Gitee release mutation.
+- A non-fast-forward Gitee branch or conflicting tag fails without force.
 - Any local, remote part, manifest, or reconstructed hash mismatch fails closed.
 - Gitee failure never rolls back public npm or GitHub Release.
 - Reruns are idempotent and converge on one release and one deterministic

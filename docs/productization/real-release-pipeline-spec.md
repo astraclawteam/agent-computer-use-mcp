@@ -30,9 +30,10 @@ The npm platform tarball and ZIP platform subtree must have identical path, size
 3. Publish `agent-computer-use-mcp@X.Y.Z` with npm provenance.
 4. On a clean Windows runner install only the core package name from public npm and run official MCP SDK list/health/doctor smoke.
 5. Publish GitHub Release.
-6. Download GitHub assets and prepare the Gitee transport inventory using the protected `release` environment.
-7. Keep assets at or below 90 MiB unchanged. Split larger assets into ordered 90 MiB parts and publish `gitee-mirror-manifest.json` plus `restore-gitee-release.ps1`.
-8. Download every managed Gitee attachment, verify its exact size and SHA-256, and verify that each chunked representation reconstructs to the GitHub asset size and SHA-256.
+6. Fast-forward Gitee `main` and create the release tag from verified GitHub commits without force.
+7. Download GitHub assets and prepare the Gitee transport inventory using the protected `release` environment.
+8. Keep assets at or below 90 MiB unchanged. Split larger assets into ordered 90 MiB parts and publish `gitee-mirror-manifest.json` plus `restore-gitee-release.ps1`.
+9. Download every managed Gitee attachment, verify its exact size and SHA-256, and verify that each chunked representation reconstructs to the GitHub asset size and SHA-256.
 
 The part size is exactly 94,371,840 bytes. Part names append `.partNNN` to the original asset name, starting at `.part001`. The manifest schema records the release tag, source commit, original name/size/SHA-256, representation (`exact` or `chunked`), and ordered part name/size/SHA-256. It contains no token, URL credential, or local path.
 
