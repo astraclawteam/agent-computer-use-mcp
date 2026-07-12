@@ -124,6 +124,24 @@ test("mirror rejects a Gitee tag that resolves to a different commit", async () 
   );
 });
 
+test("mirror rejects a non-ASCII or whitespace token before creating HTTP headers", async () => {
+  for (const token of ["\uFEFFsecret", " secret", "secret\n"]) {
+    await assert.rejects(
+      mirrorGiteeRelease({
+        owner: "team",
+        repo: "project",
+        tag: "v1.2.3",
+        sourceCommit,
+        releaseNotes,
+        assets: [],
+        token,
+        fetch: () => assert.fail("invalid token must fail before fetch"),
+      }),
+      /gitee\.config_invalid: token/u,
+    );
+  }
+});
+
 test("mirror verification rejects release notes that differ from GitHub", async () => {
   await assert.rejects(
     verifyGiteeRelease({
@@ -185,6 +203,82 @@ test("mirror verification downloads remote bytes and fails on any mismatch", asy
       ]),
     }),
     /gitee\.asset_identity_mismatch/,
+  );
+});
+
+test("mirror verification hashes remote attachments sequentially with bounded memory", async () => {
+  const root = await fixtureRoot();
+  const first = await localAsset(root, "first.part001", "first");
+  const second = await localAsset(root, "second.part001", "second");
+  const release = { id: 42, tag_name: "v1.2.3", name: "v1.2.3", body: releaseNotes };
+  let activeDownloads = 0;
+  let maximumDownloads = 0;
+  const fetch = async (url) => {
+    const value = String(url);
+    if (value.endsWith("/commits/v1.2.3")) return response(200, { sha: sourceCommit });
+    if (value.endsWith("/releases/tags/v1.2.3")) return response(200, release);
+    if (value.includes("/attach_files?")) {
+      return response(200, [
+        { id: 1, name: first.name, size: first.sizeBytes, browser_download_url: "https://download.test/first" },
+        { id: 2, name: second.name, size: second.sizeBytes, browser_download_url: "https://download.test/second" },
+      ]);
+    }
+    if (value.startsWith("https://download.test/")) {
+      activeDownloads += 1;
+      maximumDownloads = Math.max(maximumDownloads, activeDownloads);
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      activeDownloads -= 1;
+      return new Response(value.endsWith("first") ? "first" : "second", { status: 200 });
+    }
+    assert.fail(`unexpected request: ${value}`);
+  };
+
+  const report = await verifyGiteeRelease({
+    owner: "team",
+    repo: "project",
+    tag: "v1.2.3",
+    sourceCommit,
+    releaseNotes,
+    expectedAssets: [first, second],
+    originals: [{ name: "archive.zip", sizeBytes: 11, sha256: "c".repeat(64), representation: "chunked" }],
+    token: "token",
+    fetch,
+  });
+
+  assert.equal(maximumDownloads, 1);
+  assert.deepEqual(report.originals, [
+    { name: "archive.zip", sizeBytes: 11, sha256: "c".repeat(64), representation: "chunked" },
+  ]);
+});
+
+test("mirror verification downloads bytes instead of trusting an API-reported hash", async () => {
+  const root = await fixtureRoot();
+  const expected = await localAsset(root, "checksums.txt", "expected");
+  const release = { id: 42, tag_name: "v1.2.3", name: "v1.2.3", body: releaseNotes };
+
+  await assert.rejects(
+    verifyGiteeRelease({
+      owner: "team",
+      repo: "project",
+      tag: "v1.2.3",
+      sourceCommit,
+      releaseNotes,
+      expectedAssets: [expected],
+      token: "token",
+      fetch: sequenceFetch([
+        response(200, { sha: sourceCommit }),
+        response(200, release),
+        response(200, [{
+          id: 7,
+          name: expected.name,
+          size: expected.sizeBytes,
+          sha256: expected.sha256,
+          browser_download_url: "https://download.test/checksums",
+        }]),
+        new Response("changed", { status: 200 }),
+      ]),
+    }),
+    /gitee\.asset_identity_mismatch/u,
   );
 });
 

@@ -38,6 +38,7 @@ export async function mirrorGiteeRelease(options = {}) {
     tag: context.tag,
     plan,
     assets: context.assets.map(({ name, sizeBytes, sha256 }) => ({ name, sizeBytes, sha256 })),
+    originals: context.originals,
   };
 }
 
@@ -48,7 +49,7 @@ export async function verifyGiteeRelease(options = {}) {
   if (!release) throw mirrorError("gitee.release_missing", context.tag);
   assertReleaseMetadata(context, release);
   const listed = await listReleaseAssets(context, release.id);
-  const remote = await hydrateRemoteHashes(context, managedAssets(context, listed));
+  const remote = await hydrateRemoteHashes(context, managedAssets(context, listed), true);
   const plan = planGiteeMirror({ githubAssets: context.assets, giteeAssets: remote });
   if (plan.replace.length > 0 || plan.upload.length > 0 || plan.remove.length > 0) {
     throw mirrorError("gitee.asset_identity_mismatch", JSON.stringify(plan));
@@ -58,6 +59,7 @@ export async function verifyGiteeRelease(options = {}) {
     releaseId: release.id,
     tag: context.tag,
     assets: remote.map(({ name, sizeBytes, sha256 }) => ({ name, sizeBytes, sha256 })),
+    originals: context.originals,
   };
 }
 
@@ -139,19 +141,44 @@ async function listReleaseAssets(context, releaseId) {
   }
 }
 
-async function hydrateRemoteHashes(context, assets) {
-  return Promise.all(assets.map(async (asset) => {
-    if (/^[a-f0-9]{64}$/u.test(asset.sha256 ?? "")) return asset;
-    if (typeof asset.downloadUrl !== "string") return { ...asset, sha256: null };
+async function hydrateRemoteHashes(context, assets, forceDownload = false) {
+  const hydrated = [];
+  for (const asset of assets) {
+    if (!forceDownload && /^[a-f0-9]{64}$/u.test(asset.sha256 ?? "")) {
+      hydrated.push(asset);
+      continue;
+    }
+    if (typeof asset.downloadUrl !== "string") {
+      hydrated.push({ ...asset, sha256: null });
+      continue;
+    }
     const response = await retryFetch(context, asset.downloadUrl, { method: "GET" }, false);
     if (!response.ok) throw mirrorError("gitee.asset_download_failed", asset.name);
-    const bytes = Buffer.from(await response.arrayBuffer());
-    return {
+    const downloaded = await hashResponse(response);
+    hydrated.push({
       ...asset,
-      sizeBytes: bytes.length,
-      sha256: createHash("sha256").update(bytes).digest("hex"),
-    };
-  }));
+      sizeBytes: downloaded.sizeBytes,
+      sha256: downloaded.sha256,
+    });
+  }
+  return hydrated;
+}
+
+async function hashResponse(response) {
+  const hash = createHash("sha256");
+  let sizeBytes = 0;
+  if (response.body) {
+    for await (const chunk of response.body) {
+      const bytes = Buffer.from(chunk);
+      sizeBytes += bytes.length;
+      hash.update(bytes);
+    }
+  } else {
+    const bytes = Buffer.from(await response.arrayBuffer());
+    sizeBytes = bytes.length;
+    hash.update(bytes);
+  }
+  return { sizeBytes, sha256: hash.digest("hex") };
 }
 
 async function uploadAsset(context, releaseId, asset) {
@@ -214,6 +241,10 @@ function releaseContext(options) {
   }
   if (typeof options.releaseNotes !== "string") throw mirrorError("gitee.config_missing", "releaseNotes");
   if (!Array.isArray(options.assets)) throw mirrorError("gitee.assets_invalid", "assets");
+  if (!/^[\x21-\x7e]+$/u.test(options.token)) throw mirrorError("gitee.config_invalid", "token");
+  if (options.originals !== undefined && !Array.isArray(options.originals)) {
+    throw mirrorError("gitee.assets_invalid", "originals");
+  }
   return {
     owner: options.owner,
     repo: options.repo,
@@ -222,6 +253,12 @@ function releaseContext(options) {
     sourceCommit: options.sourceCommit,
     releaseNotes: options.releaseNotes,
     assets: options.assets,
+    originals: (options.originals ?? []).map(({ name, sizeBytes, sha256, representation }) => ({
+      name,
+      sizeBytes,
+      sha256,
+      representation,
+    })),
     fetch: options.fetch ?? globalThis.fetch,
     delay: options.delay ?? ((ms) => new Promise((resolveDelay) => setTimeout(resolveDelay, ms))),
   };
