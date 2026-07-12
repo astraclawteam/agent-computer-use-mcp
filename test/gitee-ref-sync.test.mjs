@@ -13,10 +13,7 @@ test("Gitee ref sync pushes only verified main and tag refs without force or tok
     tag: "v1.2.3",
     sourceCommit,
     token: "secret-token",
-    fetch: async () => new Response(JSON.stringify({ login: "automation" }), {
-      status: 200,
-      headers: { "content-type": "application/json" },
-    }),
+    fetch: refSyncFetch({ tagStatus: 404 }),
     runGit: async (args, options) => {
       calls.push({ args, options });
       return { exitCode: 0, stdout: "ok", stderr: "" };
@@ -60,12 +57,65 @@ test("Gitee ref sync validates credentials and sanitizes git failures", async ()
       tag: "v1.2.3",
       sourceCommit,
       token: "secret-token",
-      fetch: async () => new Response(JSON.stringify({ login: "automation" }), {
-        status: 200,
-        headers: { "content-type": "application/json" },
-      }),
+      fetch: refSyncFetch({ tagStatus: 404 }),
       runGit: async () => ({ exitCode: 1, stdout: "", stderr: "secret-token rejected" }),
     }),
     (error) => error.code === "gitee.ref_sync_failed" && !error.message.includes("secret-token"),
   );
 });
+
+test("Gitee ref sync preserves an existing annotated tag with the same source commit", async () => {
+  const calls = [];
+  await syncGiteeReleaseRef({
+    owner: "team",
+    repo: "project",
+    tag: "v1.2.3",
+    sourceCommit,
+    mainCommit: "b".repeat(40),
+    token: "secret-token",
+    fetch: refSyncFetch({ tagStatus: 200, tagCommit: sourceCommit }),
+    runGit: async (args) => {
+      calls.push(args);
+      return { exitCode: 0, stdout: "", stderr: "" };
+    },
+  });
+
+  assert.deepEqual(calls[0], [
+    "push",
+    "--porcelain",
+    "https://gitee.com/team/project.git",
+    `${"b".repeat(40)}:refs/heads/main`,
+  ]);
+
+  await assert.rejects(
+    syncGiteeReleaseRef({
+      owner: "team",
+      repo: "project",
+      tag: "v1.2.3",
+      sourceCommit,
+      token: "secret-token",
+      fetch: refSyncFetch({ tagStatus: 200, tagCommit: "c".repeat(40) }),
+      runGit: () => assert.fail("conflicting tag must fail before git"),
+    }),
+    /gitee\.tag_commit_mismatch/u,
+  );
+});
+
+function refSyncFetch({ tagStatus, tagCommit }) {
+  return async (url) => {
+    if (String(url).endsWith("/user")) {
+      return jsonResponse(200, { login: "automation" });
+    }
+    if (String(url).endsWith("/commits/v1.2.3")) {
+      return jsonResponse(tagStatus, tagStatus === 200 ? { sha: tagCommit } : { message: "Not Found" });
+    }
+    assert.fail(`unexpected request: ${url}`);
+  };
+}
+
+function jsonResponse(status, value) {
+  return new Response(JSON.stringify(value), {
+    status,
+    headers: { "content-type": "application/json" },
+  });
+}

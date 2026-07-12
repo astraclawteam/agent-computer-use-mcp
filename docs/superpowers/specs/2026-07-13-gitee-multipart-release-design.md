@@ -29,6 +29,8 @@ runner path, or mutable download location.
 1. Fast-forward Gitee `main` to the verified GitHub main commit and create the
    release tag from the verified source commit. The push never uses force and
    fails if Gitee diverged or the tag already has another identity.
+   An existing annotated or lightweight tag is preserved when it dereferences
+   to the expected source commit; the workflow never rewrites tag object type.
 2. Verify the Gitee tag resolves to the same source commit as GitHub.
 3. Materialize the deterministic Gitee transport inventory from downloaded
    GitHub assets.
