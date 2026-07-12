@@ -14,7 +14,7 @@ permissions:
 jobs:
   repair-gitee-release:
     runs-on: ubuntu-latest
-    environment: release
+    environment: gitee-release-repair
     steps:
       - uses: actions/checkout@v6
         with:

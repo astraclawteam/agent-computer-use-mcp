@@ -56,6 +56,11 @@ tag, verifies it is reachable from `main`, downloads that GitHub Release, and
 runs the same mirror and verification code. It cannot build release assets,
 publish npm packages, edit GitHub Release state, or move tags.
 
+The manual workflow uses a dedicated `gitee-release-repair` GitHub environment
+that permits only `main` and contains only the Gitee token and repository
+variables. The tag-only `release` environment and npm credentials remain
+unavailable to repair runs.
+
 ## Failure Policy
 
 - Missing or mismatched tag identity fails before Gitee release mutation.
