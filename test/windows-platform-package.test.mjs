@@ -28,6 +28,10 @@ test("builder produces a complete immutable Windows platform package", async () 
   assert.equal(result.status, "passed");
   assert.equal(packageJson.name, "@xiaozhiclaw/agent-computer-use-win32-x64");
   assert.equal(packageJson.version, "1.2.3");
+  assert.deepEqual(packageJson.repository, {
+    type: "git",
+    url: "git+https://github.com/astraclawteam/agent-computer-use-mcp.git",
+  });
   assert.deepEqual(packageJson.os, ["win32"]);
   assert.deepEqual(packageJson.cpu, ["x64"]);
   assert.equal(manifest.version, "1.2.3");

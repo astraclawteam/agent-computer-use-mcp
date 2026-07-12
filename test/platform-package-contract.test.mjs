@@ -24,6 +24,10 @@ test("core and Windows platform manifests use one exact release version", () => 
     version: "1.2.3",
     private: false,
     license: "MIT",
+    repository: {
+      type: "git",
+      url: "git+https://github.com/astraclawteam/agent-computer-use-mcp.git",
+    },
     os: ["win32"],
     cpu: ["x64"],
     files: [
