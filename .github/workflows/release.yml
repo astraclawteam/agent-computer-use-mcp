@@ -85,6 +85,7 @@ jobs:
       contents: read
       id-token: write
     steps:
+      - uses: actions/checkout@v6
       - uses: actions/setup-node@v6
         with:
           node-version: "24.12.0"
@@ -94,7 +95,11 @@ jobs:
         with:
           name: platform-release-assets
           path: release-assets
-      - run: npm publish "./release-assets/agent-computer-use-win32-x64-${{ needs.validate.outputs.version }}.tgz" --access public --provenance
+      - name: Publish Windows platform package with validated authentication
+        run: |
+          node scripts/validate-npm-auth-token.mjs
+          npm whoami --registry https://registry.npmjs.org/
+          npm publish "./release-assets/agent-computer-use-win32-x64-${{ needs.validate.outputs.version }}.tgz" --access public --provenance
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_PLATFORM_TOKEN }}
 
@@ -106,6 +111,7 @@ jobs:
       contents: read
       id-token: write
     steps:
+      - uses: actions/checkout@v6
       - uses: actions/setup-node@v6
         with:
           node-version: "24.12.0"
@@ -115,7 +121,11 @@ jobs:
         with:
           name: platform-release-assets
           path: release-assets
-      - run: npm publish "./release-assets/agent-computer-use-mcp-${{ needs.validate.outputs.version }}.tgz" --access public --provenance
+      - name: Publish core package with validated authentication
+        run: |
+          node scripts/validate-npm-auth-token.mjs
+          npm whoami --registry https://registry.npmjs.org/
+          npm publish "./release-assets/agent-computer-use-mcp-${{ needs.validate.outputs.version }}.tgz" --access public --provenance
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_CORE_TOKEN }}
 
