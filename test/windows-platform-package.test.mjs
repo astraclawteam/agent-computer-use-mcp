@@ -26,7 +26,7 @@ test("builder produces a complete immutable Windows platform package", async () 
   const manifest = JSON.parse(await readFile(join(outputRoot, "platform-manifest.json"), "utf8"));
   const sbom = JSON.parse(await readFile(join(outputRoot, "SBOM.cdx.json"), "utf8"));
   assert.equal(result.status, "passed");
-  assert.equal(packageJson.name, "@agent-computer-use/win32-x64");
+  assert.equal(packageJson.name, "@xiaozhiclaw/agent-computer-use-win32-x64");
   assert.equal(packageJson.version, "1.2.3");
   assert.deepEqual(packageJson.os, ["win32"]);
   assert.deepEqual(packageJson.cpu, ["x64"]);

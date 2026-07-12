@@ -26,7 +26,7 @@ The npm platform tarball and ZIP platform subtree must have identical path, size
 ## Publication Order
 
 1. Create draft GitHub Release with all six assets.
-2. Publish `@agent-computer-use/win32-x64@X.Y.Z` with npm provenance.
+2. Publish `@xiaozhiclaw/agent-computer-use-win32-x64@X.Y.Z` with npm provenance.
 3. Publish `agent-computer-use-mcp@X.Y.Z` with npm provenance.
 4. On a clean Windows runner install only the core package name from public npm and run official MCP SDK list/health/doctor smoke.
 5. Publish GitHub Release.

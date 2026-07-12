@@ -81,7 +81,7 @@ test("protected npm staging package has a release-only manifest", async () => {
     "ppu-paddle-ocr": "^6.0.0",
   });
   assert.deepEqual(packageJson.optionalDependencies, {
-    "@agent-computer-use/win32-x64": "0.0.1",
+    "@xiaozhiclaw/agent-computer-use-win32-x64": "0.0.1",
   });
   assert.equal(packageJson.files.some((entry) => /cua-driver|overlay|ocr-runtime|models/u.test(entry)), false);
 });

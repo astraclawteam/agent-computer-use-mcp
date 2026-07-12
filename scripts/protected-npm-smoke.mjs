@@ -70,7 +70,12 @@ export async function runProtectedNpmSmoke(options = {}) {
 }
 
 async function buildSmokePlatformPackage(outputRoot, version) {
-  const platformRoot = join(outputRoot, "node_modules", "@agent-computer-use", "win32-x64");
+  const platformRoot = join(
+    outputRoot,
+    "node_modules",
+    "@xiaozhiclaw",
+    "agent-computer-use-win32-x64",
+  );
   await buildWindowsPlatformPackage({
     outputRoot: platformRoot,
     version,

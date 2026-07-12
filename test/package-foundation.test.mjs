@@ -31,7 +31,7 @@ test("package foundation assigns upgrade and rollback to exact npm versions", ()
 test("package foundation requires npm provenance hashes and SBOM", () => {
   const policy = getSigningPolicy();
   assert.equal(policy.npm.provenanceRequired, true);
-  assert.deepEqual(policy.npm.publishOrder, ["@agent-computer-use/win32-x64", "agent-computer-use-mcp"]);
+  assert.deepEqual(policy.npm.publishOrder, ["@xiaozhiclaw/agent-computer-use-win32-x64", "agent-computer-use-mcp"]);
   assert.equal(policy.releaseArtifacts.sha256Required, true);
   assert.equal(policy.releaseArtifacts.sbomRequired, true);
   assert.equal(policy.windowsHelpers.firstPartyFiles.includes("gateway-overlay"), true);
@@ -40,7 +40,7 @@ test("package foundation requires npm provenance hashes and SBOM", () => {
 test("offline asset manifest assigns every native byte to the platform package", () => {
   const manifest = buildOfflineAssetManifest({ packageVersion: "0.0.1", generatedAt: "2026-07-11T00:00:00.000Z" });
   assert.equal(manifest.distribution.runtimeDownloadAllowed, false);
-  assert.equal(manifest.distribution.platformPackage, "@agent-computer-use/win32-x64@0.0.1");
+  assert.equal(manifest.distribution.platformPackage, "@xiaozhiclaw/agent-computer-use-win32-x64@0.0.1");
   assert.deepEqual(manifest.assets.map(({ id }) => id), [
     "cua-driver-windows-x64",
     "gateway-overlay-windows",

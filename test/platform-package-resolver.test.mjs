@@ -26,7 +26,7 @@ test("resolver returns native paths only after exact-version verification", asyn
     realpath,
   });
 
-  assert.equal(resolved.packageName, "@agent-computer-use/win32-x64");
+  assert.equal(resolved.packageName, "@xiaozhiclaw/agent-computer-use-win32-x64");
   assert.equal(resolved.packageRoot, platformRoot);
   assert.equal(resolved.manifest.version, "1.2.3");
   assert.equal(resolved.paths.cuaDriverRoot, join(platformRoot, "cua-driver"));

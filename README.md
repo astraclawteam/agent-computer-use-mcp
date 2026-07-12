@@ -11,7 +11,7 @@ npm install agent-computer-use-mcp@X.Y.Z
 npx -y agent-computer-use-mcp@X.Y.Z
 ```
 
-npm automatically selects the exact matching `@agent-computer-use/win32-x64@X.Y.Z` optional dependency. The protected core package contains the MCP runtime; the platform package contains cua-driver, the native overlay, ONNX Runtime, and PP-OCRv6 small models. Missing, linked, mismatched, incomplete, or corrupt platform packages fail before MCP startup.
+npm automatically selects the exact matching `@xiaozhiclaw/agent-computer-use-win32-x64@X.Y.Z` optional dependency. The protected core package contains the MCP runtime; the platform package contains cua-driver, the native overlay, ONNX Runtime, and PP-OCRv6 small models. Missing, linked, mismatched, incomplete, or corrupt platform packages fail before MCP startup.
 
 Example host configuration:
 

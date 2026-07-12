@@ -15,12 +15,12 @@ test("core and Windows platform manifests use one exact release version", () => 
     arch: "x64",
     id: "windows-x64",
   });
-  assert.equal(platformPackageName(WINDOWS_X64_TARGET), "@agent-computer-use/win32-x64");
+  assert.equal(platformPackageName(WINDOWS_X64_TARGET), "@xiaozhiclaw/agent-computer-use-win32-x64");
   assert.deepEqual(createCoreOptionalDependencies("1.2.3"), {
-    "@agent-computer-use/win32-x64": "1.2.3",
+    "@xiaozhiclaw/agent-computer-use-win32-x64": "1.2.3",
   });
   assert.deepEqual(createPlatformPackageJson({ version: "1.2.3" }), {
-    name: "@agent-computer-use/win32-x64",
+    name: "@xiaozhiclaw/agent-computer-use-win32-x64",
     version: "1.2.3",
     private: false,
     license: "MIT",

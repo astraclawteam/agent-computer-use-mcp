@@ -38,7 +38,7 @@ test("formal release plan requires exact assets platform-first npm and provenanc
       "release-manifest.json",
       "SBOM.cdx.json",
     ],
-    npmPublishOrder: ["@agent-computer-use/win32-x64", "agent-computer-use-mcp"],
+    npmPublishOrder: ["@xiaozhiclaw/agent-computer-use-win32-x64", "agent-computer-use-mcp"],
     provenance: true,
     githubDraftFirst: true,
     runtimeDownloadAllowed: false,

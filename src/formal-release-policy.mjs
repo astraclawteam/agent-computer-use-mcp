@@ -38,7 +38,7 @@ export function validatePlatformReleasePlan(plan = {}) {
     violations.push(violation("release.assets_invalid", "Release artifact inventory does not match the platform contract."));
   }
   if (JSON.stringify(plan.npmPublishOrder) !== JSON.stringify([
-    "@agent-computer-use/win32-x64",
+    "@xiaozhiclaw/agent-computer-use-win32-x64",
     "agent-computer-use-mcp",
   ])) {
     violations.push(violation("release.npm_order_invalid", "Platform npm package must publish before core."));
