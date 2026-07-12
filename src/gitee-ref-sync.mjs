@@ -5,14 +5,16 @@ const API_ROOT = "https://gitee.com/api/v5";
 export async function syncGiteeReleaseRef(options = {}) {
   const context = validateOptions(options);
   const identity = await resolveIdentity(context);
+  const existingTagCommit = await resolveTagCommit(context);
   const authorization = Buffer.from(`${identity.login}:${context.token}`, "utf8").toString("base64");
-  const result = await context.runGit([
+  const args = [
     "push",
     "--porcelain",
     `https://gitee.com/${context.owner}/${context.repo}.git`,
     `${context.mainCommit}:refs/heads/main`,
-    `${context.sourceCommit}:refs/tags/${context.tag}`,
-  ], {
+  ];
+  if (existingTagCommit === null) args.push(`${context.sourceCommit}:refs/tags/${context.tag}`);
+  const result = await context.runGit(args, {
     env: {
       ...process.env,
       GIT_CONFIG_COUNT: "2",
@@ -25,6 +27,31 @@ export async function syncGiteeReleaseRef(options = {}) {
   });
   if (result.exitCode !== 0) throw syncError("gitee.ref_sync_failed", String(result.exitCode));
   return { status: "synced", tag: context.tag, sourceCommit: context.sourceCommit };
+}
+
+async function resolveTagCommit(context) {
+  let response;
+  try {
+    response = await context.fetch(
+      `${API_ROOT}/repos/${encodeURIComponent(context.owner)}/${encodeURIComponent(context.repo)}/commits/${encodeURIComponent(context.tag)}`,
+      {
+        method: "GET",
+        headers: {
+          authorization: `token ${context.token}`,
+          accept: "application/json",
+        },
+      },
+    );
+  } catch (cause) {
+    throw syncError("gitee.transport_failed", cause instanceof Error ? cause.name : typeof cause);
+  }
+  if (response.status === 404) return null;
+  if (!response.ok) throw syncError("gitee.api_failed", String(response.status));
+  const commit = await response.json();
+  if (commit?.sha !== context.sourceCommit) {
+    throw syncError("gitee.tag_commit_mismatch", `${commit?.sha ?? "missing"} != ${context.sourceCommit}`);
+  }
+  return commit.sha;
 }
 
 async function resolveIdentity(context) {
