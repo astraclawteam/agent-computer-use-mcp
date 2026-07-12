@@ -27,6 +27,7 @@ test("Gitee repair workflow reuses an immutable published GitHub release", async
   assert.match(runs, /sync-gitee-release-ref\.mjs[\s\S]*mirror-gitee-release\.mjs/u);
   assert.match(runs, /mirror-gitee-release\.mjs/u);
   assert.match(runs, /verify-gitee-release\.mjs/u);
+  assert.doesNotMatch(runs, /npm ci/u);
   assert.match(source, /vars\.GITEE_OWNER/u);
   assert.match(source, /vars\.GITEE_REPO/u);
   assert.match(source, /secrets\.GITEE_TOKEN/u);
