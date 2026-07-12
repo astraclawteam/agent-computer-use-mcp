@@ -46,6 +46,16 @@ test("release workflow is tag-only draft-first with two npm provenance publishes
   assert.match(stepRuns(jobs["verify-gitee-release"]), /gh release view[\s\S]*--json body/u);
   assert.match(source, /RELEASE_SOURCE_COMMIT:[\s\S]*github\.sha/u);
   assert.match(source, /RELEASE_NOTES_PATH:/u);
+  const releaseCommands = [
+    ...stepRuns(jobs["draft-github-release"]).matchAll(/^gh release .+$/gmu),
+    ...stepRuns(jobs["publish-github-release"]).matchAll(/^gh release .+$/gmu),
+    ...stepRuns(jobs["mirror-gitee-release"]).matchAll(/^gh release .+$/gmu),
+    ...stepRuns(jobs["verify-gitee-release"]).matchAll(/^gh release .+$/gmu),
+  ].map(([command]) => command);
+  assert.equal(releaseCommands.length, 6);
+  for (const command of releaseCommands) {
+    assert.match(command, /--repo "\$\{GITHUB_REPOSITORY\}"/u);
+  }
   assert.doesNotMatch(source, /azure|artifact-signing|authenticode|installer|test certificate|ASSET_SIGNING_PRIVATE_KEY/iu);
 });
 
