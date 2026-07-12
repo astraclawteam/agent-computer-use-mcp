@@ -28,7 +28,9 @@
 - Platform npm publishes before core npm; both use provenance.
 - A clean runner installs only `agent-computer-use-mcp@X.Y.Z` from public npm and passes MCP smoke before GitHub Release is published.
 - GitHub Release includes exactly both npm tarballs, complete ZIP, `checksums.txt`, `release-manifest.json`, and `SBOM.cdx.json`.
-- Gitee mirrors those same bytes. Any remote name, size, or SHA-256 mismatch fails the mirror verification job.
+- Gitee keeps each asset at or below 90 MiB byte-identical and deterministically splits larger assets into 90 MiB parts.
+- The Gitee manifest, every part hash, and each reconstructed original size and SHA-256 must match the published GitHub inventory. Any mismatch fails closed.
+- A Gitee repair run consumes an immutable published GitHub tag and assets; it cannot rebuild, publish npm, or move a tag.
 
 ## Product Safety
 

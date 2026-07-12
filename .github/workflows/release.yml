@@ -160,6 +160,8 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
       - uses: actions/setup-node@v6
         with:
           node-version: "24.12.0"
@@ -173,7 +175,16 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: gh release view "${GITHUB_REF_NAME}" --repo "${GITHUB_REPOSITORY}" --json body --jq .body > "${RUNNER_TEMP}/github-release-notes.md"
-      - name: Mirror exact assets to Gitee
+      - name: Fast-forward Gitee main and create the immutable release tag
+        env:
+          GITEE_OWNER: ${{ vars.GITEE_OWNER }}
+          GITEE_REPO: ${{ vars.GITEE_REPO }}
+          GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}
+          RELEASE_TAG: ${{ github.ref_name }}
+          RELEASE_SOURCE_COMMIT: ${{ github.sha }}
+          GITEE_MAIN_COMMIT: ${{ github.sha }}
+        run: node scripts/sync-gitee-release-ref.mjs
+      - name: Mirror quota-safe assets to Gitee
         env:
           GITEE_OWNER: ${{ vars.GITEE_OWNER }}
           GITEE_REPO: ${{ vars.GITEE_REPO }}
@@ -205,7 +216,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: gh release view "${GITHUB_REF_NAME}" --repo "${GITHUB_REPOSITORY}" --json body --jq .body > "${RUNNER_TEMP}/github-release-notes.md"
-      - name: Verify Gitee attachment hashes
+      - name: Verify Gitee parts and reconstructed identities
         env:
           GITEE_OWNER: ${{ vars.GITEE_OWNER }}
           GITEE_REPO: ${{ vars.GITEE_REPO }}

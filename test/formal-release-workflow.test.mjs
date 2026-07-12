@@ -57,6 +57,9 @@ test("release workflow is tag-only draft-first with two npm provenance publishes
   assert.match(stepRuns(jobs["post-publish-npm-smoke"]), /post-publish-smoke\.mjs/u);
   assert.match(stepRuns(jobs["mirror-gitee-release"]), /gh release view[\s\S]*--json body/u);
   assert.match(stepRuns(jobs["verify-gitee-release"]), /gh release view[\s\S]*--json body/u);
+  assert.match(stepRuns(jobs["mirror-gitee-release"]), /mirror-gitee-release\.mjs/u);
+  assert.match(stepRuns(jobs["mirror-gitee-release"]), /sync-gitee-release-ref\.mjs[\s\S]*mirror-gitee-release\.mjs/u);
+  assert.match(stepRuns(jobs["verify-gitee-release"]), /verify-gitee-release\.mjs/u);
   assert.match(source, /RELEASE_SOURCE_COMMIT:[\s\S]*github\.sha/u);
   assert.match(source, /RELEASE_NOTES_PATH:/u);
   const releaseCommands = [

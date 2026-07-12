@@ -309,20 +309,32 @@ The mirror job:
 1. Uses the published GitHub Release inventory as its only input.
 2. Ensures the same `vX.Y.Z` tag exists in the Gitee repository.
 3. Creates or updates the Gitee Release for that exact tag.
-4. Uploads the complete Windows x64 ZIP, checksums, SBOM, and release inventory.
-5. Lists the uploaded attachments and compares file names and sizes.
-6. Downloads each attachment when the API permits deterministic download and
-   compares SHA-256; otherwise it verifies the API-reported identity and records
-   the limitation as explicit evidence.
-7. Writes a sanitized mirror report containing no access token or local path.
+4. Keeps attachments at or below 90 MiB byte-identical and splits every larger
+   GitHub asset into ordered 90 MiB `.partNNN` attachments.
+5. Uploads `gitee-mirror-manifest.json` and `restore-gitee-release.ps1` with the
+   transport inventory.
+6. Downloads every managed attachment and compares its exact size and SHA-256.
+7. Verifies that ordered parts reconstruct to each GitHub original's exact size
+   and SHA-256.
+8. Writes a sanitized mirror report containing no access token or local path.
 
 The job is idempotent:
 
 - an existing release for the same tag is reused;
-- an attachment with the expected name and hash is retained;
+- an attachment or part with the expected name and hash is retained;
 - an attachment with the expected name but different bytes is replaced;
 - unrelated releases and attachments are never deleted;
-- rerunning the workflow converges to the GitHub release inventory.
+- rerunning the workflow converges to the deterministic Gitee transport
+  inventory without rebuilding a GitHub or npm artifact.
+
+Gitee community release attachments have a 100 MB per-file quota. The mirror
+therefore uses a conservative exact part size of 94,371,840 bytes (90 MiB).
+Part names append `.partNNN` to the original asset name, starting at
+`.part001`. The versioned manifest records the tag, source commit, original
+name/size/SHA-256, representation (`exact` or `chunked`), and ordered part
+name/size/SHA-256. The recovery script joins only manifest-declared local parts,
+refuses missing or unexpected hashes, and verifies the restored original before
+success. GitHub and npm retain the original six unmodified release assets.
 
 GitHub and npm publication are not rolled back when Gitee is unavailable. A
 failed mirror job leaves the authoritative release published, marks the workflow
@@ -424,7 +436,8 @@ For the ZIP:
   storage, removable media, or an enterprise artifact proxy, and then used
   offline;
 - GitHub Release remains the only official ZIP publication channel;
-- Gitee Release exposes a byte-identical regional mirror of that official ZIP;
+- Gitee Release exposes either the identical attachment or a reversible,
+  hash-verified multipart representation of that official ZIP;
 - the project does not promise direct GitHub reachability or throughput from
   every network.
 
@@ -448,8 +461,9 @@ The implementation is complete only when automated tests prove:
 - neither MCP startup nor first Computer Use activation performs a download;
 - the complete ZIP runs without npm or network access;
 - npm platform payload bytes and ZIP platform payload bytes are identical;
-- Gitee mirror attachments match the published GitHub release inventory and a
-  rerun does not create duplicate releases or attachments;
+- Gitee managed attachments match the deterministic transport inventory, every
+  part hash is verified, reconstructed originals match the GitHub inventory,
+  and a rerun creates no duplicate release or attachment;
 - a simulated Gitee outage does not mutate or revoke npm or GitHub publication;
 - logs and mirror reports never contain `GITEE_TOKEN`;
 - public npm post-publish installation resolves the platform package;
@@ -469,8 +483,8 @@ The implementation is complete only when automated tests prove:
   architecture.
 - No first-use asset download occurs.
 - Public npm and GitHub Release remain the only official channels.
-- Gitee provides a byte-identical, automatically maintained regional mirror and
-  never builds or versions artifacts independently.
+- Gitee provides an automatically maintained, reversible regional transport
+  mirror and never builds or versions artifacts independently.
 - Runtime works fully offline after package acquisition.
 
 ## References
