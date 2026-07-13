@@ -8,6 +8,9 @@ import { createBrowserFixtureAdapter } from "./browser-fixture.mjs";
 import { createNativeFixtureAdapter } from "./native-fixture.mjs";
 import { createNotepadAdapter } from "./notepad.mjs";
 import { createVisualFixtureAdapter } from "./visual-fixture.mjs";
+import { createLibreOfficeAdapter } from "./libreoffice.mjs";
+import { createVscodeAdapter } from "./vscode.mjs";
+import { createWpsOfficeAdapter } from "./wps-office.mjs";
 
 export {
   APP_ADAPTER_METHODS,
@@ -21,6 +24,15 @@ export const TIER_A_ADAPTER_FACTORIES = Object.freeze({
   "native-form": createNativeFixtureAdapter,
   "browser-local": createBrowserFixtureAdapter,
   "visual-fixture": createVisualFixtureAdapter,
+});
+
+export const INSTALLED_APP_ADAPTER_FACTORIES = Object.freeze({
+  "vscode-workspace": createVscodeAdapter,
+  "libreoffice-writer": (options) => createLibreOfficeAdapter({ ...options, component: "writer" }),
+  "libreoffice-calc": (options) => createLibreOfficeAdapter({ ...options, component: "calc" }),
+  "libreoffice-impress": (options) => createLibreOfficeAdapter({ ...options, component: "impress" }),
+  "libreoffice-draw": (options) => createLibreOfficeAdapter({ ...options, component: "draw" }),
+  "wps-document": createWpsOfficeAdapter,
 });
 
 export function createAppAdapterRegistry(adapters = {}) {

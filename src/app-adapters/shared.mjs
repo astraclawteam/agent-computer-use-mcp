@@ -70,6 +70,17 @@ export async function inspectWindowsExecutableIdentity(path) {
   };
 }
 
+export function terminateOwnedProcessTree(pid) {
+  if (!Number.isInteger(pid) || pid <= 0) return Promise.resolve();
+  if (process.platform !== "win32") {
+    try { process.kill(pid, "SIGKILL"); } catch {}
+    return Promise.resolve();
+  }
+  return new Promise((resolvePromise) => {
+    execFile("taskkill.exe", ["/PID", String(pid), "/T", "/F"], { windowsHide: true, timeout: 10_000 }, () => resolvePromise());
+  });
+}
+
 function readWindowsFileVersion(path) {
   return new Promise((resolvePromise, reject) => {
     execFile("powershell.exe", [
