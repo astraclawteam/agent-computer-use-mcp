@@ -56,3 +56,10 @@
 - Complete screenshots and user documents are forbidden. Tokens, user-profile
   paths, host names, command lines, and executable paths are rejected before
   evidence sealing.
+- The two-hour nightly gate runs for exactly 7,200,000 ms on Windows with its
+  immutable workload and retains sealed evidence for 30 days.
+- The eight-hour release-candidate gate runs for exactly 28,800,000 ms, writes
+  at least 48 periodic checkpoints, and is imported only after source and copy
+  identities both verify.
+- Failed long runs and passing retries use distinct run IDs. Evidence files are
+  immutable and are never edited, deleted, or overwritten to obtain a pass.

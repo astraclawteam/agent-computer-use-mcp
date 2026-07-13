@@ -20,5 +20,6 @@ test("product docs freeze PR soak evidence commands targets and privacy", async 
   assert.match(text, /checksums\.txt/u);
   assert.match(text, /zero orphan processes,\s+residual ports, overlay leaks, and cursor\s+leaks/u);
   assert.match(text, /complete screenshots and user documents are forbidden/iu);
-  assert.match(roadmap, /two-hour nightly and eight-hour release-candidate evidence remain in PR6B/iu);
+  assert.match(roadmap, /Frozen two-hour nightly and eight-hour release-candidate gates/iu);
+  assert.match(roadmap, /implementation tests do not substitute for those long runs/iu);
 });
