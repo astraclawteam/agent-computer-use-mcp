@@ -73,12 +73,29 @@ export function buildPerceptionLatencyReport(options = {}) {
     }),
     targets: Object.freeze({ ...PERCEPTION_QUALITY_TARGETS, ...PERCEPTION_LATENCY_TARGETS }),
     quality,
+    regressions: sanitizeRegressions(benchmark.regressions),
     cases: Object.freeze(cases),
     fullWindow,
     violations: Object.freeze(violations.map((entry) => Object.freeze(entry))),
     includeUserOverlay: false,
     startsDesktopControl: false,
   });
+}
+
+function sanitizeRegressions(regressions) {
+  if (!Array.isArray(regressions)) throw reportError("perception.benchmark_regressions_invalid");
+  return Object.freeze(regressions.map((entry) => {
+    if (typeof entry?.sampleId !== "string" || entry.sampleId.trim() === "" || !Array.isArray(entry.failures)) {
+      throw reportError("perception.benchmark_regressions_invalid");
+    }
+    const failures = entry.failures.map((failure) => {
+      if (typeof failure?.code !== "string" || !/^[a-z][a-z0-9._-]{1,100}$/u.test(failure.code)) {
+        throw reportError("perception.benchmark_regressions_invalid");
+      }
+      return Object.freeze({ code: failure.code });
+    });
+    return Object.freeze({ sampleId: entry.sampleId, failures: Object.freeze(failures) });
+  }));
 }
 
 function warmCase(id, values, targetMs) {

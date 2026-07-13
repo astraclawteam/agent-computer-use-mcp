@@ -35,6 +35,7 @@ test("Phase 3.5 derives quality and latency gates only from a measured benchmark
   assert.equal(report.cases.fullWindowFirstRun.firstRunMs, 900);
   assert.equal(report.cases.fullWindowWarmDiagnostic.warmP95Ms, 620);
   assert.equal(report.fullWindow.cacheVerified, true);
+  assert.deepEqual(report.regressions, []);
   assert.equal(report.includeUserOverlay, false);
   assert.equal(report.startsDesktopControl, false);
 });
@@ -53,9 +54,11 @@ test("Phase 3.5 fails every quality, latency, provider, and full-window breach",
   benchmark.fullWindow.cacheVerified = false;
   benchmark.fullWindow.progressAware = false;
   benchmark.fullWindow.actionLoopAllowed = true;
+  benchmark.regressions = [{ sampleId: "visual-1", failures: [{ code: "proposal.false-positive" }] }];
   const report = buildPerceptionLatencyReport({ benchmark });
 
   assert.equal(report.status, "failed");
+  assert.deepEqual(report.regressions, benchmark.regressions);
   assert.deepEqual(report.violations.map((violation) => violation.code), [
     "benchmark-provider-failure",
     "ocr-character-accuracy-below-target",
@@ -140,6 +143,7 @@ function passingBenchmark() {
     ocr: { characterAccuracy: 0.98, criticalLabelRecall: 0.96, failedSamples: 0 },
     proposal: { precision: 0.99, recall: 0.91, guessedActionCount: 0, failedSamples: 0 },
     fullWindow: { actionLoopAllowed: false, progressAware: true, cacheVerified: true, cachePrimeMs: 500, cacheHitMs: 0 },
+    regressions: [],
     samples: [
       measured("small-1", "small-ui-crop", 120),
       measured("small-2", "small-ui-crop", 180),

@@ -14,20 +14,26 @@ export function calculateOcrMetrics(samples) {
   let criticalLabelMatches = 0;
   let failedSamples = 0;
   const durations = [];
+  const regressions = [];
 
   for (const sample of samples) {
     validateMetricSample(sample);
     const expected = normalizeUiText(sample.expectedText, sample.languageClass);
     const actual = normalizeUiText(typeof sample.actualText === "string" ? sample.actualText : "", sample.languageClass);
     const expectedCodePoints = [...expected];
+    const failures = [];
     totalExpectedCodePoints += expectedCodePoints.length;
     totalEditDistance += codePointEditDistance(expected, actual);
+    if (sample.error) failures.push({ code: sample.error });
+    if (expected !== actual) failures.push({ code: "ocr.text-mismatch" });
     if (sample.criticalLabel) {
       criticalLabels += 1;
       if (!sample.error && expected === actual) criticalLabelMatches += 1;
+      else failures.push({ code: "ocr.critical-label-missed" });
     }
     if (sample.error) failedSamples += 1;
     durations.push(sample.durationMs);
+    if (failures.length > 0) regressions.push({ sampleId: sample.sampleId, failures });
   }
 
   return Object.freeze({
@@ -43,6 +49,7 @@ export function calculateOcrMetrics(samples) {
     criticalLabelMatches,
     criticalLabelRecall: criticalLabels === 0 ? 1 : criticalLabelMatches / criticalLabels,
     p95Ms: nearestRankPercentile(durations, 0.95),
+    regressions: Object.freeze(regressions.map(freezeRegression)),
   });
 }
 
@@ -58,6 +65,7 @@ export function calculateProposalMetrics(samples, { iouThreshold = 0.5 } = {}) {
   let guessedActionCount = 0;
   let failedSamples = 0;
   const durations = [];
+  const regressions = [];
 
   for (const sample of samples) {
     validateMetricSample(sample);
@@ -76,9 +84,14 @@ export function calculateProposalMetrics(samples, { iouThreshold = 0.5 } = {}) {
     if (sample.error) failedSamples += 1;
     durations.push(sample.durationMs);
     const matched = new Set();
+    let sampleFalsePositives = 0;
+    let sampleGuessedActions = 0;
 
     for (const proposal of proposals) {
-      if (proposal.guessedAction === true) guessedActionCount += 1;
+      if (proposal.guessedAction === true) {
+        guessedActionCount += 1;
+        sampleGuessedActions += 1;
+      }
       if (ignored.some((entry) => intersectionOverUnion(proposal.box, entry.box) >= iouThreshold)) {
         ignoredProposals += 1;
         continue;
@@ -98,8 +111,16 @@ export function calculateProposalMetrics(samples, { iouThreshold = 0.5 } = {}) {
         truePositives += 1;
       } else {
         falsePositives += 1;
+        sampleFalsePositives += 1;
       }
     }
+    const sampleFalseNegatives = expected.length - matched.size;
+    const failures = [];
+    if (sample.error) failures.push({ code: sample.error });
+    if (sampleFalsePositives > 0) failures.push({ code: "proposal.false-positive" });
+    if (sampleFalseNegatives > 0) failures.push({ code: "proposal.false-negative" });
+    if (sampleGuessedActions > 0) failures.push({ code: "proposal.guessed-action" });
+    if (failures.length > 0) regressions.push({ sampleId: sample.sampleId, failures });
   }
 
   const falseNegatives = expectedTargets - truePositives;
@@ -115,6 +136,14 @@ export function calculateProposalMetrics(samples, { iouThreshold = 0.5 } = {}) {
     precision: truePositives + falsePositives === 0 ? 0 : truePositives / (truePositives + falsePositives),
     recall: expectedTargets === 0 ? 1 : truePositives / expectedTargets,
     p95Ms: nearestRankPercentile(durations, 0.95),
+    regressions: Object.freeze(regressions.map(freezeRegression)),
+  });
+}
+
+function freezeRegression(entry) {
+  return Object.freeze({
+    sampleId: entry.sampleId,
+    failures: Object.freeze(entry.failures.map((failure) => Object.freeze({ code: failure.code }))),
   });
 }
 
