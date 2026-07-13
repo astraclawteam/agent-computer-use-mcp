@@ -142,6 +142,7 @@ export class ComputerUseProviderRouter {
         "7.8": "platform-package-integrity",
         "7.9": "offline-package-identity",
         "8.0": "runtime-soak",
+        "9.0": "commercial-promotion-evidence",
       },
       providers: {
         windowCapture: process.platform === "win32" ? "PrintWindow" : "unsupported",
