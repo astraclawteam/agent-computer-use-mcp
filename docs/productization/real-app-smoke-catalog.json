@@ -296,7 +296,7 @@
       "role": "policy-only",
       "adapter": "privacy-window-policy",
       "requiredCategory": null,
-      "executableCandidates": ["%PROGRAMFILES(X86)%/Tencent/WeChat/WeChat.exe", "%LOCALAPPDATA%/Tencent/WeChat/WeChat.exe"],
+      "executableCandidates": ["%PROGRAMFILES%/Tencent/Weixin/Weixin.exe", "%PROGRAMFILES(X86)%/Tencent/WeChat/WeChat.exe", "%LOCALAPPDATA%/Tencent/WeChat/WeChat.exe"],
       "expectedStatus": "policy-blocked",
       "privacyClass": "private-window-policy",
       "policyBlockedReason": "policy.private_content_capture_denied",

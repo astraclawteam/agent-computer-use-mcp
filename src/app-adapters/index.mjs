@@ -11,6 +11,7 @@ import { createVisualFixtureAdapter } from "./visual-fixture.mjs";
 import { createLibreOfficeAdapter } from "./libreoffice.mjs";
 import { createVscodeAdapter } from "./vscode.mjs";
 import { createWpsOfficeAdapter } from "./wps-office.mjs";
+import { createPrivacyWindowAdapter } from "./privacy-window.mjs";
 
 export {
   APP_ADAPTER_METHODS,
@@ -33,6 +34,10 @@ export const INSTALLED_APP_ADAPTER_FACTORIES = Object.freeze({
   "libreoffice-impress": (options) => createLibreOfficeAdapter({ ...options, component: "impress" }),
   "libreoffice-draw": (options) => createLibreOfficeAdapter({ ...options, component: "draw" }),
   "wps-document": createWpsOfficeAdapter,
+});
+
+export const PRIVACY_APP_ADAPTER_FACTORIES = Object.freeze({
+  "privacy-window-policy": createPrivacyWindowAdapter,
 });
 
 export function createAppAdapterRegistry(adapters = {}) {
