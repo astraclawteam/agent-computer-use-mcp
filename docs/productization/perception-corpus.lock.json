@@ -1,0 +1,11 @@
+{
+  "schemaVersion": 1,
+  "packId": "agent-computer-use-perception-corpus",
+  "version": "0.0.0-unpublished",
+  "identityStatus": "pending",
+  "manifest": {
+    "target": "manifest.json",
+    "sizeBytes": null,
+    "sha256": null
+  }
+}

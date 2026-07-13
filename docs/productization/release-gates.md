@@ -63,3 +63,21 @@
   identities both verify.
 - Failed long runs and passing retries use distinct run IDs. Evidence files are
   immutable and are never edited, deleted, or overwritten to obtain a pass.
+
+## Perception Evidence
+
+- Pull requests use the deterministic generated quick corpus; the scheduled
+  app-lab workflow uses the separately stored, hash-locked full corpus.
+- The full corpus must contain at least 400 OCR regions and 200 complex-visual
+  scenes and pass the repository lock plus local privacy scanner before any
+  provider starts.
+- Benchmarks invoke the released offline PP-OCRv6 ONNX, SOM, template, and
+  proposal providers. Caller-supplied latency or accuracy arrays are forbidden.
+- Commercial targets are 97% OCR character accuracy, 95% critical-label
+  recall, 98% proposal precision, 90% proposal recall, and zero guessed actions.
+- Warm small-crop P95 is at most 200 ms, ordinary-region P95 is at most 300 ms,
+  and the first synthetic full-window diagnostic is at most 1,000 ms with an
+  actual cache hit.
+- Nightly artifacts contain only `run-manifest.json`, `events.jsonl`,
+  `report.json`, and `checksums.txt`. Corpus images, complete windows, user
+  documents, raw OCR strings, and local paths are never uploaded.

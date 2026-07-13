@@ -11,6 +11,7 @@ native-lab/obj/
 # Runtime/cache artifacts
 artifacts/
 /artifacts/app-fixtures/
+/artifacts/perception-corpus/
 evidence/
 models/
 *.log

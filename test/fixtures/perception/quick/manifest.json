@@ -1,0 +1,586 @@
+{
+  "schemaVersion": 1,
+  "packId": "agent-computer-use-perception-quick",
+  "version": "2026.07.13-seed-20260713",
+  "tier": "quick",
+  "provenance": "generated",
+  "licenses": [
+    {
+      "id": "generated-mit",
+      "spdx": "MIT",
+      "target": "LICENSE.txt",
+      "sizeBytes": 47,
+      "sha256": "f60962d725c32d5b26bd795837868df6eed4e423cde092382c6ceafc36a8db52"
+    }
+  ],
+  "samples": [
+    {
+      "id": "quick-ocr-chinese-00",
+      "kind": "ocr",
+      "applicationClass": "dialog",
+      "dpi": 100,
+      "theme": "light",
+      "licenseId": "generated-mit",
+      "image": {
+        "target": "images/quick-ocr-chinese-00.png",
+        "sizeBytes": 2213,
+        "sha256": "f55d6dd95fbcead0bbf5e7cafdabb1d0927f957b1b1bbdfc08a8a4813ed27df6"
+      },
+      "annotation": {
+        "normalizedText": "保存",
+        "languageClass": "chinese",
+        "criticalLabel": true,
+        "region": {
+          "x": 0,
+          "y": 0,
+          "width": 360,
+          "height": 72
+        }
+      }
+    },
+    {
+      "id": "quick-ocr-chinese-01",
+      "kind": "ocr",
+      "applicationClass": "native-form",
+      "dpi": 125,
+      "theme": "dark",
+      "licenseId": "generated-mit",
+      "image": {
+        "target": "images/quick-ocr-chinese-01.png",
+        "sizeBytes": 3583,
+        "sha256": "4326a518cbdc529f8e2eff66feef4bf3749b268980daa662d4252df7c1a2cd1a"
+      },
+      "annotation": {
+        "normalizedText": "打开文件",
+        "languageClass": "chinese",
+        "criticalLabel": false,
+        "region": {
+          "x": 0,
+          "y": 0,
+          "width": 360,
+          "height": 72
+        }
+      }
+    },
+    {
+      "id": "quick-ocr-chinese-02",
+      "kind": "ocr",
+      "applicationClass": "timeline",
+      "dpi": 150,
+      "theme": "light",
+      "licenseId": "generated-mit",
+      "image": {
+        "target": "images/quick-ocr-chinese-02.png",
+        "sizeBytes": 5559,
+        "sha256": "8ef61952df4d446d8b6bd7982210d97c725d42b6db0c7b0526f05e68c4b8eeac"
+      },
+      "annotation": {
+        "normalizedText": "导出时间线",
+        "languageClass": "chinese",
+        "criticalLabel": true,
+        "region": {
+          "x": 0,
+          "y": 0,
+          "width": 360,
+          "height": 72
+        }
+      }
+    },
+    {
+      "id": "quick-ocr-english-03",
+      "kind": "ocr",
+      "applicationClass": "editor",
+      "dpi": 100,
+      "theme": "dark",
+      "licenseId": "generated-mit",
+      "image": {
+        "target": "images/quick-ocr-english-03.png",
+        "sizeBytes": 2496,
+        "sha256": "872f058b3adc248579f9dc1c7dd9747e165714a46b73294e6251889308267d4c"
+      },
+      "annotation": {
+        "normalizedText": "Save",
+        "languageClass": "english",
+        "criticalLabel": true,
+        "region": {
+          "x": 0,
+          "y": 0,
+          "width": 360,
+          "height": 72
+        }
+      }
+    },
+    {
+      "id": "quick-ocr-english-04",
+      "kind": "ocr",
+      "applicationClass": "toolbar",
+      "dpi": 125,
+      "theme": "light",
+      "licenseId": "generated-mit",
+      "image": {
+        "target": "images/quick-ocr-english-04.png",
+        "sizeBytes": 6978,
+        "sha256": "d73fea6e5b379d8bde1dce19424ca3364b3b39342e08d9b94699f3c7f6b6960e"
+      },
+      "annotation": {
+        "normalizedText": "Open project",
+        "languageClass": "english",
+        "criticalLabel": false,
+        "region": {
+          "x": 0,
+          "y": 0,
+          "width": 680,
+          "height": 230
+        }
+      }
+    },
+    {
+      "id": "quick-ocr-english-05",
+      "kind": "ocr",
+      "applicationClass": "dialog",
+      "dpi": 150,
+      "theme": "dark",
+      "licenseId": "generated-mit",
+      "image": {
+        "target": "images/quick-ocr-english-05.png",
+        "sizeBytes": 10946,
+        "sha256": "47a3437e2864bbfd1d6c91a9ad0dac7b4d85819c12910dabba25bcf11d4189ca"
+      },
+      "annotation": {
+        "normalizedText": "Apply changes",
+        "languageClass": "english",
+        "criticalLabel": true,
+        "region": {
+          "x": 0,
+          "y": 0,
+          "width": 900,
+          "height": 520
+        }
+      }
+    },
+    {
+      "id": "quick-ocr-numeric-06",
+      "kind": "ocr",
+      "applicationClass": "table",
+      "dpi": 100,
+      "theme": "light",
+      "licenseId": "generated-mit",
+      "image": {
+        "target": "images/quick-ocr-numeric-06.png",
+        "sizeBytes": 2776,
+        "sha256": "43080b1a0d775db95ae7c4a9d47c4c6677892b178cabcb067718e392ece0ed82"
+      },
+      "annotation": {
+        "normalizedText": "125.50",
+        "languageClass": "numeric",
+        "criticalLabel": true,
+        "region": {
+          "x": 0,
+          "y": 0,
+          "width": 360,
+          "height": 72
+        }
+      }
+    },
+    {
+      "id": "quick-ocr-numeric-07",
+      "kind": "ocr",
+      "applicationClass": "canvas",
+      "dpi": 125,
+      "theme": "dark",
+      "licenseId": "generated-mit",
+      "image": {
+        "target": "images/quick-ocr-numeric-07.png",
+        "sizeBytes": 5131,
+        "sha256": "4ccc07b4a97eeeda595d4f74dc3674f7491eae355285a4c0f1078ca9c435c628"
+      },
+      "annotation": {
+        "normalizedText": "1920 x 1080",
+        "languageClass": "numeric",
+        "criticalLabel": false,
+        "region": {
+          "x": 0,
+          "y": 0,
+          "width": 360,
+          "height": 72
+        }
+      }
+    },
+    {
+      "id": "quick-ocr-numeric-08",
+      "kind": "ocr",
+      "applicationClass": "timeline",
+      "dpi": 150,
+      "theme": "light",
+      "licenseId": "generated-mit",
+      "image": {
+        "target": "images/quick-ocr-numeric-08.png",
+        "sizeBytes": 4878,
+        "sha256": "7604fa2492b36833c4b6d2123b0aba268c35e0805dd86af38cff7ed9afc4321b"
+      },
+      "annotation": {
+        "normalizedText": "00:01:24",
+        "languageClass": "numeric",
+        "criticalLabel": true,
+        "region": {
+          "x": 0,
+          "y": 0,
+          "width": 360,
+          "height": 72
+        }
+      }
+    },
+    {
+      "id": "quick-ocr-mixed-09",
+      "kind": "ocr",
+      "applicationClass": "timeline",
+      "dpi": 100,
+      "theme": "dark",
+      "licenseId": "generated-mit",
+      "image": {
+        "target": "images/quick-ocr-mixed-09.png",
+        "sizeBytes": 3169,
+        "sha256": "edc8f158322d3fc70b372132360e6bad5492dc85b8170a4e92509ce2947a80a1"
+      },
+      "annotation": {
+        "normalizedText": "轨道 A1",
+        "languageClass": "mixed",
+        "criticalLabel": true,
+        "region": {
+          "x": 0,
+          "y": 0,
+          "width": 360,
+          "height": 72
+        }
+      }
+    },
+    {
+      "id": "quick-ocr-mixed-10",
+      "kind": "ocr",
+      "applicationClass": "canvas",
+      "dpi": 125,
+      "theme": "light",
+      "licenseId": "generated-mit",
+      "image": {
+        "target": "images/quick-ocr-mixed-10.png",
+        "sizeBytes": 7418,
+        "sha256": "3da84c73cf73e3f0e20d1441b8bd60289fff1ebf468b46874534135db1ec7b47"
+      },
+      "annotation": {
+        "normalizedText": "图层 Layer 02",
+        "languageClass": "mixed",
+        "criticalLabel": false,
+        "region": {
+          "x": 0,
+          "y": 0,
+          "width": 680,
+          "height": 230
+        }
+      }
+    },
+    {
+      "id": "quick-ocr-mixed-11",
+      "kind": "ocr",
+      "applicationClass": "cad",
+      "dpi": 150,
+      "theme": "dark",
+      "licenseId": "generated-mit",
+      "image": {
+        "target": "images/quick-ocr-mixed-11.png",
+        "sizeBytes": 9833,
+        "sha256": "6adfb19f70e32a0526b85ecec2275fe0ecfe68f8611d6e5bda1929e8d40ec317"
+      },
+      "annotation": {
+        "normalizedText": "角度 45 deg",
+        "languageClass": "mixed",
+        "criticalLabel": true,
+        "region": {
+          "x": 0,
+          "y": 0,
+          "width": 900,
+          "height": 520
+        }
+      }
+    },
+    {
+      "id": "quick-visual-canvas",
+      "kind": "visual",
+      "applicationClass": "native-form",
+      "dpi": 100,
+      "theme": "dark",
+      "licenseId": "generated-mit",
+      "image": {
+        "target": "images/quick-visual-canvas.png",
+        "sizeBytes": 5649,
+        "sha256": "ca25747623695b6cd22538652d4041d7cf2a5c089356dcf6214a5a1c9d6a4c2f"
+      },
+      "annotation": {
+        "surfaceClass": "canvas",
+        "targets": [
+          {
+            "box": {
+              "x": 28,
+              "y": 45,
+              "width": 92,
+              "height": 38
+            },
+            "role": "button",
+            "label": "Apply",
+            "actionable": true
+          }
+        ],
+        "ignored": [
+          {
+            "box": {
+              "x": 312,
+              "y": 24,
+              "width": 16,
+              "height": 16
+            },
+            "reason": "decorative-status-dot"
+          }
+        ]
+      }
+    },
+    {
+      "id": "quick-visual-timeline",
+      "kind": "visual",
+      "applicationClass": "editor",
+      "dpi": 125,
+      "theme": "light",
+      "licenseId": "generated-mit",
+      "image": {
+        "target": "images/quick-visual-timeline.png",
+        "sizeBytes": 2554,
+        "sha256": "050182ffbf8c291dcf2dc09affa20a2564d627b9c5a497f916dcfac8ebaa1fa9"
+      },
+      "annotation": {
+        "surfaceClass": "timeline",
+        "targets": [
+          {
+            "box": {
+              "x": 41,
+              "y": 46,
+              "width": 92,
+              "height": 38
+            },
+            "role": "button",
+            "label": "Apply",
+            "actionable": true
+          }
+        ],
+        "ignored": [
+          {
+            "box": {
+              "x": 312,
+              "y": 24,
+              "width": 16,
+              "height": 16
+            },
+            "reason": "decorative-status-dot"
+          }
+        ]
+      }
+    },
+    {
+      "id": "quick-visual-cad-like",
+      "kind": "visual",
+      "applicationClass": "table",
+      "dpi": 150,
+      "theme": "dark",
+      "licenseId": "generated-mit",
+      "image": {
+        "target": "images/quick-visual-cad-like.png",
+        "sizeBytes": 6649,
+        "sha256": "bef6043b337a823c7d87f462997879bdb3d41a8045f828be68848385250f4976"
+      },
+      "annotation": {
+        "surfaceClass": "cad-like",
+        "targets": [
+          {
+            "box": {
+              "x": 43,
+              "y": 40,
+              "width": 92,
+              "height": 38
+            },
+            "role": "button",
+            "label": "SNAP",
+            "actionable": true
+          }
+        ],
+        "ignored": [
+          {
+            "box": {
+              "x": 312,
+              "y": 24,
+              "width": 16,
+              "height": 16
+            },
+            "reason": "decorative-status-dot"
+          }
+        ]
+      }
+    },
+    {
+      "id": "quick-visual-toolbar",
+      "kind": "visual",
+      "applicationClass": "timeline",
+      "dpi": 100,
+      "theme": "light",
+      "licenseId": "generated-mit",
+      "image": {
+        "target": "images/quick-visual-toolbar.png",
+        "sizeBytes": 2505,
+        "sha256": "78fc53a461593d37c660157e974b6d507c97d305c1089ecc5d8d5de75a744d78"
+      },
+      "annotation": {
+        "surfaceClass": "toolbar",
+        "targets": [
+          {
+            "box": {
+              "x": 30,
+              "y": 44,
+              "width": 92,
+              "height": 38
+            },
+            "role": "button",
+            "label": "Apply",
+            "actionable": true
+          }
+        ],
+        "ignored": [
+          {
+            "box": {
+              "x": 312,
+              "y": 24,
+              "width": 16,
+              "height": 16
+            },
+            "reason": "decorative-status-dot"
+          }
+        ]
+      }
+    },
+    {
+      "id": "quick-visual-dialog",
+      "kind": "visual",
+      "applicationClass": "canvas",
+      "dpi": 125,
+      "theme": "dark",
+      "licenseId": "generated-mit",
+      "image": {
+        "target": "images/quick-visual-dialog.png",
+        "sizeBytes": 2504,
+        "sha256": "7c0c110810aca299db6fe1e6c5db32254d4d62855c9ee7f351eb7b785a596072"
+      },
+      "annotation": {
+        "surfaceClass": "dialog",
+        "targets": [
+          {
+            "box": {
+              "x": 35,
+              "y": 44,
+              "width": 92,
+              "height": 38
+            },
+            "role": "button",
+            "label": "Apply",
+            "actionable": true
+          }
+        ],
+        "ignored": [
+          {
+            "box": {
+              "x": 312,
+              "y": 24,
+              "width": 16,
+              "height": 16
+            },
+            "reason": "decorative-status-dot"
+          }
+        ]
+      }
+    },
+    {
+      "id": "quick-visual-table",
+      "kind": "visual",
+      "applicationClass": "cad",
+      "dpi": 150,
+      "theme": "light",
+      "licenseId": "generated-mit",
+      "image": {
+        "target": "images/quick-visual-table.png",
+        "sizeBytes": 2585,
+        "sha256": "5a239d905b594891db7d2c882fd16a1b03b65434490f32c76c0d73a98beb601a"
+      },
+      "annotation": {
+        "surfaceClass": "table",
+        "targets": [
+          {
+            "box": {
+              "x": 38,
+              "y": 43,
+              "width": 92,
+              "height": 38
+            },
+            "role": "button",
+            "label": "Apply",
+            "actionable": true
+          }
+        ],
+        "ignored": [
+          {
+            "box": {
+              "x": 312,
+              "y": 24,
+              "width": 16,
+              "height": 16
+            },
+            "reason": "decorative-status-dot"
+          }
+        ]
+      }
+    },
+    {
+      "id": "quick-visual-editor",
+      "kind": "visual",
+      "applicationClass": "toolbar",
+      "dpi": 100,
+      "theme": "dark",
+      "licenseId": "generated-mit",
+      "image": {
+        "target": "images/quick-visual-editor.png",
+        "sizeBytes": 2504,
+        "sha256": "cedfbfd49af6c347d0ecd712a66c16af415e790a00024e49830f20813fc7fce8"
+      },
+      "annotation": {
+        "surfaceClass": "editor",
+        "targets": [
+          {
+            "box": {
+              "x": 34,
+              "y": 38,
+              "width": 92,
+              "height": 38
+            },
+            "role": "button",
+            "label": "Apply",
+            "actionable": true
+          }
+        ],
+        "ignored": [
+          {
+            "box": {
+              "x": 312,
+              "y": 24,
+              "width": 16,
+              "height": 16
+            },
+            "reason": "decorative-status-dot"
+          }
+        ]
+      }
+    }
+  ]
+}

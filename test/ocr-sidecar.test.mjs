@@ -33,6 +33,13 @@ test("OCR sidecar path prefers explicit and protected release paths", () => {
     moduleDirectory: "C:\\package\\src",
     pathExists: () => false,
   }), "C:\\package\\ocr-sidecar\\xiaozhiclaw_ocr_sidecar_native.mjs");
+
+  assert.equal(resolveOcrSidecarPath({
+    env: {},
+    moduleDirectory: "C:\\repo\\src",
+    currentModulePath: "C:\\repo\\src\\ocr-sidecar.mjs",
+    pathExists: () => true,
+  }), "C:\\repo\\ocr-sidecar\\xiaozhiclaw_ocr_sidecar_native.mjs");
 });
 
 test("platform OCR environment pins verified models runtime and offline mode", () => {

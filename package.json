@@ -94,6 +94,8 @@
     "phase:3.3": "node src/phase-3-3-som-proposal-provider.mjs",
     "phase:3.4": "node src/phase-3-4-perception-strategy-selector.mjs",
     "phase:3.5": "node src/phase-3-5-perception-latency-report.mjs",
+    "perception:quick": "node scripts/generate-quick-perception-corpus.mjs --output artifacts/perception-corpus/quick && node src/phase-3-5-perception-latency-report.mjs --corpus artifacts/perception-corpus/quick --tier quick",
+    "perception:full": "node src/phase-3-5-perception-latency-report.mjs --tier full --lock docs/productization/perception-corpus.lock.json",
     "phase:4.0": "node src/phase-4-0-overlay-placement-planner.mjs",
     "phase:4.1": "node src/phase-4-1-overlay-theme-cursor-tokens.mjs",
     "phase:4.2": "node src/phase-4-2-overlay-target-tracker.mjs",

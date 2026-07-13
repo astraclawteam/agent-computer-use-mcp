@@ -43,13 +43,18 @@ export function resolveOcrSidecarPath(options = {}) {
   const env = options.env ?? process.env;
   const moduleDirectory = options.moduleDirectory ?? __dirname;
   const pathExists = options.pathExists ?? existsSync;
+  const currentModulePath = resolve(options.currentModulePath ?? fileURLToPath(import.meta.url));
   const override = env.AGENT_COMPUTER_USE_OCR_SIDECAR_PATH
     ?? env.XIAOZHICLAW_OCR_SIDECAR_PATH;
   if (override) return override;
 
   const protectedPath = resolve(moduleDirectory, "ocr-sidecar.mjs");
-  if (pathExists(protectedPath)) return protectedPath;
+  if (pathExists(protectedPath) && !samePath(protectedPath, currentModulePath)) return protectedPath;
   return resolve(moduleDirectory, "../ocr-sidecar/xiaozhiclaw_ocr_sidecar_native.mjs");
+}
+
+function samePath(left, right) {
+  return process.platform === "win32" ? left.toLowerCase() === right.toLowerCase() : left === right;
 }
 
 export function createPlatformOcrEnvironment(options = {}) {
