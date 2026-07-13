@@ -50,7 +50,10 @@ export function buildRuntimeMetrics(options = {}) {
 }
 
 export function evaluateRuntimeTargets(metrics, targets = {}) {
-  const policy = { ...COMMERCIAL_RUNTIME_TARGETS, ...targets };
+  const policy = { ...COMMERCIAL_RUNTIME_TARGETS };
+  for (const [key, value] of Object.entries(targets)) {
+    if (value !== undefined) policy[key] = value;
+  }
   const violations = [];
   if (metrics.rss.netGrowthBytes > policy.maxRssGrowthBytes) {
     violations.push({

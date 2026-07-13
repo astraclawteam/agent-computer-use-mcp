@@ -1,13 +1,20 @@
-import { spawn } from "node:child_process";
 import { performance } from "node:perf_hooks";
 
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 
-const READ_ONLY_CALLS = Object.freeze([
+import {
+  buildRuntimeMetrics,
+  evaluateRuntimeTargets,
+} from "./commercial-runtime-metrics.mjs";
+import { probeOwnedRuntime } from "./windows-runtime-probe.mjs";
+
+const SOAK_CALLS = Object.freeze([
   ["computer.health", { fast: true }],
   ["computer.list_state", {}],
   ["computer.installation", { client: "codex" }],
+  ["computer.cancel", { reason: "runtime-soak-idle-cancel" }],
+  ["computer.revoke", { reason: "runtime-soak-idle-revoke" }],
 ]);
 
 export async function runRuntimeSoak(options = {}) {
@@ -15,113 +22,199 @@ export async function runRuntimeSoak(options = {}) {
   const clientCount = positiveInteger(options.clientCount ?? 2, "clientCount");
   const concurrency = positiveInteger(options.concurrency ?? 2, "concurrency");
   const faultEveryRounds = nonNegativeInteger(options.faultEveryRounds ?? 20, "faultEveryRounds");
+  const sampleIntervalMs = positiveInteger(options.sampleIntervalMs ?? 10_000, "sampleIntervalMs");
+  const cleanupDelayMs = nonNegativeInteger(options.cleanupDelayMs ?? 250, "cleanupDelayMs");
   const now = options.now ?? (() => performance.now());
   const sleep = options.sleep ?? ((ms) => new Promise((resolvePromise) => setTimeout(resolvePromise, ms)));
   const createSession = options.createSession ?? createStandardMcpSession;
-  const processProbe = options.processProbe ?? probeProcesses;
+  const probeRuntime = options.probeRuntime ?? probeOwnedRuntime;
   const isProcessAlive = options.isProcessAlive ?? defaultIsProcessAlive;
+  const emit = createEventEmitter(options.eventSink);
   const startedAt = now();
   const sessions = [];
   const allPids = new Set();
-  const latencies = [];
-  const violations = [];
-  let completedCalls = 0;
-  let failedCalls = 0;
-  let overlayLeakCount = 0;
-  let desktopControlStartCount = 0;
+  const samples = [];
+  const calls = [];
+  const operationalViolations = [];
   let reconnectCount = 0;
   let inFlight = 0;
   let maxInFlight = 0;
   let round = 0;
+  let nextSampleAt = 0;
+  let observationOverlayLeakCount = 0;
+  let desktopControlStartCount = 0;
+
+  await emit("runtime.soak.started", {
+    durationMs,
+    clientCount,
+    concurrency,
+    faultEveryRounds,
+    sampleIntervalMs,
+  });
 
   try {
     for (let index = 0; index < clientCount; index += 1) {
       const session = await createSession({ index });
       sessions.push(session);
       if (session.pid) allPids.add(session.pid);
+      await emit("runtime.session.started", { clientIndex: index, pid: session.pid ?? null, reconnect: false });
     }
-    const initialPids = sessions.map((session) => session.pid).filter(Boolean);
-    const initialResources = totalResources(await processProbe(initialPids));
+    await takeSample("initial", true);
 
     while (now() - startedAt < durationMs) {
       await Promise.all(sessions.flatMap((session, clientIndex) => (
-        Array.from({ length: concurrency }, async (_, workerIndex) => {
-          const [name, args] = READ_ONLY_CALLS[(round + clientIndex + workerIndex) % READ_ONLY_CALLS.length];
-          const callStarted = now();
-          inFlight += 1;
-          maxInFlight = Math.max(maxInFlight, inFlight);
-          try {
-            const response = await session.callTool(name, args);
-            latencies.push(Math.max(0, now() - callStarted));
-            if (response?.isError) failedCalls += 1;
-            else completedCalls += 1;
-            if (response?.structuredContent?.includeUserOverlay !== false) overlayLeakCount += 1;
-            if (response?.structuredContent?.startsDesktopControl === true) desktopControlStartCount += 1;
-          } catch {
-            failedCalls += 1;
-          } finally {
-            inFlight -= 1;
-          }
-        })
+        Array.from({ length: concurrency }, (_, workerIndex) => runCall({ session, clientIndex, workerIndex }))
       )));
       round += 1;
       if (faultEveryRounds > 0 && round % faultEveryRounds === 0 && now() - startedAt < durationMs) {
         const index = reconnectCount % sessions.length;
-        await sessions[index].fault();
+        const previous = sessions[index];
+        await previous.fault();
+        await emit("runtime.session.faulted", { clientIndex: index, pid: previous.pid ?? null, round });
         const replacement = await createSession({ index, reconnect: true });
         sessions[index] = replacement;
         if (replacement.pid) allPids.add(replacement.pid);
         reconnectCount += 1;
+        await emit("runtime.session.started", { clientIndex: index, pid: replacement.pid ?? null, reconnect: true });
       }
-      await sleep(Math.min(10, Math.max(1, durationMs - (now() - startedAt))));
+      await takeSample("interval", false);
+      const remaining = durationMs - (now() - startedAt);
+      if (remaining > 0) await sleep(Math.min(10, Math.max(1, remaining)));
     }
+    await takeSample("final", true);
+  } catch (error) {
+    operationalViolations.push({ code: "runtime.operational_error", message: safeErrorCode(error) });
+    await emit("runtime.soak.error", { code: safeErrorCode(error) }).catch(() => {});
+    if (samples.length === 0) await takeSample("error", true).catch(() => {});
+  }
 
-    const finalPids = sessions.map((session) => session.pid).filter(Boolean);
-    const finalResources = totalResources(await processProbe(finalPids));
-    const rssGrowthBytes = finalResources.rssBytes - initialResources.rssBytes;
-    const handleGrowth = finalResources.handles - initialResources.handles;
-    const maxRssGrowthBytes = options.maxRssGrowthBytes ?? 64 * 1024 * 1024 * clientCount;
-    const maxHandleGrowth = options.maxHandleGrowth ?? 256 * clientCount;
-    if (rssGrowthBytes > maxRssGrowthBytes) {
-      violations.push({ code: "runtime.rss_growth_exceeded", actual: rssGrowthBytes, maximum: maxRssGrowthBytes });
+  if (samples.length === 0) {
+    samples.push({ elapsedMs: Math.max(0, now() - startedAt), rssBytes: 0, handles: 0 });
+  }
+  const measuredDurationMs = Math.max(0, now() - startedAt);
+
+  const closeResults = await Promise.allSettled(sessions.map((session) => session.close()));
+  const closeFailureCount = closeResults.filter((result) => result.status === "rejected").length;
+  if (cleanupDelayMs > 0) await sleep(cleanupDelayMs);
+  let cleanupProbe = emptyProbe();
+  let cleanupProbeCompleted = true;
+  try {
+    cleanupProbe = await probeRuntime({ rootPids: [...allPids] });
+  } catch {
+    cleanupProbeCompleted = false;
+  }
+  const orphanPids = [];
+  for (const pid of allPids) if (await isProcessAlive(pid)) orphanPids.push(pid);
+  const cleanup = {
+    orphanProcessCount: Math.max(orphanPids.length, cleanupProbe.processIds.length),
+    residualPortCount: cleanupProbe.listeningPorts.length,
+    overlayLeakCount: cleanupProbe.overlayProcessIds.length,
+    cursorLeakCount: cleanupProbe.cursorProcessIds.length,
+    completed: cleanupProbeCompleted && closeFailureCount === 0,
+  };
+  await emit("runtime.cleanup.completed", {
+    ...cleanup,
+    closeFailureCount,
+  }).catch(() => {
+    cleanup.completed = false;
+  });
+
+  const metrics = buildRuntimeMetrics({ samples, calls, cleanup });
+  const violations = [
+    ...operationalViolations,
+    ...evaluateRuntimeTargets(metrics, {
+      maxRssGrowthBytes: options.maxRssGrowthBytes,
+      maxHandleGrowth: options.maxHandleGrowth,
+      maxFailureRate: options.maxFailureRate,
+    }),
+  ];
+  if (observationOverlayLeakCount > 0) {
+    violations.push({ code: "runtime.overlay_observation_leak", actual: observationOverlayLeakCount, maximum: 0 });
+  }
+  if (desktopControlStartCount > 0) {
+    violations.push({ code: "runtime.unexpected_desktop_control", actual: desktopControlStartCount, maximum: 0 });
+  }
+
+  return {
+    schemaVersion: 2,
+    status: violations.length === 0 ? "passed" : "failed",
+    phase: "8.0",
+    benchmark: "runtime-soak",
+    durationMs: Math.round(measuredDurationMs),
+    clientCount,
+    concurrency,
+    rounds: round,
+    completedCalls: metrics.calls.passed,
+    failedCalls: metrics.calls.failed,
+    reconnectCount,
+    maxInFlight,
+    p95LatencyMs: metrics.calls.latencyMs.p95,
+    rssGrowthBytes: metrics.rss.netGrowthBytes,
+    handleGrowth: metrics.handles.netGrowth,
+    overlayLeakCount: observationOverlayLeakCount,
+    desktopControlStartCount,
+    orphanProcessCount: cleanup.orphanProcessCount,
+    samples,
+    calls,
+    metrics,
+    violations,
+    includeUserOverlay: false,
+  };
+
+  async function runCall({ session, clientIndex, workerIndex }) {
+    const [name, args] = SOAK_CALLS[(round + clientIndex + workerIndex) % SOAK_CALLS.length];
+    const callStarted = now();
+    inFlight += 1;
+    maxInFlight = Math.max(maxInFlight, inFlight);
+    let response;
+    let errorCode = null;
+    try {
+      response = await session.callTool(name, args);
+    } catch (error) {
+      errorCode = safeErrorCode(error);
+    } finally {
+      inFlight -= 1;
     }
-    if (handleGrowth > maxHandleGrowth) {
-      violations.push({ code: "runtime.handle_growth_exceeded", actual: handleGrowth, maximum: maxHandleGrowth });
-    }
-    if (failedCalls > 0) violations.push({ code: "runtime.request_failures", count: failedCalls });
-    if (overlayLeakCount > 0) violations.push({ code: "runtime.overlay_observation_leak", count: overlayLeakCount });
-    if (desktopControlStartCount > 0) violations.push({ code: "runtime.unexpected_desktop_control", count: desktopControlStartCount });
-
-    await Promise.all(sessions.map((session) => session.close().catch(() => {})));
-    await sleep(25);
-    const orphanPids = [];
-    for (const pid of allPids) if (await isProcessAlive(pid)) orphanPids.push(pid);
-    if (orphanPids.length > 0) violations.push({ code: "runtime.orphan_processes", count: orphanPids.length });
-
-    return {
-      schemaVersion: 1,
-      status: violations.length === 0 ? "passed" : "failed",
-      phase: "8.0",
-      benchmark: "runtime-soak",
-      durationMs: Math.round(now() - startedAt),
-      clientCount,
-      concurrency,
-      rounds: round,
-      completedCalls,
-      failedCalls,
-      reconnectCount,
-      maxInFlight,
-      p95LatencyMs: percentile(latencies, 0.95),
-      rssGrowthBytes,
-      handleGrowth,
-      overlayLeakCount,
-      desktopControlStartCount,
-      orphanProcessCount: orphanPids.length,
-      violations,
-      includeUserOverlay: false,
+    const structured = response?.structuredContent ?? {};
+    if (structured.includeUserOverlay !== false) observationOverlayLeakCount += 1;
+    if (structured.startsDesktopControl === true) desktopControlStartCount += 1;
+    const policyError = response?.isError === true && /^policy[._]/u.test(String(structured.code ?? structured.error?.code ?? ""));
+    const status = policyError
+      ? "policy-blocked"
+      : (errorCode || response?.isError === true ? "product-failure" : "passed");
+    const call = {
+      tool: name,
+      clientIndex,
+      workerIndex,
+      round,
+      status,
+      durationMs: Math.max(0, now() - callStarted),
+      ...(policyError ? { kind: "policy-error", failClosed: true } : {}),
+      ...(errorCode ? { errorCode } : {}),
     };
-  } finally {
-    await Promise.all(sessions.map((session) => session.close().catch(() => {})));
+    calls.push(call);
+    await emit("runtime.call", call);
+  }
+
+  async function takeSample(reason, force) {
+    const elapsedMs = Math.max(0, now() - startedAt);
+    if (!force && elapsedMs < nextSampleAt) return;
+    const probe = await probeRuntime({ rootPids: [...allPids] });
+    const sample = {
+      elapsedMs,
+      rssBytes: probe.rssBytes,
+      handles: probe.handles,
+    };
+    samples.push(sample);
+    nextSampleAt = elapsedMs + sampleIntervalMs;
+    await emit("runtime.sample", {
+      ...sample,
+      reason,
+      processCount: probe.processIds.length,
+      listeningPortCount: probe.listeningPorts.length,
+      overlayProcessCount: probe.overlayProcessIds.length,
+      cursorProcessCount: probe.cursorProcessIds.length,
+    });
   }
 }
 
@@ -148,27 +241,23 @@ async function createStandardMcpSession({ index }) {
   };
 }
 
-async function probeProcesses(pids) {
-  if (pids.length === 0) return {};
-  const safePids = pids.map((pid) => positiveInteger(pid, "pid"));
-  const script = `$items = Get-Process -Id ${safePids.join(",")} -ErrorAction SilentlyContinue | Select-Object Id,WorkingSet64,HandleCount; $items | ConvertTo-Json -Compress`;
-  const output = await run("powershell", ["-NoProfile", "-Command", script]);
-  const parsed = output.stdout.trim() ? JSON.parse(output.stdout) : [];
-  const rows = Array.isArray(parsed) ? parsed : [parsed];
-  return Object.fromEntries(rows.map((row) => [row.Id, { rssBytes: row.WorkingSet64, handles: row.HandleCount }]));
+function createEventEmitter(eventSink) {
+  if (!eventSink) return async () => {};
+  if (typeof eventSink === "function") return eventSink;
+  if (typeof eventSink.append === "function") return (type, payload) => eventSink.append(type, payload);
+  throw new TypeError("runtime.event_sink_invalid");
 }
 
-function totalResources(probe) {
-  return Object.values(probe).reduce((total, item) => ({
-    rssBytes: total.rssBytes + (item.rssBytes ?? 0),
-    handles: total.handles + (item.handles ?? 0),
-  }), { rssBytes: 0, handles: 0 });
-}
-
-function percentile(values, ratio) {
-  if (values.length === 0) return 0;
-  const sorted = [...values].sort((a, b) => a - b);
-  return Math.round(sorted[Math.min(sorted.length - 1, Math.ceil(sorted.length * ratio) - 1)] * 100) / 100;
+function emptyProbe() {
+  return {
+    processIds: [],
+    processes: [],
+    rssBytes: 0,
+    handles: 0,
+    listeningPorts: [],
+    overlayProcessIds: [],
+    cursorProcessIds: [],
+  };
 }
 
 async function defaultIsProcessAlive(pid) {
@@ -185,14 +274,8 @@ function nonNegativeInteger(value, name) {
   return value;
 }
 
-function run(command, args) {
-  return new Promise((resolvePromise, reject) => {
-    const child = spawn(command, args, { windowsHide: true, stdio: ["ignore", "pipe", "pipe"] });
-    let stdout = "";
-    let stderr = "";
-    child.stdout.on("data", (chunk) => { stdout += chunk; });
-    child.stderr.on("data", (chunk) => { stderr += chunk; });
-    child.on("error", reject);
-    child.on("close", (code) => code === 0 ? resolvePromise({ stdout, stderr }) : reject(new Error(stderr || stdout)));
-  });
+function safeErrorCode(error) {
+  const message = error instanceof Error ? error.message : String(error);
+  const match = /^[a-z][a-z0-9_.-]{2,80}/iu.exec(message);
+  return match?.[0] ?? "runtime.operation_failed";
 }
