@@ -19,6 +19,9 @@ test("fusion clusters independent providers and attaches the OCR label", () => {
   assert.deepEqual(result.proposals[0].support.map((entry) => entry.provider), ["ocr", "som-proposal"]);
   assert.equal(result.proposals[0].confidence >= 0.98, true);
   assert.equal(result.proposals[0].actionEligible, true);
+  assert.deepEqual(result.proposals[0].sourceRegion, result.proposals[0].box);
+  assert.deepEqual(result.proposals[0].modelIdentity, { provider: "local-proposal-fusion", model: "som-ocr-v1" });
+  assert.deepEqual(result.proposals[0].actions, ["click"]);
 });
 
 test("fusion uses one contribution per provider and suppresses duplicate boxes", () => {
@@ -49,6 +52,9 @@ test("exact approved templates may act alone while other single-source boxes rem
   });
 
   assert.deepEqual(result.proposals.map((entry) => entry.label), ["Undo"]);
+  assert.equal(result.proposals[0].source, "template");
+  assert.equal(result.proposals[0].exact, true);
+  assert.equal(result.proposals[0].approvedActionLabel, true);
   assert.equal(result.observationProposals.length, 3);
   assert.equal(result.observationProposals.every((entry) => entry.actionEligible === false), true);
 });

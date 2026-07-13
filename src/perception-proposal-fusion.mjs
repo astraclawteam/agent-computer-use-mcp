@@ -34,10 +34,16 @@ export function fusePerceptionProposals(options = {}) {
     const independent = new Set(eligibleSupport.map((entry) => entry.provider)).size >= 2;
     const fusedConfidence = complementProduct(eligibleSupport.map((entry) => entry.confidence));
     const actionEligible = Boolean(exactTemplate) || (independent && fusedConfidence >= thresholds.fusedConfidence);
+    const source = exactTemplate ? "template" : (actionEligible ? "local-proposal-fusion" : "local-proposal-observation");
+    const modelIdentity = exactTemplate
+      ? { provider: "template", model: "exact-template-v1" }
+      : { provider: "local-proposal-fusion", model: "som-ocr-v1" };
     const proposal = Object.freeze({
       proposalId: stableProposalId(bounds, support),
       box: Object.freeze(bounds),
       bounds: Object.freeze({ ...bounds }),
+      sourceRegion: Object.freeze({ ...bounds }),
+      modelIdentity: Object.freeze(modelIdentity),
       role: preferredValue(support, "role") ?? "region",
       label: preferredLabel(support),
       confidence: actionEligible ? fusedConfidence : Math.max(0, ...support.map((entry) => entry.confidence)),
@@ -49,7 +55,10 @@ export function fusePerceptionProposals(options = {}) {
       actionEligible,
       pixelLimitedAction: true,
       guessedAction: false,
-      source: actionEligible ? "local-proposal-fusion" : "local-proposal-observation",
+      actions: Object.freeze(["click"]),
+      source,
+      exact: Boolean(exactTemplate),
+      approvedActionLabel: Boolean(exactTemplate),
     });
     if (actionEligible) proposals.push(proposal);
     else observationProposals.push(proposal);

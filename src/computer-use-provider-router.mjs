@@ -13,6 +13,7 @@ import {
   readOverlayFreeRegionPixels,
 } from "./perception-region-cache.mjs";
 import { UI_TEXT_NORMALIZATION_VERSION } from "./ui-text-normalization.mjs";
+import { admitPerceptionAction } from "./perception-action-admission.mjs";
 import { buildDiagnosticsPolicy } from "./diagnostics-policy.mjs";
 import { captureWindowPngByTitle } from "./real-window-capture.mjs";
 import { createComputerUsePolicy } from "./computer-use-policy.mjs";
@@ -675,6 +676,9 @@ export class ComputerUseProviderRouter {
     this.lastCapture = {
       ...observation,
       provider: observation.provider ?? "gateway-managed",
+      window: observation.window ?? { id: controllerWindowId(this.activeController.window), title: this.activeController.window.title },
+      controllerId: this.activeController.controllerId,
+      expiresAt: Math.min(this.activeController.expiresAt, this.clock.now() + 5000),
       includeUserOverlay: false,
     };
     this.recordAudit("computer.capture.created", {
@@ -1258,6 +1262,18 @@ export class ComputerUseProviderRouter {
       observation: this.lastCapture,
     });
     this.enforcePolicyDecision(decision);
+    const element = resolveObservationElement(this.lastCapture, action);
+    const admission = admitPerceptionAction({
+      observation: this.lastCapture,
+      element,
+      action: {
+        ...action,
+        windowId: controllerWindowId(this.activeController.window),
+        controllerId: this.activeController.controllerId,
+      },
+      now: this.clock.now(),
+    });
+    if (!admission.allowed) fail(admission.code, admission.code, admission);
   }
 
   enforcePolicyDecision(decision) {
@@ -1598,6 +1614,19 @@ function pickOcrIdentity(response) {
   }
   if (!identity.provider) identity.provider = "xiaozhiclaw-ocr-sidecar";
   return identity;
+}
+
+function resolveObservationElement(observation, action) {
+  const elements = observation?.elements ?? observation?.observation?.elements ?? [];
+  if (typeof action?.elementToken === "string") {
+    return elements.find((element) => element.elementToken === action.elementToken) ?? null;
+  }
+  if (Number.isSafeInteger(action?.elementIndex) && action.elementIndex >= 0) return elements[action.elementIndex] ?? null;
+  return null;
+}
+
+function controllerWindowId(window = {}) {
+  return String(window.id ?? window.windowId ?? window.window_id ?? window.title ?? "unknown-window");
 }
 
 function lifecycleClosedError() {
