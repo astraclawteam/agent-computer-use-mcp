@@ -10,6 +10,7 @@ import {
   writeFile,
 } from "node:fs/promises";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
+import { createInterface } from "node:readline";
 
 const CHECKSUMS_FILE = "checksums.txt";
 const REQUIRED_FILES = ["events.jsonl", "report.json", "run-manifest.json"];
@@ -40,17 +41,16 @@ export async function verifyEvidenceDirectory(path, expected = undefined) {
   const violations = [];
   let manifest = null;
   let report = null;
-  let events = [];
+  let eventCount = 0;
   let checksumEntries = [];
 
   try {
     manifest = parseJson(await readFile(join(runPath, "run-manifest.json"), "utf8"), "run-manifest.json");
     report = parseJson(await readFile(join(runPath, "report.json"), "utf8"), "report.json");
-    events = parseEvents(await readFile(join(runPath, "events.jsonl"), "utf8"));
+    eventCount = await verifyEventsFile(join(runPath, "events.jsonl"));
     checksumEntries = parseChecksums(await readFile(join(runPath, CHECKSUMS_FILE), "utf8"));
     assertSafeMetadata(manifest);
     assertSafeMetadata(report);
-    for (const event of events) assertSafeMetadata(event);
   } catch (error) {
     violations.push({ code: "evidence.invalid", message: errorMessage(error) });
   }
@@ -91,7 +91,7 @@ export async function verifyEvidenceDirectory(path, expected = undefined) {
     schemaVersion: 1,
     status: violations.length === 0 ? "passed" : "failed",
     runId: manifest?.runId ?? null,
-    eventCount: events.length,
+    eventCount,
     files: checksumEntries,
     report,
     violations,
@@ -175,13 +175,23 @@ async function walk(root, relativeRoot, output, exclude) {
   }
 }
 
-function parseEvents(text) {
-  const lines = text.split(/\r?\n/u).filter((line) => line.length > 0);
-  const events = lines.map((line, index) => parseJson(line, `events.jsonl:${index + 1}`));
-  for (let index = 0; index < events.length; index += 1) {
-    if (events[index].sequence !== index + 1) throw new Error("evidence.event_sequence_invalid");
+async function verifyEventsFile(path) {
+  const input = createReadStream(path, { encoding: "utf8" });
+  const lines = createInterface({ input, crlfDelay: Infinity });
+  let eventCount = 0;
+  try {
+    for await (const line of lines) {
+      if (line.length === 0) continue;
+      eventCount += 1;
+      const event = parseJson(line, `events.jsonl:${eventCount}`);
+      if (event.sequence !== eventCount) throw new Error("evidence.event_sequence_invalid");
+      assertSafeMetadata(event);
+    }
+  } finally {
+    lines.close();
+    input.destroy();
   }
-  return events;
+  return eventCount;
 }
 
 function parseChecksums(text) {

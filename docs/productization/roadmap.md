@@ -16,11 +16,15 @@
 - Real 900,000 ms pull-request soak with official MCP clients, fault injection,
   Windows resource probes, immutable JSON/JSONL evidence, and fail-closed
   checksum verification.
+- Frozen two-hour nightly and eight-hour release-candidate gates, scheduled
+  nightly evidence retention, trend comparison, and atomic RC evidence import.
 
 ## Before Public 1.0
 
 - Expand real app evidence across Office, Electron, Qt, WPF, Canvas, self-drawn, editing, and industrial software.
-- The two-hour nightly and eight-hour release-candidate evidence remain in PR6B.
+- Collect and retain passing two-hour nightly and eight-hour release-candidate
+  evidence on prepared Windows runners; the PR6B mechanism is implemented but
+  implementation tests do not substitute for those long runs.
 - Run clean-runner release rehearsals and retain failed evidence beside passing retries.
 - Publish Windows x64 preview versions and validate npm trusted publishing plus GitHub/Gitee recovery procedures.
 - Continue OCR screenshot regression and warm region latency tracking.

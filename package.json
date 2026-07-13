@@ -121,6 +121,8 @@
     "phase:7.9": "node src/phase-7-9-offline-package-identity.mjs",
     "phase:8.0": "node src/phase-8-0-runtime-soak.mjs",
     "soak:pr": "node src/phase-8-0-runtime-soak.mjs --gate pull-request --duration-ms 900000 --clients 2 --concurrency 2 --fault-every-rounds 20 --evidence-root evidence/pr-soak --seed 20260713",
+    "soak:rc": "node src/phase-8-0-runtime-soak.mjs --gate release-candidate --duration-ms 28800000 --evidence-root evidence/release-candidate --seed 20260713",
+    "soak:rc:verify": "node scripts/verify-release-candidate-evidence.mjs",
     "evidence:verify": "node scripts/verify-commercial-evidence.mjs",
     "package:dry-run": "node scripts/package-dry-run.mjs",
     "package:foundation": "node scripts/package-foundation-report.mjs",

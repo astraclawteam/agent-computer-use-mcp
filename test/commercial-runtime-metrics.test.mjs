@@ -101,6 +101,29 @@ test("runtime metrics reject unsorted or invalid samples instead of normalizing 
   );
 });
 
+test("runtime metrics summarize long-run latency without spreading hundreds of thousands of values", () => {
+  const total = 200_000;
+  const result = buildRuntimeMetrics({
+    samples: [
+      { elapsedMs: 0, rssBytes: 1, handles: 1 },
+      { elapsedMs: 1, rssBytes: 1, handles: 1 },
+    ],
+    callSummary: {
+      total,
+      failed: 0,
+      policyNotFailClosedCount: 0,
+      durations: Array.from({ length: total }, (_, index) => index % 100),
+    },
+    cleanup: cleanCleanup(),
+  });
+
+  assert.equal(result.calls.total, total);
+  assert.equal(result.calls.latencyMs.p50, 49);
+  assert.equal(result.calls.latencyMs.p95, 94);
+  assert.equal(result.calls.latencyMs.p99, 98);
+  assert.equal(result.calls.latencyMs.maximum, 99);
+});
+
 function stableSamples() {
   return [
     { elapsedMs: 0, rssBytes: 1000, handles: 10 },
