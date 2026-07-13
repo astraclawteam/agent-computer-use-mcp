@@ -59,6 +59,16 @@ Release-focused commands:
 - `npm run phase:7.8`: verify exact platform resolution and read-only repair guidance.
 - `npm run phase:7.9`: verify npm/ZIP platform identity and network-free startup.
 - `npm run release:windows:size-report`: enforce the 310 MiB complete ZIP limit.
+- `npm run soak:pr`: run the exact 900,000 ms pull-request soak and seal commercial runtime evidence.
+- `npm run evidence:verify -- <evidence-directory>`: recompute evidence identities, inventory, and SHA-256 checksums.
+
+The pull-request soak uses real official-SDK stdio clients, fault/reconnect cycles,
+Windows process-tree sampling, and a post-cleanup probe. It enforces at most
+128 MiB RSS net growth, 128 handles net growth, a tool-call failure rate below
+0.1%, and zero orphan processes, residual ports, overlay leaks, and cursor
+leaks. Its sealed directory contains `run-manifest.json`, `events.jsonl`,
+`report.json`, and `checksums.txt`. Complete screenshots and user documents are
+forbidden from commercial runtime evidence.
 
 The repository root is private to npm publication. Only generated release staging packages are publishable. They contain protected runtime code, exact manifests, licenses, checksums, and SBOM data without first-party source or source maps. Obfuscation is defense in depth, not a secrecy boundary.
 
