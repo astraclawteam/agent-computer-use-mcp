@@ -24,6 +24,7 @@ const IMPORT_FILES = Object.freeze([
 export async function importVerifiedEvidence(options = {}) {
   const source = requiredPath(options.source, "commercial.evidence_source_required");
   const store = requiredPath(options.store, "commercial.evidence_store_required");
+  assertDisjoint(source, store);
   const expected = requiredObject(options.expected, "commercial.evidence_expected_identity_required");
   const manifest = parseJson(await readFile(join(source, "run-manifest.json"), "utf8"), "commercial.evidence_manifest_invalid");
   if (manifest.dirtyWorktree !== false) throw new Error("commercial.evidence_dirty_worktree");
@@ -174,6 +175,17 @@ function parseJson(value, code) {
 function assertInside(root, candidate) {
   const path = relative(resolve(root), resolve(candidate));
   if (!path || path === ".." || path.startsWith(`..${sep}`)) throw new Error("commercial.evidence_path_escape");
+}
+
+function assertDisjoint(left, right) {
+  if (isInsideOrSame(left, right) || isInsideOrSame(right, left)) {
+    throw new Error("commercial.evidence_path_overlap");
+  }
+}
+
+function isInsideOrSame(root, candidate) {
+  const path = relative(resolve(root), resolve(candidate));
+  return path === "" || (!path.startsWith(`..${sep}`) && path !== ".." && !path.startsWith(sep));
 }
 
 async function pathExists(path) {

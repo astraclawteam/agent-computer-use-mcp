@@ -99,6 +99,26 @@ test("release-candidate importer never overwrites a run and preserves distinct r
   assert.equal(imported.path, join(store, first.manifest.gitCommit, "rc-attempt-2"));
 });
 
+test("release-candidate importer rejects overlapping source and store roots", async () => {
+  const fixture = await evidenceFixture({ runId: "rc-overlap" });
+  await assert.rejects(
+    () => importVerifiedEvidence({
+      source: fixture.source,
+      store: join(fixture.source, "imported"),
+      expected: fixture.expected,
+    }),
+    /commercial.evidence_path_overlap/,
+  );
+  await assert.rejects(
+    () => importVerifiedEvidence({
+      source: fixture.source,
+      store: join(fixture.source, ".."),
+      expected: fixture.expected,
+    }),
+    /commercial.evidence_path_overlap/,
+  );
+});
+
 test("release-candidate commands pin the exact gate and use the protected importer", async () => {
   const packageJson = JSON.parse(await readFile("package.json", "utf8"));
   const verifier = await readFile("scripts/verify-release-candidate-evidence.mjs", "utf8");
