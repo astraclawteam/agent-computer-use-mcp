@@ -18,6 +18,7 @@ test("template matching provider finds repeated static UI controls from local PN
         id: "save-icon",
         label: "Save",
         role: "button",
+        approvedActionLabel: true,
         path: templatePath,
         threshold: 0.99,
       },
@@ -33,6 +34,8 @@ test("template matching provider finds repeated static UI controls from local PN
     { x: 52, y: 28, width: 8, height: 8 },
   ]);
   assert.ok(result.matches.every((match) => match.score >= 0.99));
+  assert.equal(result.matches.every((match) => match.exact === true), true);
+  assert.equal(result.matches.every((match) => match.approvedActionLabel === true), true);
 });
 
 test("template matches normalize into pixel-limited observation elements", async () => {
