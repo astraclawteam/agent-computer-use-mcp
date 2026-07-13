@@ -46,5 +46,18 @@ jobs:
       - name: Verify official MCP SDK server transport
         run: npm run phase:1.8
 
-      - name: Run short runtime soak
-        run: npm run phase:8.0 -- --duration-ms 60000 --clients 2 --concurrency 2 --fault-every-rounds 20
+      - name: Run 15-minute commercial soak
+        run: npm run soak:pr
+
+      - name: Upload commercial soak evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: commercial-pr-soak-evidence
+          path: |
+            evidence/pr-soak/**/run-manifest.json
+            evidence/pr-soak/**/events.jsonl
+            evidence/pr-soak/**/report.json
+            evidence/pr-soak/**/checksums.txt
+          if-no-files-found: error
+          retention-days: 30
