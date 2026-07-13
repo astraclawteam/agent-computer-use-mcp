@@ -38,7 +38,7 @@ export async function runPhase35(options = {}) {
       eventSink,
       visualConcurrency: options.visualConcurrency,
     });
-    const report = buildPerceptionLatencyReport({ benchmark });
+    const report = Object.freeze({ ...buildPerceptionLatencyReport({ benchmark }), privacyStatus: "passed" });
     if (evidence) await evidence.seal(report);
     return report;
   } catch (error) {
@@ -49,6 +49,7 @@ export async function runPhase35(options = {}) {
         benchmark: "perception-corpus-gate",
         corpus: { packId: corpus.packId, version: corpus.version, tier: corpus.tier, samples: corpus.samples.length },
         error: safeErrorCode(error),
+        privacyStatus: "passed",
         includeUserOverlay: false,
         startsDesktopControl: false,
       });

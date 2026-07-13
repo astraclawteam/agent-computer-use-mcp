@@ -1,4 +1,5 @@
 import { verifyEvidenceDirectory } from "./commercial-evidence.mjs";
+import { normalizeCommercialCandidateIdentity } from "./commercial-candidate-identity.mjs";
 
 const SOAK_REQUIREMENTS = Object.freeze({
   "pull-request": 900_000,
@@ -16,8 +17,10 @@ export async function evaluateCommercialPromotion({ evidenceDirectories, expecte
   const invalid = verified.filter((entry) => entry.status !== "passed");
   const groups = new Map();
   for (const evidence of verified.filter((entry) => entry.status === "passed")) {
-    const identity = evidence.manifest?.candidateIdentity;
-    if (!isRecord(identity)) {
+    let identity;
+    try {
+      identity = normalizeCommercialCandidateIdentity(evidence.manifest?.candidateIdentity);
+    } catch {
       addGroup(groups, "missing-identity", null, evidence);
       continue;
     }
@@ -58,6 +61,7 @@ export async function evaluateCommercialPromotion({ evidenceDirectories, expecte
 
 function evaluateGroup(identityKey, group) {
   const violations = [];
+  if (!group.identity) violations.push({ code: "promotion.candidate_identity_incomplete" });
   const failed = group.evidence.filter((entry) => entry.report?.status !== "passed");
   const failedRunIds = failed.map((entry) => entry.runId).sort();
   if (failedRunIds.length > 0) violations.push({ code: "promotion.failed_evidence_present", runIds: failedRunIds });
@@ -106,6 +110,9 @@ function evaluateGroup(identityKey, group) {
     if (entry.report.status !== "passed" || quality.ocrCharacterAccuracy < 0.97 || quality.criticalLabelRecall < 0.95
       || quality.proposalPrecision < 0.98 || quality.proposalRecall < 0.90 || quality.guessedActionCount !== 0) {
       violations.push({ code: "promotion.perception_target_failed", runId: entry.runId });
+    }
+    if (entry.report.privacyStatus !== "passed") {
+      violations.push({ code: "promotion.privacy_failed", runId: entry.runId });
     }
   }
   for (const entry of group.evidence) {

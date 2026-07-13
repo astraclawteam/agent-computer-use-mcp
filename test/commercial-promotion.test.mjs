@@ -46,6 +46,11 @@ test("promotion rejects missing short failed or identity-mismatched soak evidenc
   const mismatchReport = await evaluateCommercialPromotion({ evidenceDirectories: mismatched.paths, expected: IDENTITY });
   assert.equal(mismatchReport.eligible, false);
   assert.equal(mismatchReport.violations.some((entry) => entry.code === "promotion.identity_mismatch"), true);
+
+  const incomplete = await evidenceFixture(t, { identityOverridesAll: { ocrRuntime: undefined } });
+  const incompleteReport = await evaluateCommercialPromotion({ evidenceDirectories: incomplete.paths });
+  assert.equal(incompleteReport.eligible, false);
+  assert.equal(incompleteReport.violations.some((entry) => entry.code === "promotion.candidate_identity_incomplete"), true);
 });
 
 test("promotion rejects app coverage cleanup perception and privacy failures", async (t) => {
@@ -60,6 +65,11 @@ test("promotion rejects app coverage cleanup perception and privacy failures", a
   assert.equal(perceptionReport.eligible, false);
   assert.equal(perceptionReport.violations.some((entry) => entry.code === "promotion.perception_target_failed"), true);
   assert.equal(perceptionReport.violations.some((entry) => entry.code === "promotion.privacy_failed"), true);
+
+  const missingPrivacy = await evidenceFixture(t, { perceptionOverrides: { omitPrivacyStatus: true } });
+  const missingPrivacyReport = await evaluateCommercialPromotion({ evidenceDirectories: missingPrivacy.paths, expected: IDENTITY });
+  assert.equal(missingPrivacyReport.eligible, false);
+  assert.equal(missingPrivacyReport.violations.some((entry) => entry.code === "promotion.privacy_failed"), true);
 });
 
 test("a newer pass never hides an earlier failed run for the same candidate", async (t) => {
@@ -146,7 +156,7 @@ function appReport(options = {}) {
 }
 
 function perceptionReport(options = {}) {
-  return {
+  const report = {
     status: "passed",
     phase: "3.5",
     benchmark: "perception-corpus-gate",
@@ -157,13 +167,15 @@ function perceptionReport(options = {}) {
       proposalRecall: 0.95,
       guessedActionCount: 0,
     },
-    privacyStatus: options.privacyStatus ?? "passed",
     violations: [],
     includeUserOverlay: false,
   };
+  if (!options.omitPrivacyStatus) report.privacyStatus = options.privacyStatus ?? "passed";
+  return report;
 }
 
 function identityFor(options, kind) {
+  if (options.identityOverridesAll) return { ...IDENTITY, ...options.identityOverridesAll };
   return options.mismatchKind === kind ? { ...IDENTITY, ...(options.identityOverrides ?? {}) } : IDENTITY;
 }
 

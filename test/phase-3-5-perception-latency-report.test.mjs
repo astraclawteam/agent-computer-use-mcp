@@ -131,6 +131,7 @@ test("Phase 3.5 seals provider events and a failing or passing report through ev
   assert.deepEqual(verified.manifest.candidateIdentity, candidateIdentity());
   assert.equal(verified.eventCount, 19);
   assert.equal(verified.report.status, report.status);
+  assert.equal(verified.report.privacyStatus, "passed");
   assert.deepEqual(verified.files.map((file) => file.path), ["events.jsonl", "report.json", "run-manifest.json"]);
 });
 
