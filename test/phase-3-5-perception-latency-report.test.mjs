@@ -1,13 +1,19 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { readFileSync } from "node:fs";
+import { mkdtemp, readdir, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { test } from "node:test";
 
+import { verifyEvidenceDirectory } from "../src/commercial-evidence.mjs";
+import { generateQuickCorpus } from "../src/perception-fixture-generator.mjs";
 import {
   PERCEPTION_LATENCY_TARGETS,
   PERCEPTION_QUALITY_TARGETS,
   buildPerceptionLatencyReport,
 } from "../src/perception-latency-report.mjs";
+import { runPhase35 } from "../src/phase-3-5-perception-latency-report.mjs";
 
 test("Phase 3.5 derives quality and latency gates only from a measured benchmark", () => {
   const report = buildPerceptionLatencyReport({ benchmark: passingBenchmark() });
@@ -99,6 +105,30 @@ test("Phase 3.5 CLI requires a corpus and package scripts separate quick from fu
   assert.equal(health.phases["3.5"], "perception-latency-budget");
 });
 
+test("Phase 3.5 seals provider events and a failing or passing report through evidence core", async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "acu-phase35-corpus-"));
+  const evidenceRoot = await mkdtemp(join(tmpdir(), "acu-phase35-evidence-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  t.after(() => rm(evidenceRoot, { recursive: true, force: true }));
+  await generateQuickCorpus({ outputRoot: root, seed: 20260713 });
+
+  const report = await runPhase35({
+    corpusRoot: root,
+    tier: "quick",
+    evidenceRoot,
+    sourceCommit: "a".repeat(40),
+    providers: passingProviders(),
+  });
+  const runs = await readdir(evidenceRoot, { withFileTypes: true });
+  const run = runs.find((entry) => entry.isDirectory());
+  assert.ok(run);
+  const verified = await verifyEvidenceDirectory(join(evidenceRoot, run.name));
+  assert.equal(verified.status, "passed");
+  assert.equal(verified.eventCount, 19);
+  assert.equal(verified.report.status, report.status);
+  assert.deepEqual(verified.files.map((file) => file.path), ["events.jsonl", "report.json", "run-manifest.json"]);
+});
+
 function passingBenchmark() {
   return {
     status: "measured",
@@ -125,6 +155,38 @@ function passingBenchmark() {
 
 function measured(sampleId, latencyClass, durationMs) {
   return { sampleId, kind: "ocr", latencyClass, durationMs };
+}
+
+function passingProviders() {
+  const identity = {
+    provider: "xiaozhiclaw-ocr-sidecar",
+    modelPack: "pp-ocrv6-small",
+    modelFormat: "onnx",
+    runtime: "onnxruntime-cpu",
+    executionProvider: "CPUExecutionProvider",
+  };
+  return {
+    ocr: {
+      async open() {
+        return {
+          identity,
+          async warmup() {},
+          async recognize(request) { return { text: request.sample.annotation.normalizedText, identity }; },
+          async verifyCache() { return { cacheHit: true, primeMs: 80, hitMs: 0 }; },
+          async close() {},
+        };
+      },
+    },
+    visual: {
+      identity: { provider: "som-proposal", model: "local-components-v1" },
+      async run(request) {
+        return {
+          proposals: request.sample.annotation.targets.map((target) => ({ box: target.box, confidence: 1, guessedAction: false })),
+          identity: this.identity,
+        };
+      },
+    },
+  };
 }
 
 function runNode(args) {

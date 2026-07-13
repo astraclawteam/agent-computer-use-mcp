@@ -1,10 +1,11 @@
 #!/usr/bin/env node
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { createReleasedPerceptionProviders } from "./offline-perception-probe.mjs";
+import { createEvidenceRun } from "./commercial-evidence.mjs";
 import { runPerceptionBenchmark } from "./perception-benchmark-runner.mjs";
 import { verifyPerceptionCorpus } from "./perception-corpus.mjs";
 import { buildPerceptionLatencyReport } from "./perception-latency-report.mjs";
@@ -14,13 +15,42 @@ export async function runPhase35(options = {}) {
   const corpus = await loadCorpus(options);
   const privacy = await scanCorpusPrivacy({ manifest: corpus, root: options.corpusRoot });
   if (privacy.status !== "passed") throw phaseError("perception.corpus_privacy_rejected");
-  const benchmark = await runPerceptionBenchmark({
-    corpus,
-    providers: options.providers ?? createReleasedPerceptionProviders(options.providerOptions),
-    eventSink: options.eventSink,
-    visualConcurrency: options.visualConcurrency,
-  });
-  return buildPerceptionLatencyReport({ benchmark });
+  const evidence = options.evidenceRoot ? await createEvidenceRun({
+    root: options.evidenceRoot,
+    runId: options.runId ?? `perception-${corpus.tier}-${randomUUID()}`,
+    manifest: {
+      schemaVersion: 1,
+      benchmark: "perception-corpus",
+      sourceCommit: options.sourceCommit ?? process.env.GITHUB_SHA ?? "local-development",
+      corpus: { packId: corpus.packId, version: corpus.version, tier: corpus.tier, samples: corpus.samples.length },
+      includeUserOverlay: false,
+    },
+  }) : null;
+  const eventSink = composeEventSinks(options.eventSink, evidence);
+  try {
+    const benchmark = await runPerceptionBenchmark({
+      corpus,
+      providers: options.providers ?? createReleasedPerceptionProviders(options.providerOptions),
+      eventSink,
+      visualConcurrency: options.visualConcurrency,
+    });
+    const report = buildPerceptionLatencyReport({ benchmark });
+    if (evidence) await evidence.seal(report);
+    return report;
+  } catch (error) {
+    if (evidence) {
+      await evidence.seal({
+        status: "failed",
+        phase: "3.5",
+        benchmark: "perception-corpus-gate",
+        corpus: { packId: corpus.packId, version: corpus.version, tier: corpus.tier, samples: corpus.samples.length },
+        error: safeErrorCode(error),
+        includeUserOverlay: false,
+        startsDesktopControl: false,
+      });
+    }
+    throw error;
+  }
 }
 
 async function loadCorpus(options) {
@@ -58,15 +88,32 @@ async function createGeneratedQuickLock(root) {
 
 async function main() {
   const args = process.argv.slice(2);
-  const corpusRoot = readOption(args, "--corpus");
+  const corpusRoot = readOption(args, "--corpus") ?? process.env.AGENT_COMPUTER_USE_PERCEPTION_CORPUS;
   if (!corpusRoot) throw phaseError("perception.corpus_argument_required");
   const report = await runPhase35({
     corpusRoot,
     tier: readOption(args, "--tier") ?? "quick",
     lockPath: readOption(args, "--lock"),
+    evidenceRoot: readOption(args, "--evidence-root"),
   });
   process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
   process.exitCode = report.status === "passed" ? 0 : 1;
+}
+
+function composeEventSinks(external, evidence) {
+  if (!external && !evidence) return undefined;
+  return async (event) => {
+    if (external) await external(event);
+    if (evidence) {
+      const { type, ...payload } = event;
+      await evidence.append(type, payload);
+    }
+  };
+}
+
+function safeErrorCode(error) {
+  const value = typeof error?.code === "string" ? error.code : "perception.phase_failed";
+  return /^[a-z][a-z0-9._-]{1,100}$/u.test(value) ? value : "perception.phase_failed";
 }
 
 function readOption(args, name) {
