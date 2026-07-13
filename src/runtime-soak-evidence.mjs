@@ -67,6 +67,7 @@ function validateNamedGateOptions(gateName, options) {
   assertGateParameter(options, "concurrency", policy.concurrency, positiveInteger, "runtime.soak_concurrency_invalid");
   assertGateParameter(options, "faultEveryRounds", policy.faultEveryRounds, nonNegativeInteger, "runtime.soak_fault_cadence_invalid");
   assertGateParameter(options, "sampleIntervalMs", policy.sampleIntervalMs, positiveInteger, "runtime.soak_sample_interval_invalid");
+  assertGateParameter(options, "checkpointIntervalMs", policy.checkpointIntervalMs, positiveInteger, "runtime.soak_checkpoint_interval_invalid");
   assertGateParameter(options, "minimumCheckpointCount", policy.minimumCheckpointCount, positiveInteger, "runtime.soak_checkpoint_count_invalid");
   for (const [name, expected] of Object.entries(policy.thresholds)) {
     assertGateParameter(options, name, expected, nonNegativeNumber, `runtime.soak_${name}_invalid`);
@@ -80,6 +81,7 @@ function validateNamedGateOptions(gateName, options) {
     concurrency: policy.concurrency,
     faultEveryRounds: policy.faultEveryRounds,
     sampleIntervalMs: policy.sampleIntervalMs,
+    checkpointIntervalMs: policy.checkpointIntervalMs,
     minimumCheckpointCount: policy.minimumCheckpointCount,
     maxRssGrowthBytes: policy.thresholds.maxRssGrowthBytes,
     maxHandleGrowth: policy.thresholds.maxHandleGrowth,
@@ -123,6 +125,9 @@ export async function executeRuntimeSoakPhase(rawOptions = {}, dependencies = {}
     clientCount: options.clientCount,
     concurrency: options.concurrency,
     faultEveryRounds: options.faultEveryRounds,
+    sampleIntervalMs: options.sampleIntervalMs,
+    checkpointIntervalMs: options.checkpointIntervalMs,
+    minimumCheckpointCount: options.minimumCheckpointCount,
     startedAt,
     privacyPolicyVersion: 1,
   };
@@ -134,7 +139,10 @@ export async function executeRuntimeSoakPhase(rawOptions = {}, dependencies = {}
   });
   let report;
   try {
-    report = await runner({ ...options, eventSink: evidence });
+    report = await runner({
+      ...options,
+      eventSink: createCheckpointingEventSink(evidence, options),
+    });
   } catch (error) {
     report = {
       schemaVersion: 2,
@@ -171,6 +179,21 @@ export async function executeRuntimeSoakPhase(rawOptions = {}, dependencies = {}
   return {
     ...sealedReport,
     evidence: { runId, verified: true },
+  };
+}
+
+function createCheckpointingEventSink(evidence, options) {
+  let nextCheckpointAt = options.checkpointIntervalMs;
+  return {
+    async append(type, payload) {
+      const event = await evidence.append(type, payload);
+      if (type !== "runtime.sample" || !Number.isFinite(payload?.elapsedMs)) return event;
+      while (payload.elapsedMs >= nextCheckpointAt) {
+        await evidence.checkpoint({ stage: "periodic", elapsedMs: nextCheckpointAt });
+        nextCheckpointAt += options.checkpointIntervalMs;
+      }
+      return event;
+    },
   };
 }
 

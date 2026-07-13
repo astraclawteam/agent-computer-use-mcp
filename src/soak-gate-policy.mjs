@@ -42,6 +42,7 @@ function gate(options) {
   return Object.freeze({
     ...options,
     sampleIntervalMs: 10_000,
+    checkpointIntervalMs: 600_000,
     thresholds: THRESHOLDS,
   });
 }

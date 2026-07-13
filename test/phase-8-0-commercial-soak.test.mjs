@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp } from "node:fs/promises";
+import { mkdtemp, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -90,6 +90,33 @@ test("phase fails closed when the measured workload is shorter or the worktree i
   });
   assert.equal(short.status, "failed");
   assert.ok(short.violations.some((item) => item.code === "runtime.soak_duration_short"));
+});
+
+test("release-candidate phase writes periodic checkpoints that satisfy its immutable gate", async () => {
+  const root = await mkdtemp(join(tmpdir(), "commercial-soak-phase-"));
+  await executeRuntimeSoakPhase({
+    gate: "release-candidate",
+    durationMs: 28_800_000,
+    evidenceRoot: root,
+    runId: "rc-checkpoints",
+  }, {
+    resolveIdentity: async () => validIdentity(),
+    runRuntimeSoak: async (options) => {
+      for (let elapsedMs = 600_000; elapsedMs <= 28_800_000; elapsedMs += 600_000) {
+        await options.eventSink.append("runtime.sample", { elapsedMs, rssBytes: 1, handles: 1 });
+      }
+      return passingReport(28_800_000);
+    },
+    now: () => "2026-07-13T00:00:00.000Z",
+  });
+
+  const lines = (await readFile(join(root, "rc-checkpoints", "events.jsonl"), "utf8"))
+    .trim()
+    .split("\n")
+    .map((line) => JSON.parse(line));
+  const checkpoints = lines.filter((event) => event.type === "evidence.checkpoint");
+  assert.ok(checkpoints.length >= 48);
+  assert.equal(checkpoints.some((event) => event.payload.stage === "periodic"), true);
 });
 
 function validIdentity() {
