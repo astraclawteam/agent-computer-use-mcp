@@ -1,4 +1,5 @@
 import { readFileSync } from "node:fs";
+import { matchesCommercialCandidateIdentity } from "./commercial-candidate-identity.mjs";
 
 export const ALPHA_RELEASE_COMMANDS = [
   "npm test",
@@ -144,7 +145,9 @@ export const REQUIRED_RELEASE_EVIDENCE = [
 
 export function buildReleaseReadinessGate(options = {}) {
   const packageJson = options.packageJson ?? readPackageJson();
-  const commands = ALPHA_RELEASE_COMMANDS.map((command, index) => ({
+  const commercialRequired = isStableVersion(packageJson.version);
+  const commandContract = commercialRequired ? [...ALPHA_RELEASE_COMMANDS, "npm run phase:9.0"] : ALPHA_RELEASE_COMMANDS;
+  const commands = commandContract.map((command, index) => ({
     id: commandId(command),
     order: index + 1,
     command,
@@ -153,19 +156,25 @@ export function buildReleaseReadinessGate(options = {}) {
     requiresDesktopControl: command === "npm run phase:1.4",
   }));
 
+  const evidence = REQUIRED_RELEASE_EVIDENCE.map(([id, command]) => ({
+    id,
+    command,
+    required: true,
+  }));
+  if (commercialRequired) evidence.push({ id: "commercial-promotion-evidence", command: "npm run phase:9.0", required: true });
+  const commercial = commercialSummary(options.commercialPromotion, packageJson, commercialRequired);
   const gate = {
     phase: "0.11",
     status: "passed",
     packageName: packageJson.name,
     packageVersion: packageJson.version,
-    releaseGate: "alpha",
+    releaseGate: commercialRequired ? "stable-commercial" : "alpha",
+    commercialRequired,
+    commercialEligible: commercial.eligible,
+    commercial,
     executionMode: "manifest-only",
     commands,
-    evidence: REQUIRED_RELEASE_EVIDENCE.map(([id, command]) => ({
-      id,
-      command,
-      required: true,
-    })),
+    evidence,
     invariants: REQUIRED_RELEASE_INVARIANTS,
     includeUserOverlay: false,
     startsDesktopControl: false,
@@ -213,6 +222,13 @@ export function validateReleaseReadinessGate(gate, options = {}) {
       });
     }
   }
+  if (gate.commercialRequired === true) {
+    if (!gate.evidence?.some((candidate) => candidate.id === "commercial-promotion-evidence"
+      && candidate.command === "npm run phase:9.0" && candidate.required === true)) {
+      violations.push({ code: "missing-evidence", id: "commercial-promotion-evidence", command: "npm run phase:9.0" });
+    }
+    violations.push(...(gate.commercial?.violations ?? []));
+  }
 
   if (gate.startsDesktopControl !== false) {
     violations.push({ code: "gate-starts-desktop-control" });
@@ -231,6 +247,41 @@ export function validateReleaseReadinessGate(gate, options = {}) {
     includeUserOverlay: false,
     startsDesktopControl: false,
   };
+}
+
+function commercialSummary(report, packageJson, required) {
+  if (!required) return Object.freeze({ required: false, eligible: false, violations: Object.freeze([]) });
+  if (report?.status !== "passed" || report?.eligible !== true || report?.phase !== "9.0"
+    || report?.benchmark !== "commercial-promotion-evidence" || !Array.isArray(report?.violations)
+    || report.violations.length > 0) {
+    return Object.freeze({
+      required: true,
+      eligible: false,
+      violations: Object.freeze([Object.freeze({ code: "commercial-evidence-required" })]),
+    });
+  }
+  const identity = report.candidateIdentity;
+  const matching = report.releaseTag === `v${packageJson.version}`
+    && matchesCommercialCandidateIdentity(identity, packageJson);
+  if (!matching) {
+    return Object.freeze({
+      required: true,
+      eligible: false,
+      violations: Object.freeze([Object.freeze({ code: "commercial-release-identity-mismatch" })]),
+    });
+  }
+  return Object.freeze({
+    required: true,
+    eligible: true,
+    releaseTag: report.releaseTag,
+    candidateIdentity: identity,
+    violations: Object.freeze([]),
+  });
+}
+
+function isStableVersion(version) {
+  const match = /^(\d+)\.(\d+)\.(\d+)$/.exec(String(version ?? ""));
+  return Boolean(match && Number(match[1]) >= 1);
 }
 
 function commandId(command) {

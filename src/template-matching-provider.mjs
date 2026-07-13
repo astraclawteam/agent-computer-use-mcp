@@ -85,6 +85,8 @@ function matchTemplatePixels(image, template, options) {
           label: options.label ?? options.id,
           role: options.role ?? "button",
           score,
+          exact: score >= 0.999999,
+          approvedActionLabel: options.approvedActionLabel === true,
           bounds: {
             x,
             y,

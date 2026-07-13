@@ -21,6 +21,8 @@ test("release metadata matches package version, tag, changelog, and upgrade poli
   assert.equal(metadata.packageVersion, packageJson.version);
   assert.equal(metadata.releaseTag, `v${packageJson.version}`);
   assert.equal(metadata.channel, "0.x-preview");
+  assert.equal(metadata.commercialRequired, false);
+  assert.equal(metadata.commercialEligible, false);
   assert.equal(metadata.publicContract, "computer.* MCP tools and structuredContent schemas");
   assert.equal(metadata.upgradeStrategy, "npm-install-exact-core-and-platform-version");
   assert.equal(metadata.rollbackStrategy, "npm-install-previous-exact-version");
@@ -56,6 +58,49 @@ test("release metadata matches package version, tag, changelog, and upgrade poli
   assert.deepEqual(validation.violations, []);
 });
 
+test("stable metadata includes matching Commercial 1.0 promotion evidence", async () => {
+  const { buildReleaseMetadata, validateReleaseMetadata } = await import("../src/release-metadata.mjs");
+  const packageJson = JSON.parse(readFileSync("package.json", "utf8"));
+  packageJson.version = "1.0.0";
+  const promotion = {
+    status: "passed",
+    phase: "9.0",
+    benchmark: "commercial-promotion-evidence",
+    eligible: true,
+    releaseTag: "v1.0.0",
+    candidateIdentity: {
+      gitCommit: "1".repeat(40),
+      corePackage: { name: packageJson.name, version: packageJson.version, sha256: "a".repeat(64) },
+      platformPackage: { name: "@xiaozhiclaw/agent-computer-use-win32-x64", version: packageJson.version, sha256: "b".repeat(64) },
+      driver: { id: "cua-driver", version: "0.7.1", sha256: "c".repeat(64) },
+      overlay: { id: "gateway-overlay", sha256: "d".repeat(64) },
+      ocrRuntime: { id: "onnxruntime-node", version: "1.27.0", sha256: "e".repeat(64) },
+      modelPack: { id: "pp-ocr-v6-small", sha256: "f".repeat(64) },
+    },
+    violations: [],
+  };
+  const metadata = buildReleaseMetadata({ packageJson, commercialPromotion: promotion });
+  const validation = validateReleaseMetadata(metadata, { packageJson, changelogText: "## 1.0.0\n" });
+
+  assert.equal(metadata.channel, "stable");
+  assert.equal(metadata.commercialRequired, true);
+  assert.equal(metadata.commercialEligible, true);
+  assert.ok(metadata.artifacts.some((entry) => entry.name === "commercial-promotion-evidence" && entry.command === "npm run phase:9.0"));
+  assert.equal(validation.status, "passed");
+
+  const incomplete = structuredClone(metadata);
+  delete incomplete.commercialPromotion.candidateIdentity.driver;
+  assert.equal(validateReleaseMetadata(incomplete, { packageJson, changelogText: "## 1.0.0\n" }).status, "failed");
+
+  const invalidCommit = structuredClone(metadata);
+  invalidCommit.commercialPromotion.candidateIdentity.gitCommit = "not-a-commit";
+  assert.equal(validateReleaseMetadata(invalidCommit, { packageJson, changelogText: "## 1.0.0\n" }).status, "failed");
+
+  const missingRuntime = structuredClone(metadata);
+  delete missingRuntime.commercialPromotion.candidateIdentity.ocrRuntime;
+  assert.equal(validateReleaseMetadata(missingRuntime, { packageJson, changelogText: "## 1.0.0\n" }).status, "failed");
+});
+
 test("release metadata validation fails closed for missing changelog or mismatched tag", async () => {
   const { buildReleaseMetadata, validateReleaseMetadata } = await import("../src/release-metadata.mjs");
   const packageJson = JSON.parse(readFileSync("package.json", "utf8"));
@@ -89,6 +134,8 @@ test("Phase 0.10 has changelog and executable release metadata smoke script", as
   assert.equal(report.status, "passed");
   assert.equal(report.phase, "0.10");
   assert.equal(report.releaseTag, `v${packageJson.version}`);
+  assert.equal(report.commercialRequired, false);
+  assert.equal(report.commercialEligible, false);
   assert.equal(report.changelogEntryPresent, true);
   assert.equal(report.artifactCount, 23);
   assert.equal(report.includeUserOverlay, false);

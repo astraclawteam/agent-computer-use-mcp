@@ -64,6 +64,21 @@
 - Failed long runs and passing retries use distinct run IDs. Evidence files are
   immutable and are never edited, deleted, or overwritten to obtain a pass.
 
+## Commercial Promotion Gate
+
+- Phase 9.0 is a read-only sealed-evidence aggregator. It cannot execute tests,
+  download assets, start desktop control, or infer missing results.
+- Preview `0.x` releases report `commercialEligible: false` but keep their
+  existing publication behavior.
+- Stable `1.x` release metadata requires `eligible: true` from Phase 9.0 and a
+  matching `vX.Y.Z` tag, package version, Git commit, platform package, driver,
+  overlay, OCR runtime/model identity, and zero promotion violations.
+- One candidate identity must contain passing pull-request, nightly, release-
+  candidate, real-app, and perception evidence. Evidence split across different
+  candidate identities cannot be combined.
+- Any verified failed run remains disqualifying. A newer passing retry never
+  hides or replaces its run ID.
+
 ## Perception Evidence
 
 - Pull requests use the deterministic generated quick corpus; the scheduled
@@ -73,6 +88,9 @@
   provider starts.
 - Benchmarks invoke the released offline PP-OCRv6 ONNX, SOM, template, and
   proposal providers. Caller-supplied latency or accuracy arrays are forbidden.
+- Action proposals require calibrated support from at least two independent
+  local providers at fused confidence 0.98, or an exact approved template at
+  0.995. SOM-only and OCR-only boxes remain observation-only.
 - Commercial targets are 97% OCR character accuracy, 95% critical-label
   recall, 98% proposal precision, 90% proposal recall, and zero guessed actions.
 - Warm small-crop P95 is at most 200 ms, ordinary-region P95 is at most 300 ms,
@@ -81,3 +99,6 @@
 - Nightly artifacts contain only `run-manifest.json`, `events.jsonl`,
   `report.json`, and `checksums.txt`. Corpus images, complete windows, user
   documents, raw OCR strings, and local paths are never uploaded.
+- The committed quick regression corpus contains only generated/public crops
+  that pass privacy scanning. The external full-corpus lock remains fail-closed
+  until its real manifest identity and evidence are supplied.

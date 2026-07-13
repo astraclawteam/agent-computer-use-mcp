@@ -1,0 +1,356 @@
+{
+  "schemaVersion": 1,
+  "packId": "agent-computer-use-perception-quick-regressions",
+  "version": "2026.07.13-seed-20260713",
+  "tier": "quick",
+  "provenance": "generated",
+  "licenses": [
+    {
+      "id": "generated-mit",
+      "spdx": "MIT",
+      "target": "LICENSE.txt",
+      "sizeBytes": 47,
+      "sha256": "f60962d725c32d5b26bd795837868df6eed4e423cde092382c6ceafc36a8db52"
+    }
+  ],
+  "samples": [
+    {
+      "id": "quick-visual-cad-like",
+      "kind": "visual",
+      "applicationClass": "table",
+      "dpi": 150,
+      "theme": "dark",
+      "licenseId": "generated-mit",
+      "image": {
+        "target": "images/quick-visual-cad-like.png",
+        "sizeBytes": 6649,
+        "sha256": "bef6043b337a823c7d87f462997879bdb3d41a8045f828be68848385250f4976"
+      },
+      "annotation": {
+        "surfaceClass": "cad-like",
+        "targets": [
+          {
+            "box": {
+              "x": 43,
+              "y": 40,
+              "width": 92,
+              "height": 38
+            },
+            "role": "button",
+            "label": "SNAP",
+            "actionable": true
+          }
+        ],
+        "ignored": [
+          {
+            "box": {
+              "x": 312,
+              "y": 24,
+              "width": 16,
+              "height": 16
+            },
+            "reason": "decorative-status-dot"
+          }
+        ]
+      }
+    },
+    {
+      "id": "quick-visual-canvas",
+      "kind": "visual",
+      "applicationClass": "native-form",
+      "dpi": 100,
+      "theme": "dark",
+      "licenseId": "generated-mit",
+      "image": {
+        "target": "images/quick-visual-canvas.png",
+        "sizeBytes": 5649,
+        "sha256": "ca25747623695b6cd22538652d4041d7cf2a5c089356dcf6214a5a1c9d6a4c2f"
+      },
+      "annotation": {
+        "surfaceClass": "canvas",
+        "targets": [
+          {
+            "box": {
+              "x": 28,
+              "y": 45,
+              "width": 92,
+              "height": 38
+            },
+            "role": "button",
+            "label": "Apply",
+            "actionable": true
+          }
+        ],
+        "ignored": [
+          {
+            "box": {
+              "x": 312,
+              "y": 24,
+              "width": 16,
+              "height": 16
+            },
+            "reason": "decorative-status-dot"
+          }
+        ]
+      }
+    },
+    {
+      "id": "quick-visual-dialog",
+      "kind": "visual",
+      "applicationClass": "canvas",
+      "dpi": 125,
+      "theme": "dark",
+      "licenseId": "generated-mit",
+      "image": {
+        "target": "images/quick-visual-dialog.png",
+        "sizeBytes": 2504,
+        "sha256": "7c0c110810aca299db6fe1e6c5db32254d4d62855c9ee7f351eb7b785a596072"
+      },
+      "annotation": {
+        "surfaceClass": "dialog",
+        "targets": [
+          {
+            "box": {
+              "x": 35,
+              "y": 44,
+              "width": 92,
+              "height": 38
+            },
+            "role": "button",
+            "label": "Apply",
+            "actionable": true
+          }
+        ],
+        "ignored": [
+          {
+            "box": {
+              "x": 312,
+              "y": 24,
+              "width": 16,
+              "height": 16
+            },
+            "reason": "decorative-status-dot"
+          }
+        ]
+      }
+    },
+    {
+      "id": "quick-visual-editor",
+      "kind": "visual",
+      "applicationClass": "toolbar",
+      "dpi": 100,
+      "theme": "dark",
+      "licenseId": "generated-mit",
+      "image": {
+        "target": "images/quick-visual-editor.png",
+        "sizeBytes": 2504,
+        "sha256": "cedfbfd49af6c347d0ecd712a66c16af415e790a00024e49830f20813fc7fce8"
+      },
+      "annotation": {
+        "surfaceClass": "editor",
+        "targets": [
+          {
+            "box": {
+              "x": 34,
+              "y": 38,
+              "width": 92,
+              "height": 38
+            },
+            "role": "button",
+            "label": "Apply",
+            "actionable": true
+          }
+        ],
+        "ignored": [
+          {
+            "box": {
+              "x": 312,
+              "y": 24,
+              "width": 16,
+              "height": 16
+            },
+            "reason": "decorative-status-dot"
+          }
+        ]
+      }
+    },
+    {
+      "id": "quick-visual-table",
+      "kind": "visual",
+      "applicationClass": "cad",
+      "dpi": 150,
+      "theme": "light",
+      "licenseId": "generated-mit",
+      "image": {
+        "target": "images/quick-visual-table.png",
+        "sizeBytes": 2585,
+        "sha256": "5a239d905b594891db7d2c882fd16a1b03b65434490f32c76c0d73a98beb601a"
+      },
+      "annotation": {
+        "surfaceClass": "table",
+        "targets": [
+          {
+            "box": {
+              "x": 38,
+              "y": 43,
+              "width": 92,
+              "height": 38
+            },
+            "role": "button",
+            "label": "Apply",
+            "actionable": true
+          }
+        ],
+        "ignored": [
+          {
+            "box": {
+              "x": 312,
+              "y": 24,
+              "width": 16,
+              "height": 16
+            },
+            "reason": "decorative-status-dot"
+          }
+        ]
+      }
+    },
+    {
+      "id": "quick-visual-timeline",
+      "kind": "visual",
+      "applicationClass": "editor",
+      "dpi": 125,
+      "theme": "light",
+      "licenseId": "generated-mit",
+      "image": {
+        "target": "images/quick-visual-timeline.png",
+        "sizeBytes": 2554,
+        "sha256": "050182ffbf8c291dcf2dc09affa20a2564d627b9c5a497f916dcfac8ebaa1fa9"
+      },
+      "annotation": {
+        "surfaceClass": "timeline",
+        "targets": [
+          {
+            "box": {
+              "x": 41,
+              "y": 46,
+              "width": 92,
+              "height": 38
+            },
+            "role": "button",
+            "label": "Apply",
+            "actionable": true
+          }
+        ],
+        "ignored": [
+          {
+            "box": {
+              "x": 312,
+              "y": 24,
+              "width": 16,
+              "height": 16
+            },
+            "reason": "decorative-status-dot"
+          }
+        ]
+      }
+    },
+    {
+      "id": "quick-visual-toolbar",
+      "kind": "visual",
+      "applicationClass": "timeline",
+      "dpi": 100,
+      "theme": "light",
+      "licenseId": "generated-mit",
+      "image": {
+        "target": "images/quick-visual-toolbar.png",
+        "sizeBytes": 2505,
+        "sha256": "78fc53a461593d37c660157e974b6d507c97d305c1089ecc5d8d5de75a744d78"
+      },
+      "annotation": {
+        "surfaceClass": "toolbar",
+        "targets": [
+          {
+            "box": {
+              "x": 30,
+              "y": 44,
+              "width": 92,
+              "height": 38
+            },
+            "role": "button",
+            "label": "Apply",
+            "actionable": true
+          }
+        ],
+        "ignored": [
+          {
+            "box": {
+              "x": 312,
+              "y": 24,
+              "width": 16,
+              "height": 16
+            },
+            "reason": "decorative-status-dot"
+          }
+        ]
+      }
+    }
+  ],
+  "regressions": [
+    {
+      "sampleId": "quick-visual-cad-like",
+      "failures": [
+        {
+          "code": "proposal.false-positive"
+        }
+      ]
+    },
+    {
+      "sampleId": "quick-visual-canvas",
+      "failures": [
+        {
+          "code": "proposal.false-positive"
+        }
+      ]
+    },
+    {
+      "sampleId": "quick-visual-dialog",
+      "failures": [
+        {
+          "code": "proposal.false-positive"
+        }
+      ]
+    },
+    {
+      "sampleId": "quick-visual-editor",
+      "failures": [
+        {
+          "code": "proposal.false-positive"
+        }
+      ]
+    },
+    {
+      "sampleId": "quick-visual-table",
+      "failures": [
+        {
+          "code": "proposal.false-positive"
+        }
+      ]
+    },
+    {
+      "sampleId": "quick-visual-timeline",
+      "failures": [
+        {
+          "code": "proposal.false-positive"
+        }
+      ]
+    },
+    {
+      "sampleId": "quick-visual-toolbar",
+      "failures": [
+        {
+          "code": "proposal.false-positive"
+        }
+      ]
+    }
+  ]
+}

@@ -62,6 +62,7 @@ test("benchmark opens one warm OCR session and executes every sample through pro
   assert.equal(report.status, "measured");
   assert.equal(report.ocr.characterAccuracy, 1);
   assert.equal(report.proposal.recall, 1);
+  assert.deepEqual(report.regressions, []);
   assert.equal(report.samples.every((sample) => sample.durationMs < 999999), true);
   assert.equal(report.samples.filter((sample) => sample.kind === "ocr")
     .every((sample) => sample.latencyClass === "small-ui-crop"), true);
@@ -110,6 +111,8 @@ test("provider failures remain attached to sample IDs and fail the aggregate", a
   assert.equal(report.samples.every((sample) => !sample.error || sample.error === "provider.crashed"), true);
   assert.equal(report.ocr.failedSamples, 1);
   assert.equal(report.proposal.failedSamples, 1);
+  assert.deepEqual(report.regressions.map((entry) => entry.sampleId), ["ocr-2", "visual-1", "visual-2"]);
+  assert.equal(JSON.stringify(report.regressions).includes("private detail"), false);
 });
 
 test("visual provider execution is bounded", async () => {

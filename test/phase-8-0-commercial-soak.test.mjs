@@ -66,6 +66,16 @@ test("pull-request phase seals verified evidence bound to the candidate identity
     corePackage: identity.corePackage,
   });
   assert.equal(verified.status, "passed");
+  assert.deepEqual(verified.manifest.ocrRuntime, identity.ocrRuntime);
+  assert.deepEqual(verified.manifest.candidateIdentity, {
+    gitCommit: identity.gitCommit,
+    corePackage: identity.corePackage,
+    platformPackage: identity.platformPackage,
+    driver: identity.driver,
+    overlay: identity.overlay,
+    ocrRuntime: identity.ocrRuntime,
+    modelPack: identity.modelPack,
+  });
   assert.equal(verified.report.durationMs, 900_001);
   assert.equal(verified.report.calls, undefined);
   assert.equal(verified.report.samples, undefined);
@@ -130,7 +140,8 @@ function validIdentity() {
     platformPackage: { name: "@xiaozhiclaw/agent-computer-use-win32-x64", version: "0.0.1", sha256: "2".repeat(64) },
     driver: { id: "cua-driver-windows-x64", version: "0.7.1", sha256: "3".repeat(64) },
     overlay: { id: "gateway-overlay", sha256: "4".repeat(64) },
-    modelPack: { id: "pp-ocr-v6-small", sha256: "5".repeat(64) },
+    ocrRuntime: { id: "onnxruntime-node", version: "1.27.0", sha256: "5".repeat(64) },
+    modelPack: { id: "pp-ocr-v6-small", sha256: "6".repeat(64) },
     machine: { platform: "win32", arch: "x64", nodeVersion: "24.12.0" },
   };
 }

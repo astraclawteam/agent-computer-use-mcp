@@ -28,6 +28,8 @@ test("SOM proposal provider finds self-drawn control candidates without image up
     { x: 12, y: 48, width: 70, height: 8 },
   ]);
   assert.ok(result.proposals.every((proposal) => proposal.confidence >= 0.7));
+  assert.equal(result.proposals.every((proposal) => proposal.calibrationVersion === "som-geometry-v1"), true);
+  assert.equal(result.proposals.every((proposal) => Number.isFinite(proposal.rawConfidence)), true);
 });
 
 test("SOM proposal provider normalizes candidates into pixel-limited observation elements", async () => {
