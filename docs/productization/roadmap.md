@@ -27,6 +27,13 @@ claims.
   checksum verification.
 - Frozen two-hour nightly and eight-hour release-candidate gates, scheduled
   nightly evidence retention, trend comparison, and atomic RC evidence import.
+- Hash-verified quick/full perception corpus contracts, privacy scanner,
+  released-provider benchmark runner, and deterministic regression extraction.
+- Shared UI OCR normalization, content-addressed bounded region cache, and
+  calibrated SOM/OCR/template proposal fusion with provenance-aware action
+  admission.
+- Read-only Phase 9.0 Commercial 1.0 promotion aggregation and stable `1.x`
+  release blocking on matching sealed evidence.
 
 ## Before Public 1.0
 
@@ -37,6 +44,11 @@ claims.
 - Run clean-runner release rehearsals and retain failed evidence beside passing retries.
 - Publish Windows x64 preview versions and validate npm trusted publishing plus GitHub/Gitee recovery procedures.
 - Continue OCR screenshot regression and warm region latency tracking.
+- Publish and lock the external full corpus (at least 400 OCR and 200 visual
+  samples), then retain passing full-corpus results from the app-lab runner.
+- Regenerate PR6/PR7 evidence with the unified candidate identity required by
+  Phase 9.0; historical evidence without that identity remains intentionally
+  ineligible.
 
 ## Future Platforms
 

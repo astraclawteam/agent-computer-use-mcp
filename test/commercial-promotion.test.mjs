@@ -26,6 +26,8 @@ test("promotion is eligible only for one fully verified candidate identity", asy
   assert.equal(report.eligible, true);
   assert.equal(report.status, "passed");
   assert.equal(report.candidateGroups.length, 1);
+  assert.equal(report.releaseTag, "v1.0.0");
+  assert.deepEqual(report.candidateIdentity, IDENTITY);
   assert.deepEqual(report.failedRunIds, []);
   assert.deepEqual(report.violations, []);
 });

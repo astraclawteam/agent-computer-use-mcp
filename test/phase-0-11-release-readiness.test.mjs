@@ -15,6 +15,8 @@ test("release readiness gate captures the alpha release command contract", async
   assert.equal(gate.packageName, "agent-computer-use-mcp");
   assert.equal(gate.packageVersion, packageJson.version);
   assert.equal(gate.releaseGate, "alpha");
+  assert.equal(gate.commercialEligible, false);
+  assert.equal(gate.commercialRequired, false);
   assert.equal(gate.executionMode, "manifest-only");
   assert.equal(gate.startsDesktopControl, false);
   assert.equal(gate.includeUserOverlay, false);
@@ -59,6 +61,37 @@ test("release readiness gate captures the alpha release command contract", async
   assert.deepEqual(validation.violations, []);
 });
 
+test("stable 1.x readiness requires matching verified Commercial 1.0 evidence", async () => {
+  const { buildReleaseReadinessGate } = await import("../src/release-readiness-gate.mjs");
+  const packageJson = JSON.parse(readFileSync("package.json", "utf8"));
+  packageJson.version = "1.0.0";
+
+  const missing = buildReleaseReadinessGate({ packageJson });
+  assert.equal(missing.status, "failed");
+  assert.equal(missing.commercialRequired, true);
+  assert.equal(missing.commercialEligible, false);
+  assert.equal(missing.violations.some((entry) => entry.code === "commercial-evidence-required"), true);
+
+  const mismatched = buildReleaseReadinessGate({
+    packageJson,
+    commercialPromotion: promotionEvidence({ releaseTag: "v1.0.1" }),
+  });
+  assert.equal(mismatched.status, "failed");
+  assert.equal(mismatched.violations.some((entry) => entry.code === "commercial-release-identity-mismatch"), true);
+
+  const incompleteIdentity = promotionEvidence();
+  delete incompleteIdentity.candidateIdentity.overlay;
+  const incomplete = buildReleaseReadinessGate({ packageJson, commercialPromotion: incompleteIdentity });
+  assert.equal(incomplete.status, "failed");
+  assert.equal(incomplete.violations.some((entry) => entry.code === "commercial-release-identity-mismatch"), true);
+
+  const passed = buildReleaseReadinessGate({ packageJson, commercialPromotion: promotionEvidence() });
+  assert.equal(passed.status, "passed");
+  assert.equal(passed.releaseGate, "stable-commercial");
+  assert.equal(passed.commercialEligible, true);
+  assert.ok(passed.evidence.some((entry) => entry.id === "commercial-promotion-evidence" && entry.required === true));
+});
+
 test("release readiness validation fails closed when a required script or invariant is missing", async () => {
   const { buildReleaseReadinessGate, validateReleaseReadinessGate } = await import("../src/release-readiness-gate.mjs");
   const packageJson = JSON.parse(readFileSync("package.json", "utf8"));
@@ -94,6 +127,8 @@ test("Phase 0.11 has an executable release readiness smoke script", async () => 
   assert.equal(report.status, "passed");
   assert.equal(report.phase, "0.11");
   assert.equal(report.releaseGate, "alpha");
+  assert.equal(report.commercialRequired, false);
+  assert.equal(report.commercialEligible, false);
   assert.equal(report.commandCount >= 40, true);
   assert.equal(report.evidenceCount >= 20, true);
   assert.equal(report.invariantCount, 3);
@@ -117,6 +152,26 @@ function requiredCommandSubset(gate) {
     "npm run package:dry-run",
     "npm run assets:manifest",
   ].filter((command) => commands.has(command));
+}
+
+function promotionEvidence(overrides = {}) {
+  return {
+    status: "passed",
+    phase: "9.0",
+    benchmark: "commercial-promotion-evidence",
+    eligible: true,
+    releaseTag: "v1.0.0",
+    candidateIdentity: {
+      gitCommit: "1".repeat(40),
+      corePackage: { name: "agent-computer-use-mcp", version: "1.0.0", sha256: "a".repeat(64) },
+      platformPackage: { name: "@xiaozhiclaw/agent-computer-use-win32-x64", version: "1.0.0", sha256: "b".repeat(64) },
+      driver: { id: "cua-driver", version: "0.7.1", sha256: "c".repeat(64) },
+      overlay: { id: "gateway-overlay", sha256: "d".repeat(64) },
+      modelPack: { id: "pp-ocr-v6-small", sha256: "e".repeat(64) },
+    },
+    violations: [],
+    ...overrides,
+  };
 }
 
 function runNode(args) {

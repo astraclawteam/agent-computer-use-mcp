@@ -37,11 +37,17 @@ export async function evaluateCommercialPromotion({ evidenceDirectories, expecte
   else violations.push(...selected.violations);
   const failedRunIds = summaries.flatMap((group) => group.failedRunIds).sort();
   const eligible = violations.length === 0 && summaries.length === 1 && selected?.violations.length === 0;
+  const candidateIdentity = selected?.candidateIdentity ?? null;
+  const releaseTag = typeof candidateIdentity?.corePackage?.version === "string"
+    ? `v${candidateIdentity.corePackage.version}`
+    : null;
   return Object.freeze({
     status: eligible ? "passed" : "failed",
     phase: "9.0",
     benchmark: "commercial-promotion-evidence",
     eligible,
+    releaseTag,
+    candidateIdentity,
     candidateGroups: Object.freeze(summaries),
     failedRunIds: Object.freeze(failedRunIds),
     violations: Object.freeze(violations.map((entry) => Object.freeze(entry))),
