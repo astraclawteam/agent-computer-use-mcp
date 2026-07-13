@@ -341,6 +341,46 @@ test("runtime soak deduplicates observed identities when Windows reuses a sessio
   assert.deepEqual(cleanupRoots[0], { pid: 88, startedAtMs: 300 });
 });
 
+test("runtime soak waits for exact owned identities to exit before declaring cleanup failure", async () => {
+  let now = 0;
+  let cleanupAttempts = 0;
+  const report = await runRuntimeSoak({
+    durationMs: 1,
+    clientCount: 1,
+    concurrency: 1,
+    faultEveryRounds: 0,
+    now: () => now,
+    wallClock: () => 40_000 + now,
+    sleep: async (ms) => { now += ms; },
+    cleanupDelayMs: 0,
+    cleanupTimeoutMs: 500,
+    cleanupPollIntervalMs: 100,
+    createSession: async () => ({
+      pid: 99,
+      async callTool() {
+        now += 1;
+        return { isError: false, structuredContent: { includeUserOverlay: false } };
+      },
+      async fault() {},
+      async close() {},
+    }),
+    probeRuntime: async ({ rootPids = [], rootProcesses = [] }) => {
+      if (rootProcesses.length > 0) {
+        cleanupAttempts += 1;
+        return cleanupAttempts === 1
+          ? runtimeProbe({ rssBytes: 100, handles: 10, processIds: [99] })
+          : runtimeProbe({ rssBytes: 0, handles: 0, processIds: [] });
+      }
+      return runtimeProbe({ rssBytes: 100, handles: 10, processIds: rootPids });
+    },
+  });
+
+  assert.equal(cleanupAttempts, 2);
+  assert.equal(report.orphanProcessCount, 0);
+  assert.equal(report.metrics.cleanup.completed, true);
+  assert.equal(report.status, "passed");
+});
+
 test("runtime soak is exposed through the standard health phase catalog", async () => {
   const { ComputerUseProviderRouter } = await import("../src/computer-use-provider-router.mjs");
   const health = await new ComputerUseProviderRouter().health({ fast: true });

@@ -23,7 +23,9 @@ export async function runRuntimeSoak(options = {}) {
   const concurrency = positiveInteger(options.concurrency ?? 2, "concurrency");
   const faultEveryRounds = nonNegativeInteger(options.faultEveryRounds ?? 20, "faultEveryRounds");
   const sampleIntervalMs = positiveInteger(options.sampleIntervalMs ?? 10_000, "sampleIntervalMs");
-  const cleanupDelayMs = nonNegativeInteger(options.cleanupDelayMs ?? 250, "cleanupDelayMs");
+  const cleanupDelayMs = nonNegativeInteger(options.cleanupDelayMs ?? 0, "cleanupDelayMs");
+  const cleanupTimeoutMs = positiveInteger(options.cleanupTimeoutMs ?? 10_000, "cleanupTimeoutMs");
+  const cleanupPollIntervalMs = positiveInteger(options.cleanupPollIntervalMs ?? 100, "cleanupPollIntervalMs");
   const now = options.now ?? (() => performance.now());
   const wallClock = options.wallClock ?? Date.now;
   const sleep = options.sleep ?? ((ms) => new Promise((resolvePromise) => setTimeout(resolvePromise, ms)));
@@ -116,10 +118,22 @@ export async function runRuntimeSoak(options = {}) {
   if (cleanupDelayMs > 0) await sleep(cleanupDelayMs);
   let cleanupProbe = emptyProbe();
   let cleanupProbeCompleted = true;
-  try {
-    cleanupProbe = await probeRuntime({ rootProcesses: cleanupProcessIdentities() });
-  } catch {
-    cleanupProbeCompleted = false;
+  let cleanupProbeAttempts = 0;
+  const cleanupStartedAt = wallClock();
+  const cleanupDeadline = cleanupStartedAt + cleanupTimeoutMs;
+  const cleanupIdentities = cleanupProcessIdentities();
+  while (true) {
+    try {
+      cleanupProbe = await probeRuntime({ rootProcesses: cleanupIdentities });
+      cleanupProbeAttempts += 1;
+    } catch {
+      cleanupProbeCompleted = false;
+      break;
+    }
+    if (isProbeClean(cleanupProbe)) break;
+    const remainingMs = cleanupDeadline - wallClock();
+    if (remainingMs <= 0) break;
+    await sleep(Math.min(cleanupPollIntervalMs, remainingMs));
   }
   const cleanup = {
     orphanProcessCount: cleanupProbe.processIds.length,
@@ -131,6 +145,8 @@ export async function runRuntimeSoak(options = {}) {
   await emit("runtime.cleanup.completed", {
     ...cleanup,
     closeFailureCount,
+    cleanupProbeAttempts,
+    cleanupWaitMs: Math.max(0, wallClock() - cleanupStartedAt),
   }).catch(() => {
     cleanup.completed = false;
   });
@@ -312,6 +328,13 @@ function emptyProbe() {
     overlayProcessIds: [],
     cursorProcessIds: [],
   };
+}
+
+function isProbeClean(probe) {
+  return probe.processIds.length === 0
+    && probe.listeningPorts.length === 0
+    && probe.overlayProcessIds.length === 0
+    && probe.cursorProcessIds.length === 0;
 }
 
 function positiveInteger(value, name) {
