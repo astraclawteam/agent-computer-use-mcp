@@ -7,6 +7,12 @@ import { computeDirtyRegion } from "./image-diff.mjs";
 import { ComputerUseMcpError, fail } from "./computer-use-errors.mjs";
 import { OcrSidecarSession, normalizeOcrSidecarResponse } from "./ocr-sidecar.mjs";
 import { runInstallCacheDoctor } from "./install-cache-doctor.mjs";
+import {
+  PerceptionRegionCache,
+  createPerceptionRegionCacheKey,
+  readOverlayFreeRegionPixels,
+} from "./perception-region-cache.mjs";
+import { UI_TEXT_NORMALIZATION_VERSION } from "./ui-text-normalization.mjs";
 import { buildDiagnosticsPolicy } from "./diagnostics-policy.mjs";
 import { captureWindowPngByTitle } from "./real-window-capture.mjs";
 import { createComputerUsePolicy } from "./computer-use-policy.mjs";
@@ -16,6 +22,8 @@ import { cleanupRuntimeState } from "./runtime-cleanup.mjs";
 export class ComputerUseProviderRouter {
   constructor(options = {}) {
     this.ocr = options.ocrSession ?? new OcrSidecarSession();
+    this.perceptionCache = options.perceptionCache ?? new PerceptionRegionCache();
+    this.ocrIdentity = options.ocrIdentity ?? null;
     this.driver = options.driver ?? null;
     this.overlayRuntime = options.overlayRuntime ?? null;
     this.processSupervisor = options.processSupervisor ?? null;
@@ -868,6 +876,32 @@ export class ComputerUseProviderRouter {
       fail("ocr_region.requires_imagePath_or_titlePart", "ocr_region requires either imagePath or titlePart");
     }
 
+    const windowId = String(args.windowId ?? capture?.title ?? this.activeController?.window?.id
+      ?? this.activeController?.window?.title ?? "artifact");
+    const pixels = await this.awaitExternal(ticket, () => readOverlayFreeRegionPixels(imagePath, args.crop ?? null));
+    const keyOptions = {
+      windowId,
+      region: args.crop ?? { x: 0, y: 0, width: 1, height: 1 },
+      pixels,
+      normalizationVersion: UI_TEXT_NORMALIZATION_VERSION,
+      includeUserOverlay: false,
+    };
+    if (this.ocrIdentity) {
+      const key = createPerceptionRegionCacheKey({ ...keyOptions, modelIdentity: this.ocrIdentity });
+      const cached = this.perceptionCache.get(key);
+      if (cached) {
+        return {
+          status: "ok",
+          provider: "gateway-managed",
+          mode: "ocr-region",
+          imagePath,
+          capture,
+          observation: { ...cached, cacheHit: true, timings: { ...(cached.timings ?? {}), totalMs: 0 } },
+          includeUserOverlay: false,
+        };
+      }
+    }
+
     const response = await this.awaitExternal(ticket, () => this.ocr.recognize({
       imagePath,
       crop: args.crop,
@@ -878,6 +912,13 @@ export class ComputerUseProviderRouter {
     const observation = normalizeOcrSidecarResponse(response, {
       observationId: `ocr-region-${Date.now()}`,
       window: capture ? { title: capture.title } : undefined,
+      languageClass: args.languageClass ?? "mixed",
+    });
+    this.ocrIdentity = pickOcrIdentity(response);
+    const cacheKey = createPerceptionRegionCacheKey({ ...keyOptions, modelIdentity: this.ocrIdentity });
+    this.perceptionCache.set(cacheKey, observation, {
+      windowId,
+      sensitive: args.sensitiveRegion === true || args.passwordRegion === true || args.paymentRegion === true || args.privateRegion === true,
     });
 
     return {
@@ -1548,6 +1589,15 @@ export class ComputerUseProviderRouter {
       release();
     }
   }
+}
+
+function pickOcrIdentity(response) {
+  const identity = {};
+  for (const key of ["provider", "model", "modelPack", "modelFormat", "runtime", "executionProvider"]) {
+    if (typeof response?.[key] === "string" && response[key].trim() !== "") identity[key] = response[key];
+  }
+  if (!identity.provider) identity.provider = "xiaozhiclaw-ocr-sidecar";
+  return identity;
 }
 
 function lifecycleClosedError() {

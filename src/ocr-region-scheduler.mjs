@@ -33,12 +33,12 @@ export function scheduleOcrRegion(options = {}) {
       cache: {
         policy: "region-bucket",
         key: null,
+        contentAddressed: true,
         ttlMs: options.cacheTtlMs ?? 5000,
       },
       includeUserOverlay: false,
       startsDesktopControl: false,
     };
-    plan.cache.key = buildOcrRegionCacheKey(plan);
     return plan;
   }
 
@@ -88,7 +88,10 @@ export function scheduleOcrRegion(options = {}) {
   };
 }
 
-export function buildOcrRegionCacheKey(plan) {
+export function buildOcrRegionCacheKey(plan, pixelSha256) {
+  if (typeof pixelSha256 !== "string" || !/^[a-f0-9]{64}$/u.test(pixelSha256)) {
+    throw new Error("ocr_region_scheduler.pixel_sha256_required");
+  }
   const modelPackId = plan.modelPackId ?? PP_OCRV6_SMALL_MODEL_PACK.id;
   const windowId = plan.window?.id ?? "unknown-window";
   const image = normalizeImage(plan.image);
@@ -96,11 +99,12 @@ export function buildOcrRegionCacheKey(plan) {
   if (!crop) return null;
   return [
     "ocr-region",
-    "v1",
+    "v2",
     modelPackId,
     windowId,
     `${image.width}x${image.height}`,
     `${crop.x},${crop.y},${crop.width},${crop.height}`,
+    pixelSha256,
   ].join(":");
 }
 

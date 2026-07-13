@@ -3,7 +3,7 @@ import { spawn } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
 
-test("OCR region scheduler buckets dirty regions and creates stable cache keys", async () => {
+test("OCR region scheduler buckets dirty regions and requires pixels for cache keys", async () => {
   const {
     buildOcrRegionCacheKey,
     scheduleOcrRegion,
@@ -35,8 +35,13 @@ test("OCR region scheduler buckets dirty regions and creates stable cache keys",
     width: 288,
     height: 96,
   });
-  assert.equal(plan.cache.key, buildOcrRegionCacheKey(plan));
-  assert.equal(plan.cache.key, "ocr-region:v1:ocr-model-pp-ocrv6-small:win-42:720x420:0,192,288,96");
+  assert.equal(plan.cache.key, null);
+  assert.equal(plan.cache.contentAddressed, true);
+  assert.throws(() => buildOcrRegionCacheKey(plan), /ocr_region_scheduler\.pixel_sha256_required/u);
+  assert.equal(
+    buildOcrRegionCacheKey(plan, "a".repeat(64)),
+    `ocr-region:v2:ocr-model-pp-ocrv6-small:win-42:720x420:0,192,288,96:${"a".repeat(64)}`,
+  );
 });
 
 test("OCR region scheduler refuses full-window OCR in normal action loops", async () => {
