@@ -14,6 +14,9 @@ export function matchesCommercialCandidateIdentity(identity, packageJson) {
     && hasSha256(identity.driver)
     && hasNonEmptyString(identity?.overlay?.id)
     && hasSha256(identity.overlay)
+    && identity?.ocrRuntime?.id === "onnxruntime-node"
+    && hasNonEmptyString(identity.ocrRuntime.version)
+    && hasSha256(identity.ocrRuntime)
     && hasNonEmptyString(identity?.modelPack?.id)
     && hasSha256(identity.modelPack);
 }

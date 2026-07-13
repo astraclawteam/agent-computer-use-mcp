@@ -74,7 +74,8 @@ test("stable metadata includes matching Commercial 1.0 promotion evidence", asyn
       platformPackage: { name: "@xiaozhiclaw/agent-computer-use-win32-x64", version: packageJson.version, sha256: "b".repeat(64) },
       driver: { id: "cua-driver", version: "0.7.1", sha256: "c".repeat(64) },
       overlay: { id: "gateway-overlay", sha256: "d".repeat(64) },
-      modelPack: { id: "pp-ocr-v6-small", sha256: "e".repeat(64) },
+      ocrRuntime: { id: "onnxruntime-node", version: "1.27.0", sha256: "e".repeat(64) },
+      modelPack: { id: "pp-ocr-v6-small", sha256: "f".repeat(64) },
     },
     violations: [],
   };
@@ -94,6 +95,10 @@ test("stable metadata includes matching Commercial 1.0 promotion evidence", asyn
   const invalidCommit = structuredClone(metadata);
   invalidCommit.commercialPromotion.candidateIdentity.gitCommit = "not-a-commit";
   assert.equal(validateReleaseMetadata(invalidCommit, { packageJson, changelogText: "## 1.0.0\n" }).status, "failed");
+
+  const missingRuntime = structuredClone(metadata);
+  delete missingRuntime.commercialPromotion.candidateIdentity.ocrRuntime;
+  assert.equal(validateReleaseMetadata(missingRuntime, { packageJson, changelogText: "## 1.0.0\n" }).status, "failed");
 });
 
 test("release metadata validation fails closed for missing changelog or mismatched tag", async () => {
