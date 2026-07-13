@@ -49,7 +49,7 @@ export async function generateQuickCorpus({ outputRoot, seed = 20260713 } = {}) 
     const target = `images/${id}.png`;
     const dpi = DPIS[index % DPIS.length];
     const theme = THEMES[index % THEMES.length];
-    const image = drawTextRegion({ text, dpi, theme, random });
+    const image = drawTextRegion({ text, dpi, theme, random, size: textRegionSize(index) });
     const bytes = image.canvas.toBuffer("image/png");
     await writeAsset(root, target, bytes);
     samples.push({
@@ -107,9 +107,8 @@ export async function generateQuickCorpus({ outputRoot, seed = 20260713 } = {}) 
   return manifest;
 }
 
-function drawTextRegion({ text, dpi, theme, random }) {
-  const width = 360;
-  const height = 72;
+function drawTextRegion({ text, dpi, theme, random, size }) {
+  const { width, height } = size;
   const canvas = createCanvas(width, height);
   const ctx = canvas.getContext("2d");
   const dark = theme === "dark";
@@ -126,6 +125,12 @@ function drawTextRegion({ text, dpi, theme, random }) {
   ctx.textBaseline = "middle";
   ctx.fillText(text, inset + 14, height / 2, width - inset * 2 - 28);
   return { canvas, region: { x: 0, y: 0, width, height } };
+}
+
+function textRegionSize(index) {
+  if (index === 5 || index === 11) return { width: 900, height: 520 };
+  if (index === 4 || index === 10) return { width: 680, height: 230 };
+  return { width: 360, height: 72 };
 }
 
 function drawVisualScene({ surfaceClass, theme, random }) {

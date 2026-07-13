@@ -26,6 +26,7 @@ test("benchmark opens one warm OCR session and executes every sample through pro
                 durationMs: 999999,
               };
             },
+            async verifyCache() { return { cacheHit: true, primeMs: 40, hitMs: 0 }; },
             async close() { closed += 1; },
           };
         },
@@ -62,7 +63,16 @@ test("benchmark opens one warm OCR session and executes every sample through pro
   assert.equal(report.ocr.characterAccuracy, 1);
   assert.equal(report.proposal.recall, 1);
   assert.equal(report.samples.every((sample) => sample.durationMs < 999999), true);
+  assert.equal(report.samples.filter((sample) => sample.kind === "ocr")
+    .every((sample) => sample.latencyClass === "small-ui-crop"), true);
   assert.equal(report.identities.ocr.modelPack, "pp-ocrv6-small");
+  assert.deepEqual(report.fullWindow, {
+    actionLoopAllowed: false,
+    progressAware: true,
+    cacheVerified: true,
+    cachePrimeMs: 40,
+    cacheHitMs: 0,
+  });
   assert.equal(JSON.stringify(report).includes("C:\\private-corpus"), false);
 });
 

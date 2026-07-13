@@ -63,6 +63,10 @@ test("quick corpus covers approved text and complex UI surface families", async 
   assert.equal(manifest.samples.every((sample) => sample.image.target.endsWith(".png")), true);
   assert.equal(manifest.samples.filter((sample) => sample.kind === "visual")
     .every((sample) => sample.annotation.ignored.length > 0), true);
+  assert.deepEqual(
+    new Set(manifest.samples.filter((sample) => sample.kind === "ocr").map((sample) => latencyClass(sample.annotation.region))),
+    new Set(["small-ui-crop", "ordinary-window-region", "full-window-diagnostic"]),
+  );
 });
 
 function coverage(manifest) {
@@ -76,6 +80,12 @@ function coverage(manifest) {
     dpis: [...new Set(manifest.samples.map((sample) => sample.dpi))].sort((a, b) => a - b),
     themes: [...new Set(manifest.samples.map((sample) => sample.theme))].sort(),
   };
+}
+
+function latencyClass(region) {
+  if (region.width >= 800 && region.height >= 480) return "full-window-diagnostic";
+  if (region.width * region.height > 100_000) return "ordinary-window-region";
+  return "small-ui-crop";
 }
 
 async function temporaryDirectory(t, prefix) {

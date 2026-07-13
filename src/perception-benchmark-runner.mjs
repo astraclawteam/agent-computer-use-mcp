@@ -20,6 +20,7 @@ export async function runPerceptionBenchmark(options = {}) {
   const proposalMetricInputs = [];
   let ocrIdentity = null;
   let ocrSession = null;
+  let cacheVerification = { cacheHit: false, primeMs: null, hitMs: null };
 
   try {
     if (ocrSamples.length > 0) {
@@ -31,6 +32,15 @@ export async function runPerceptionBenchmark(options = {}) {
         const result = await runOcrSample({ corpus, sample, session: ocrSession, eventSink, expectedIdentity: ocrIdentity });
         sampleResults.push(result.publicResult);
         ocrMetricInputs.push(result.metricInput);
+      }
+      if (typeof ocrSession.verifyCache === "function") {
+        const cacheSample = ocrSamples.find((sample) => classifyOcrLatencyRegion(sample.annotation.region) === "full-window-diagnostic")
+          ?? ocrSamples[0];
+        try {
+          cacheVerification = normalizeCacheVerification(await ocrSession.verifyCache(requestForSample(corpus, cacheSample)));
+        } catch {
+          cacheVerification = { cacheHit: false, primeMs: null, hitMs: null };
+        }
       }
     }
 
@@ -63,9 +73,28 @@ export async function runPerceptionBenchmark(options = {}) {
     }),
     ocr: ocrMetrics,
     proposal: proposalMetrics,
+    fullWindow: Object.freeze({
+      actionLoopAllowed: false,
+      progressAware: true,
+      cacheVerified: cacheVerification.cacheHit,
+      cachePrimeMs: cacheVerification.primeMs,
+      cacheHitMs: cacheVerification.hitMs,
+    }),
     samples: Object.freeze(sampleResults),
     includeUserOverlay: false,
   });
+}
+
+function normalizeCacheVerification(value) {
+  return {
+    cacheHit: value?.cacheHit === true,
+    primeMs: finiteOrNull(value?.primeMs),
+    hitMs: finiteOrNull(value?.hitMs),
+  };
+}
+
+function finiteOrNull(value) {
+  return Number.isFinite(value) && value >= 0 ? value : null;
 }
 
 async function runOcrSample({ corpus, sample, session, eventSink, expectedIdentity }) {
@@ -139,10 +168,17 @@ function sampleResult(sample, durationMs, identity, error) {
     dpi: sample.dpi,
     theme: sample.theme,
     durationMs,
+    ...(sample.kind === "ocr" ? { latencyClass: classifyOcrLatencyRegion(sample.annotation.region) } : {}),
     identity: normalizeIdentity(identity, sample.kind),
     ...(error ? { error } : {}),
     includeUserOverlay: false,
   });
+}
+
+export function classifyOcrLatencyRegion(region) {
+  if (region?.width >= 800 && region?.height >= 480) return "full-window-diagnostic";
+  if (Number(region?.width) * Number(region?.height) > 100_000) return "ordinary-window-region";
+  return "small-ui-crop";
 }
 
 function eventForSample(result) {

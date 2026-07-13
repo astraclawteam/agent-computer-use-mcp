@@ -51,6 +51,15 @@ export function createReleasedPerceptionProviders(options = {}) {
               identity: ocrIdentity(response),
             };
           },
+          async verifyCache(request) {
+            const prime = await recognize(session, request, { noCache: false });
+            const hit = await recognize(session, request, { noCache: false });
+            return {
+              cacheHit: hit.cacheHit === true,
+              primeMs: Number(prime.timings?.totalMs ?? 0),
+              hitMs: Number(hit.timings?.totalMs ?? 0),
+            };
+          },
           async close() {
             await session.close();
           },
@@ -89,12 +98,12 @@ export function createReleasedPerceptionProviders(options = {}) {
   });
 }
 
-function recognize(session, request) {
+function recognize(session, request, options = {}) {
   return session.recognize({
     imagePath: request.imagePath,
     crop: request.sample.annotation.region,
     languages: request.sample.annotation.languageClass === "english" ? ["en"] : ["zh", "en"],
-    noCache: true,
+    noCache: options.noCache !== false,
     timeoutMs: 30_000,
   });
 }

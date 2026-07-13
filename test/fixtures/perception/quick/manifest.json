@@ -119,8 +119,8 @@
       "licenseId": "generated-mit",
       "image": {
         "target": "images/quick-ocr-english-04.png",
-        "sizeBytes": 5562,
-        "sha256": "488ab3a3300e37b5b4be1e316f14deedf27c0eae515d0eaa0293ea28bf3c1559"
+        "sizeBytes": 6978,
+        "sha256": "d73fea6e5b379d8bde1dce19424ca3364b3b39342e08d9b94699f3c7f6b6960e"
       },
       "annotation": {
         "normalizedText": "Open project",
@@ -129,8 +129,8 @@
         "region": {
           "x": 0,
           "y": 0,
-          "width": 360,
-          "height": 72
+          "width": 680,
+          "height": 230
         }
       }
     },
@@ -143,8 +143,8 @@
       "licenseId": "generated-mit",
       "image": {
         "target": "images/quick-ocr-english-05.png",
-        "sizeBytes": 7091,
-        "sha256": "66866c813b0c746a34f3df4c641a16d3e67826a34f1ce9d6336e1d0631915320"
+        "sizeBytes": 10946,
+        "sha256": "47a3437e2864bbfd1d6c91a9ad0dac7b4d85819c12910dabba25bcf11d4189ca"
       },
       "annotation": {
         "normalizedText": "Apply changes",
@@ -153,8 +153,8 @@
         "region": {
           "x": 0,
           "y": 0,
-          "width": 360,
-          "height": 72
+          "width": 900,
+          "height": 520
         }
       }
     },
@@ -263,8 +263,8 @@
       "licenseId": "generated-mit",
       "image": {
         "target": "images/quick-ocr-mixed-10.png",
-        "sizeBytes": 6011,
-        "sha256": "dab0d1c0398907693d093bdc251463b08688cfab5ac293c48b5f31949ec15e09"
+        "sizeBytes": 7418,
+        "sha256": "3da84c73cf73e3f0e20d1441b8bd60289fff1ebf468b46874534135db1ec7b47"
       },
       "annotation": {
         "normalizedText": "图层 Layer 02",
@@ -273,8 +273,8 @@
         "region": {
           "x": 0,
           "y": 0,
-          "width": 360,
-          "height": 72
+          "width": 680,
+          "height": 230
         }
       }
     },
@@ -287,8 +287,8 @@
       "licenseId": "generated-mit",
       "image": {
         "target": "images/quick-ocr-mixed-11.png",
-        "sizeBytes": 6207,
-        "sha256": "796da497ddedf136aa2e8ea00e2f0449580753f05aa10d5790103ca4238075ef"
+        "sizeBytes": 9833,
+        "sha256": "6adfb19f70e32a0526b85ecec2275fe0ecfe68f8611d6e5bda1929e8d40ec317"
       },
       "annotation": {
         "normalizedText": "角度 45 deg",
@@ -297,8 +297,8 @@
         "region": {
           "x": 0,
           "y": 0,
-          "width": 360,
-          "height": 72
+          "width": 900,
+          "height": 520
         }
       }
     },
