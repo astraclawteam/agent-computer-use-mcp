@@ -67,6 +67,15 @@ test("pull-request phase seals verified evidence bound to the candidate identity
   });
   assert.equal(verified.status, "passed");
   assert.deepEqual(verified.manifest.ocrRuntime, identity.ocrRuntime);
+  assert.deepEqual(verified.manifest.candidateIdentity, {
+    gitCommit: identity.gitCommit,
+    corePackage: identity.corePackage,
+    platformPackage: identity.platformPackage,
+    driver: identity.driver,
+    overlay: identity.overlay,
+    ocrRuntime: identity.ocrRuntime,
+    modelPack: identity.modelPack,
+  });
   assert.equal(verified.report.durationMs, 900_001);
   assert.equal(verified.report.calls, undefined);
   assert.equal(verified.report.samples, undefined);

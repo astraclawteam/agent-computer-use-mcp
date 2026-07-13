@@ -7,6 +7,7 @@ import {
   createEvidenceRun,
   verifyEvidenceDirectory,
 } from "./commercial-evidence.mjs";
+import { normalizeCommercialCandidateIdentity } from "./commercial-candidate-identity.mjs";
 import { runRuntimeSoak } from "./runtime-soak-runner.mjs";
 import { resolveSoakGate } from "./soak-gate-policy.mjs";
 
@@ -123,6 +124,7 @@ export async function executeRuntimeSoakPhase(rawOptions = {}, dependencies = {}
     overlay: identity.overlay,
     ocrRuntime: identity.ocrRuntime,
     modelPack: identity.modelPack,
+    candidateIdentity: normalizeCommercialCandidateIdentity(identity),
     machine: identity.machine,
     gate: options.gate,
     requestedDurationMs: options.durationMs,

@@ -5,16 +5,19 @@ import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { createReleasedPerceptionProviders } from "./offline-perception-probe.mjs";
+import { normalizeCommercialCandidateIdentity } from "./commercial-candidate-identity.mjs";
 import { createEvidenceRun } from "./commercial-evidence.mjs";
 import { runPerceptionBenchmark } from "./perception-benchmark-runner.mjs";
 import { verifyPerceptionCorpus } from "./perception-corpus.mjs";
 import { buildPerceptionLatencyReport } from "./perception-latency-report.mjs";
 import { scanCorpusPrivacy } from "./perception-privacy-scanner.mjs";
+import { resolveRuntimeSoakIdentity } from "./runtime-soak-evidence.mjs";
 
 export async function runPhase35(options = {}) {
   const corpus = await loadCorpus(options);
   const privacy = await scanCorpusPrivacy({ manifest: corpus, root: options.corpusRoot });
   if (privacy.status !== "passed") throw phaseError("perception.corpus_privacy_rejected");
+  const candidateIdentity = options.evidenceRoot ? await resolveEvidenceIdentity(options) : null;
   const evidence = options.evidenceRoot ? await createEvidenceRun({
     root: options.evidenceRoot,
     runId: options.runId ?? `perception-${corpus.tier}-${randomUUID()}`,
@@ -22,6 +25,7 @@ export async function runPhase35(options = {}) {
       schemaVersion: 1,
       benchmark: "perception-corpus",
       sourceCommit: options.sourceCommit ?? process.env.GITHUB_SHA ?? "local-development",
+      candidateIdentity,
       corpus: { packId: corpus.packId, version: corpus.version, tier: corpus.tier, samples: corpus.samples.length },
       includeUserOverlay: false,
     },
@@ -51,6 +55,15 @@ export async function runPhase35(options = {}) {
     }
     throw error;
   }
+}
+
+async function resolveEvidenceIdentity(options) {
+  const raw = options.candidateIdentity ?? await (options.resolveIdentity ?? resolveRuntimeSoakIdentity)();
+  if (raw.dirtyWorktree === true) throw phaseError("perception.evidence_dirty_worktree");
+  const candidate = normalizeCommercialCandidateIdentity(raw);
+  const sourceCommit = options.sourceCommit ?? process.env.GITHUB_SHA;
+  if (sourceCommit && sourceCommit !== candidate.gitCommit) throw phaseError("perception.evidence_identity_mismatch");
+  return candidate;
 }
 
 async function loadCorpus(options) {

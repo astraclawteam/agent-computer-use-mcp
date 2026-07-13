@@ -120,6 +120,7 @@ test("Phase 3.5 seals provider events and a failing or passing report through ev
     tier: "quick",
     evidenceRoot,
     sourceCommit: "a".repeat(40),
+    candidateIdentity: candidateIdentity(),
     providers: passingProviders(),
   });
   const runs = await readdir(evidenceRoot, { withFileTypes: true });
@@ -127,6 +128,7 @@ test("Phase 3.5 seals provider events and a failing or passing report through ev
   assert.ok(run);
   const verified = await verifyEvidenceDirectory(join(evidenceRoot, run.name));
   assert.equal(verified.status, "passed");
+  assert.deepEqual(verified.manifest.candidateIdentity, candidateIdentity());
   assert.equal(verified.eventCount, 19);
   assert.equal(verified.report.status, report.status);
   assert.deepEqual(verified.files.map((file) => file.path), ["events.jsonl", "report.json", "run-manifest.json"]);
@@ -154,6 +156,18 @@ function passingBenchmark() {
       { sampleId: "visual-1", kind: "visual", durationMs: 30 },
       { sampleId: "visual-2", kind: "visual", durationMs: 40 },
     ],
+  };
+}
+
+function candidateIdentity() {
+  return {
+    gitCommit: "a".repeat(40),
+    corePackage: { name: "agent-computer-use-mcp", version: "0.0.1", sha256: "1".repeat(64) },
+    platformPackage: { name: "@xiaozhiclaw/agent-computer-use-win32-x64", version: "0.0.1", sha256: "2".repeat(64) },
+    driver: { id: "cua-driver-windows-x64", version: "0.7.1", sha256: "3".repeat(64) },
+    overlay: { id: "gateway-overlay", sha256: "4".repeat(64) },
+    ocrRuntime: { id: "onnxruntime-node", version: "1.27.0", sha256: "5".repeat(64) },
+    modelPack: { id: "pp-ocr-v6-small", sha256: "6".repeat(64) },
   };
 }
 
