@@ -12,18 +12,21 @@ const EMPTY_PROBE = Object.freeze({
 
 export async function probeOwnedRuntime(options = {}) {
   const rootPids = validateRootPids(options.rootPids ?? []);
-  if (rootPids.length === 0) return structuredClone(EMPTY_PROBE);
+  const rootProcesses = validateRootProcesses(options.rootProcesses ?? []);
+  if (rootPids.length > 0 && rootProcesses.length > 0) throw new TypeError("runtime.probe_roots_ambiguous");
+  const requestedPids = rootProcesses.length > 0 ? rootProcesses.map((root) => root.pid) : rootPids;
+  if (requestedPids.length === 0) return structuredClone(EMPTY_PROBE);
   const runPowerShell = options.runPowerShell ?? defaultRunPowerShell;
-  const script = buildProbeScript(rootPids);
+  const script = buildProbeScript(requestedPids);
   let raw;
   try {
-    raw = await runPowerShell({ rootPids, script });
+    raw = await runPowerShell({ rootPids: requestedPids, rootProcesses, script });
   } catch {
     throw new Error("runtime.probe_failed");
   }
   const payload = parsePayload(raw);
   const rows = normalizeProcesses(payload.processes ?? []);
-  const owned = collectOwnedPids(rootPids, rows);
+  const owned = collectOwnedPids(rootPids, rootProcesses, rows);
   const processes = rows
     .filter((row) => owned.has(row.pid))
     .sort((left, right) => left.pid - right.pid)
@@ -33,6 +36,7 @@ export async function probeOwnedRuntime(options = {}) {
       name: row.name,
       rssBytes: row.rssBytes,
       handles: row.handles,
+      ...(row.startedAtMs === null ? {} : { startedAtMs: row.startedAtMs }),
     }));
   const listeners = normalizeListeners(payload.listeners ?? [])
     .filter((listener) => owned.has(listener.pid));
@@ -75,6 +79,7 @@ foreach ($item in $all) {
     pid = $pidValue
     parentPid = [int]$item.ParentProcessId
     name = [string]$item.Name
+    startedAtMs = [double]([DateTimeOffset]$runtime.StartTime).ToUnixTimeMilliseconds()
     rssBytes = [double]$runtime.WorkingSet64
     handles = [int]$runtime.HandleCount
   }
@@ -138,6 +143,25 @@ function validateRootPids(values) {
   return roots.sort((left, right) => left - right);
 }
 
+function validateRootProcesses(values) {
+  if (!Array.isArray(values)) throw new TypeError("runtime.probe_process_roots_invalid");
+  const seen = new Set();
+  return values.map((value) => {
+    const pid = positiveInteger(value?.pid, "runtime.probe_pid_invalid");
+    if (seen.has(pid)) throw new TypeError("runtime.probe_pid_duplicate");
+    seen.add(pid);
+    const hasExactStart = value?.startedAtMs !== undefined;
+    const hasRetirementBoundary = value?.notCreatedAfterMs !== undefined;
+    if (hasExactStart === hasRetirementBoundary) throw new TypeError("runtime.probe_process_identity_invalid");
+    return {
+      pid,
+      ...(hasExactStart
+        ? { startedAtMs: nonNegativeInteger(value.startedAtMs, "runtime.probe_process_start_invalid") }
+        : { notCreatedAfterMs: nonNegativeInteger(value.notCreatedAfterMs, "runtime.probe_process_boundary_invalid") }),
+    };
+  });
+}
+
 function parsePayload(raw) {
   try {
     const payload = JSON.parse(String(raw).replace(/^\uFEFF/u, "").trim());
@@ -159,6 +183,9 @@ function normalizeProcesses(rows) {
       pid,
       parentPid: nonNegativeInteger(row?.parentPid, "runtime.probe_parent_pid_invalid"),
       name: sanitizeName(row?.name),
+      startedAtMs: row?.startedAtMs === undefined
+        ? null
+        : nonNegativeInteger(row.startedAtMs, "runtime.probe_process_start_invalid"),
       rssBytes: nonNegativeNumber(row?.rssBytes, "runtime.probe_rss_invalid"),
       handles: nonNegativeInteger(row?.handles, "runtime.probe_handles_invalid"),
     };
@@ -173,8 +200,16 @@ function normalizeListeners(rows) {
   }));
 }
 
-function collectOwnedPids(rootPids, rows) {
+function collectOwnedPids(rootPids, rootProcesses, rows) {
   const owned = new Set(rootPids);
+  for (const root of rootProcesses) {
+    const row = rows.find((candidate) => candidate.pid === root.pid);
+    if (!row || row.startedAtMs === null) continue;
+    const matches = root.startedAtMs !== undefined
+      ? row.startedAtMs === root.startedAtMs
+      : row.startedAtMs <= root.notCreatedAfterMs;
+    if (matches) owned.add(root.pid);
+  }
   let changed = true;
   while (changed) {
     changed = false;

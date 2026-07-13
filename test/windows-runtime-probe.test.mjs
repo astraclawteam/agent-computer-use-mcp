@@ -76,3 +76,30 @@ test("probe returns an empty sanitized sample when no roots are active", async (
     cursorProcessIds: [],
   });
 });
+
+test("probe matches process identity constraints instead of trusting a reused PID", async () => {
+  const original = await probeOwnedRuntime({
+    rootProcesses: [{ pid: 10, startedAtMs: 900 }],
+    runPowerShell: async () => JSON.stringify({
+      processes: [
+        { pid: 10, parentPid: 1, name: "node.exe", startedAtMs: 900, rssBytes: 100, handles: 10 },
+        { pid: 11, parentPid: 10, name: "conhost.exe", startedAtMs: 901, rssBytes: 20, handles: 2 },
+      ],
+      listeners: [],
+    }),
+  });
+  const reused = await probeOwnedRuntime({
+    rootProcesses: [{ pid: 10, notCreatedAfterMs: 1_000 }],
+    runPowerShell: async () => JSON.stringify({
+      processes: [
+        { pid: 10, parentPid: 1, name: "unrelated.exe", startedAtMs: 2_000, rssBytes: 999, handles: 99 },
+        { pid: 12, parentPid: 10, name: "unrelated-child.exe", startedAtMs: 2_001, rssBytes: 999, handles: 99 },
+      ],
+      listeners: [],
+    }),
+  });
+
+  assert.deepEqual(original.processIds, [10, 11]);
+  assert.deepEqual(reused.processIds, []);
+  assert.equal(reused.handles, 0);
+});

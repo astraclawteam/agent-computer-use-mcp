@@ -30,15 +30,19 @@ test("runtime soak bounds concurrency reconnects faults and leaves no orphan ses
         async close() { alive.delete(pid); },
       };
     },
-    probeRuntime: async ({ rootPids }) => ({
-      processIds: rootPids.filter((pid) => alive.has(pid)),
-      processes: rootPids.filter((pid) => alive.has(pid)).map((pid) => ({ pid, rssBytes: 10_000, handles: 20 })),
-      rssBytes: rootPids.filter((pid) => alive.has(pid)).length * 10_000,
-      handles: rootPids.filter((pid) => alive.has(pid)).length * 20,
-      listeningPorts: [],
-      overlayProcessIds: [],
-      cursorProcessIds: [],
-    }),
+    probeRuntime: async ({ rootPids = [], rootProcesses = [] }) => {
+      const requestedPids = rootPids.length > 0 ? rootPids : rootProcesses.map((root) => root.pid);
+      const processIds = requestedPids.filter((pid) => alive.has(pid));
+      return {
+        processIds,
+        processes: processIds.map((pid) => ({ pid, rssBytes: 10_000, handles: 20 })),
+        rssBytes: processIds.length * 10_000,
+        handles: processIds.length * 20,
+        listeningPorts: [],
+        overlayProcessIds: [],
+        cursorProcessIds: [],
+      };
+    },
     isProcessAlive: async (pid) => alive.has(pid),
     cleanupDelayMs: 1,
   });
@@ -202,6 +206,139 @@ test("runtime soak duration starts after sessions and the baseline probe are rea
   });
   assert.equal(report.calls.length, 2);
   assert.ok(report.durationMs >= 2);
+});
+
+test("runtime soak samples only the currently active session roots after reconnects", async () => {
+  let now = 0;
+  let nextPid = 40;
+  const active = new Set();
+  const sampledRoots = [];
+  const report = await runRuntimeSoak({
+    durationMs: 4,
+    clientCount: 1,
+    concurrency: 1,
+    faultEveryRounds: 1,
+    sampleIntervalMs: 1,
+    now: () => now,
+    wallClock: () => 1_000 + now,
+    sleep: async () => {},
+    cleanupDelayMs: 0,
+    createSession: async () => {
+      const pid = nextPid++;
+      active.add(pid);
+      return {
+        pid,
+        async callTool() {
+          now += 1;
+          return { isError: false, structuredContent: { includeUserOverlay: false } };
+        },
+        async fault() { active.delete(pid); },
+        async close() { active.delete(pid); },
+      };
+    },
+    probeRuntime: async ({ rootPids = [], rootProcesses = [] }) => {
+      if (rootPids.length > 0) sampledRoots.push([...rootPids]);
+      const processIds = rootPids.filter((pid) => active.has(pid));
+      return runtimeProbe({
+        rssBytes: processIds.length * 100,
+        handles: processIds.length * 10,
+        processIds,
+        rootProcesses,
+      });
+    },
+  });
+
+  assert.equal(report.status, "passed");
+  assert.ok(sampledRoots.length > 2);
+  assert.equal(sampledRoots.every((roots) => roots.length === 1), true);
+});
+
+test("runtime soak cleanup excludes a different process that later reuses an owned PID", async () => {
+  let now = 0;
+  const cleanupProbes = [];
+  const report = await runRuntimeSoak({
+    durationMs: 1,
+    clientCount: 1,
+    concurrency: 1,
+    faultEveryRounds: 0,
+    now: () => now,
+    wallClock: () => 10_000 + now,
+    sleep: async () => {},
+    cleanupDelayMs: 0,
+    createSession: async () => ({
+      pid: 77,
+      async callTool() {
+        now += 1;
+        return { isError: false, structuredContent: { includeUserOverlay: false } };
+      },
+      async fault() {},
+      async close() {},
+    }),
+    probeRuntime: async ({ rootPids = [], rootProcesses = [] }) => {
+      if (rootProcesses.length > 0) {
+        cleanupProbes.push(rootProcesses);
+        const reusedAfterRetirement = 20_000 > rootProcesses[0].notCreatedAfterMs;
+        return runtimeProbe({
+          rssBytes: reusedAfterRetirement ? 0 : 100,
+          handles: reusedAfterRetirement ? 0 : 10,
+          processIds: reusedAfterRetirement ? [] : [77],
+        });
+      }
+      return runtimeProbe({ rssBytes: 100, handles: 10, processIds: rootPids });
+    },
+    isProcessAlive: async () => true,
+  });
+
+  assert.equal(cleanupProbes.length, 1);
+  assert.equal(cleanupProbes[0][0].pid, 77);
+  assert.equal(cleanupProbes[0][0].notCreatedAfterMs, 10_001);
+  assert.equal(report.orphanProcessCount, 0);
+  assert.equal(report.status, "passed");
+});
+
+test("runtime soak deduplicates observed identities when Windows reuses a session PID", async () => {
+  let now = 0;
+  let generation = 0;
+  let activeStartedAtMs = 0;
+  let cleanupRoots = [];
+  const report = await runRuntimeSoak({
+    durationMs: 3,
+    clientCount: 1,
+    concurrency: 1,
+    faultEveryRounds: 1,
+    sampleIntervalMs: 1,
+    now: () => now,
+    wallClock: () => 30_000 + now,
+    sleep: async () => {},
+    cleanupDelayMs: 0,
+    createSession: async () => {
+      generation += 1;
+      activeStartedAtMs = generation * 100;
+      return {
+        pid: 88,
+        async callTool() {
+          now += 1;
+          return { isError: false, structuredContent: { includeUserOverlay: false } };
+        },
+        async fault() {},
+        async close() {},
+      };
+    },
+    probeRuntime: async ({ rootPids = [], rootProcesses = [] }) => {
+      if (rootProcesses.length > 0) {
+        cleanupRoots = rootProcesses;
+        return runtimeProbe({ rssBytes: 0, handles: 0, processIds: [] });
+      }
+      return {
+        ...runtimeProbe({ rssBytes: 100, handles: 10, processIds: rootPids }),
+        processes: rootPids.map((pid) => ({ pid, startedAtMs: activeStartedAtMs, rssBytes: 100, handles: 10 })),
+      };
+    },
+  });
+
+  assert.equal(report.status, "passed");
+  assert.equal(cleanupRoots.length, 1);
+  assert.deepEqual(cleanupRoots[0], { pid: 88, startedAtMs: 300 });
 });
 
 test("runtime soak is exposed through the standard health phase catalog", async () => {

@@ -25,14 +25,15 @@ export async function runRuntimeSoak(options = {}) {
   const sampleIntervalMs = positiveInteger(options.sampleIntervalMs ?? 10_000, "sampleIntervalMs");
   const cleanupDelayMs = nonNegativeInteger(options.cleanupDelayMs ?? 250, "cleanupDelayMs");
   const now = options.now ?? (() => performance.now());
+  const wallClock = options.wallClock ?? Date.now;
   const sleep = options.sleep ?? ((ms) => new Promise((resolvePromise) => setTimeout(resolvePromise, ms)));
   const createSession = options.createSession ?? createStandardMcpSession;
   const probeRuntime = options.probeRuntime ?? probeOwnedRuntime;
-  const isProcessAlive = options.isProcessAlive ?? defaultIsProcessAlive;
   const emit = createEventEmitter(options.eventSink);
   const lifecycleStartedAt = now();
   const sessions = [];
-  const allPids = new Set();
+  const processRoots = [];
+  const observedProcesses = new Map();
   const samples = [];
   const calls = [];
   const operationalViolations = [];
@@ -58,7 +59,7 @@ export async function runRuntimeSoak(options = {}) {
     for (let index = 0; index < clientCount; index += 1) {
       const session = await createSession({ index });
       sessions.push(session);
-      if (session.pid) allPids.add(session.pid);
+      registerProcessRoot(session);
       await emit("runtime.session.started", { clientIndex: index, pid: session.pid ?? null, reconnect: false });
     }
     await takeSample("initial", true, 0);
@@ -73,11 +74,13 @@ export async function runRuntimeSoak(options = {}) {
       if (faultEveryRounds > 0 && round % faultEveryRounds === 0 && now() - workloadStartedAt < durationMs) {
         const index = reconnectCount % sessions.length;
         const previous = sessions[index];
+        const previousPid = previous.pid ?? null;
         await previous.fault();
-        await emit("runtime.session.faulted", { clientIndex: index, pid: previous.pid ?? null, round });
+        retireProcessRoot(previous);
+        await emit("runtime.session.faulted", { clientIndex: index, pid: previousPid, round });
         const replacement = await createSession({ index, reconnect: true });
         sessions[index] = replacement;
-        if (replacement.pid) allPids.add(replacement.pid);
+        registerProcessRoot(replacement);
         reconnectCount += 1;
         await emit("runtime.session.started", { clientIndex: index, pid: replacement.pid ?? null, reconnect: true });
       }
@@ -102,20 +105,24 @@ export async function runRuntimeSoak(options = {}) {
   workloadEndedAt ??= now();
   const measuredDurationMs = Math.max(0, workloadEndedAt - workloadStartedAt);
 
-  const closeResults = await Promise.allSettled(sessions.map((session) => session.close()));
+  const closeResults = await Promise.allSettled(sessions.map(async (session) => {
+    try {
+      await session.close();
+    } finally {
+      retireProcessRoot(session);
+    }
+  }));
   const closeFailureCount = closeResults.filter((result) => result.status === "rejected").length;
   if (cleanupDelayMs > 0) await sleep(cleanupDelayMs);
   let cleanupProbe = emptyProbe();
   let cleanupProbeCompleted = true;
   try {
-    cleanupProbe = await probeRuntime({ rootPids: [...allPids] });
+    cleanupProbe = await probeRuntime({ rootProcesses: cleanupProcessIdentities() });
   } catch {
     cleanupProbeCompleted = false;
   }
-  const orphanPids = [];
-  for (const pid of allPids) if (await isProcessAlive(pid)) orphanPids.push(pid);
   const cleanup = {
-    orphanProcessCount: Math.max(orphanPids.length, cleanupProbe.processIds.length),
+    orphanProcessCount: cleanupProbe.processIds.length,
     residualPortCount: cleanupProbe.listeningPorts.length,
     overlayLeakCount: cleanupProbe.overlayProcessIds.length,
     cursorLeakCount: cleanupProbe.cursorProcessIds.length,
@@ -209,7 +216,8 @@ export async function runRuntimeSoak(options = {}) {
   async function takeSample(reason, force, elapsedOverride = undefined) {
     const elapsedMs = elapsedOverride ?? Math.max(0, now() - (workloadStartedAt ?? now()));
     if (!force && elapsedMs < nextSampleAt) return;
-    const probe = await probeRuntime({ rootPids: [...allPids] });
+    const probe = await probeRuntime({ rootPids: activeProcessIds() });
+    rememberObservedProcesses(probe.processes);
     const sample = {
       elapsedMs,
       rssBytes: probe.rssBytes,
@@ -225,6 +233,42 @@ export async function runRuntimeSoak(options = {}) {
       overlayProcessCount: probe.overlayProcessIds.length,
       cursorProcessCount: probe.cursorProcessIds.length,
     });
+  }
+
+  function registerProcessRoot(session) {
+    if (!session.pid) return;
+    processRoots.push({ session, pid: session.pid, notCreatedAfterMs: null });
+  }
+
+  function retireProcessRoot(session) {
+    const root = processRoots.find((candidate) => candidate.session === session);
+    if (root && root.notCreatedAfterMs === null) root.notCreatedAfterMs = wallClock();
+  }
+
+  function activeProcessIds() {
+    return sessions.map((session) => session.pid).filter((pid) => Number.isSafeInteger(pid) && pid > 0);
+  }
+
+  function rememberObservedProcesses(processes) {
+    for (const process of processes ?? []) {
+      if (!Number.isSafeInteger(process?.pid) || !Number.isSafeInteger(process?.startedAtMs)) continue;
+      observedProcesses.set(process.pid, {
+        pid: process.pid,
+        startedAtMs: process.startedAtMs,
+      });
+    }
+  }
+
+  function cleanupProcessIdentities() {
+    const identities = [...observedProcesses.values()];
+    for (const root of processRoots) {
+      if (identities.some((identity) => identity.pid === root.pid)) continue;
+      identities.push({
+        pid: root.pid,
+        notCreatedAfterMs: root.notCreatedAfterMs ?? wallClock(),
+      });
+    }
+    return identities;
   }
 }
 
@@ -268,10 +312,6 @@ function emptyProbe() {
     overlayProcessIds: [],
     cursorProcessIds: [],
   };
-}
-
-async function defaultIsProcessAlive(pid) {
-  try { process.kill(pid, 0); return true; } catch { return false; }
 }
 
 function positiveInteger(value, name) {
