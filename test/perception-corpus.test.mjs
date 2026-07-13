@@ -58,6 +58,9 @@ test("verified corpus checks manifest and asset identities without exposing its 
   assert.equal(corpus.status, "verified");
   assert.equal(corpus.tier, "quick");
   assert.equal(corpus.samples.length, fixture.manifest.samples.length);
+  assert.equal(typeof corpus.resolveImagePath, "function");
+  assert.equal(corpus.resolveImagePath(corpus.samples[0].id).startsWith(fixture.root), true);
+  assert.throws(() => corpus.resolveImagePath("missing-sample"), /perception\.corpus_sample_unknown/u);
   assert.equal(JSON.stringify(corpus).includes(fixture.root), false);
 });
 

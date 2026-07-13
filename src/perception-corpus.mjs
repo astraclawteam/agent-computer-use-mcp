@@ -96,7 +96,7 @@ export async function verifyPerceptionCorpus(options = {}) {
   }
   if (actual.length !== expected.size) throw corpusError("perception.corpus_file_inventory_mismatch");
 
-  return Object.freeze({
+  const verified = {
     status: "verified",
     schemaVersion: 1,
     packId: manifest.packId,
@@ -105,7 +105,17 @@ export async function verifyPerceptionCorpus(options = {}) {
     provenance: manifest.provenance,
     licenses: manifest.licenses,
     samples: manifest.samples,
+  };
+  const samplesById = new Map(manifest.samples.map((sample) => [sample.id, sample]));
+  Object.defineProperty(verified, "resolveImagePath", {
+    enumerable: false,
+    value(sampleId) {
+      const sample = samplesById.get(sampleId);
+      if (!sample) throw corpusError("perception.corpus_sample_unknown", sampleId);
+      return joinTarget(root, sample.image.target);
+    },
   });
+  return Object.freeze(verified);
 }
 
 function validateCorpusLock(lock) {
