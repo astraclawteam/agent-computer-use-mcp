@@ -23,14 +23,24 @@ jobs:
           dotnet-version: "10.0.x"
       - run: npm ci
       - run: dotnet build native-lab/NativeComputerUseLab.csproj --nologo
+      - name: Verify hash-locked app fixture pack
+        env:
+          AGENT_COMPUTER_USE_FIXTURE_PACK: ${{ vars.APP_LAB_FIXTURE_PACK }}
+          AGENT_COMPUTER_USE_FIXTURE_LOCK: ${{ vars.APP_LAB_FIXTURE_LOCK }}
+        run: node scripts/verify-app-fixture-pack.mjs --lock "$env:AGENT_COMPUTER_USE_FIXTURE_LOCK" --root "$env:AGENT_COMPUTER_USE_FIXTURE_PACK"
       - name: Run real applications with sanitized evidence
         env:
           AGENT_COMPUTER_USE_CUA_DRIVER: ${{ vars.APP_LAB_CUA_DRIVER_PATH }}
-          AGENT_COMPUTER_USE_REAL_APP_REPORT: artifacts/app-smoke/real-app-smoke-report.json
-        run: npm run phase:6.2
+          AGENT_COMPUTER_USE_REAL_APP_EVIDENCE_ROOT: evidence/real-app
+        run: npm run phase:6.2 -- --evidence-root evidence/real-app
       - uses: actions/upload-artifact@v4
+        if: ${{ always() }}
         with:
-          name: real-app-smoke-report
-          path: artifacts/app-smoke/real-app-smoke-report.json
+          name: real-app-smoke-evidence
+          path: |
+            evidence/real-app/**/events.jsonl
+            evidence/real-app/**/report.json
+            evidence/real-app/**/run-manifest.json
+            evidence/real-app/**/checksums.txt
           if-no-files-found: error
           retention-days: 30

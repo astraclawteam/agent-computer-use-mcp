@@ -13,6 +13,7 @@ import {
   structured,
   waitForWindow,
 } from "./shared.mjs";
+import { DEFAULT_AGENT_CURSOR_STYLE } from "../overlay-theme-cursor-tokens.mjs";
 
 export function createNativeFixtureAdapter(options) {
   const mcp = options.mcp;
@@ -34,6 +35,8 @@ export function createNativeFixtureAdapter(options) {
     async launch() {
       await startDriverSession(mcp, session);
       sessionStarted = true;
+      await mcp.callTool("set_agent_cursor_style", DEFAULT_AGENT_CURSOR_STYLE);
+      await mcp.callTool("set_agent_cursor_enabled", { enabled: true, cursor_id: "default" });
       child = spawnApp(options.executable.path, [filePath]);
       const window = await waitForWindow(mcp, (item) => item.title?.includes(basename(filePath)) || item.pid === child.pid, { sleep: options.sleep });
       await publishOverlayTargetRect(options.overlayTargetRectFile, window);
@@ -63,6 +66,7 @@ export function createNativeFixtureAdapter(options) {
     },
     async cleanup() {
       child?.kill();
+      if (sessionStarted) await mcp.callTool("set_agent_cursor_enabled", { enabled: false, cursor_id: "default" }).catch(() => {});
       if (sessionStarted) await stopDriverSession(mcp, session);
       else await mcp.close();
       await removeTemporaryWorkspace(root);
