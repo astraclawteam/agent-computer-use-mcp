@@ -20,3 +20,19 @@ test("ordinary CI stays offline while release workflows own real platform assets
   assert.match(release, /build-platform-release\.mjs --allow-network/u);
   assert.match(release, /release:windows:size-report/u);
 });
+
+test("pull request CI runs and retains exact commercial soak evidence", async () => {
+  const source = await readFile(".github/workflows/ci.yml", "utf8");
+  const workflow = parse(source);
+  const steps = workflow.jobs.test.steps;
+  const soak = steps.find((step) => step.name === "Run 15-minute commercial soak");
+  const upload = steps.find((step) => step.uses === "actions/upload-artifact@v4");
+  assert.equal(soak.run, "npm run soak:pr");
+  assert.equal(upload.if, "always()");
+  assert.equal(upload.with["retention-days"], 30);
+  assert.match(upload.with.path, /run-manifest\.json/u);
+  assert.match(upload.with.path, /events\.jsonl/u);
+  assert.match(upload.with.path, /report\.json/u);
+  assert.match(upload.with.path, /checksums\.txt/u);
+  assert.doesNotMatch(JSON.stringify(upload), /png|jpe?g|screenshot/iu);
+});

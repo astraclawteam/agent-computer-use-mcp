@@ -38,3 +38,21 @@
 - Overlay is absent from agent observations, OCR, screenshots, traces, and artifacts.
 - Password, payment, credential, private, and denied-window policies fail closed.
 - Concurrency, daemon cleanup, runtime soak, OCR latency, and real app evidence gates pass.
+
+## Commercial Runtime Evidence
+
+- Pull-request CI runs `npm run soak:pr` for exactly 900,000 ms after all MCP
+  sessions and the baseline process probe are ready.
+- RSS net growth is at most 128 MiB, handle net growth is at most 128 handles,
+  and the tool-call failure rate is below 0.1%.
+- Cleanup requires zero orphan processes, residual ports, overlay leaks, and
+  cursor leaks. Safety-policy errors must fail closed.
+- The evidence directory contains `run-manifest.json`, append-only
+  `events.jsonl`, `report.json`, and `checksums.txt` bound to the exact Git,
+  package, driver, overlay, OCR, and model identities.
+- `npm run evidence:verify -- <evidence-directory>` recomputes every inventory
+  entry and rejects tampering, unreferenced files, dirty-worktree identity, and
+  candidate mismatch.
+- Complete screenshots and user documents are forbidden. Tokens, user-profile
+  paths, host names, command lines, and executable paths are rejected before
+  evidence sealing.
