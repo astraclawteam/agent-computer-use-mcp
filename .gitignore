@@ -10,6 +10,7 @@ native-lab/obj/
 
 # Runtime/cache artifacts
 artifacts/
+evidence/
 models/
 *.log
 *.tmp
