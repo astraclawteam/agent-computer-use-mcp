@@ -103,3 +103,25 @@ test("probe matches process identity constraints instead of trusting a reused PI
   assert.deepEqual(reused.processIds, []);
   assert.equal(reused.handles, 0);
 });
+
+test("probe excludes stale PPID descendants created before a reused root process", async () => {
+  const result = await probeOwnedRuntime({
+    rootPids: [20],
+    runPowerShell: async () => JSON.stringify({
+      processes: [
+        { pid: 20, parentPid: 1, name: "node.exe", startedAtMs: 2_000, rssBytes: 100, handles: 10 },
+        { pid: 21, parentPid: 20, name: "stale-service.exe", startedAtMs: 1_000, rssBytes: 9_000, handles: 900 },
+        { pid: 22, parentPid: 21, name: "stale-child.exe", startedAtMs: 1_100, rssBytes: 9_000, handles: 900 },
+        { pid: 23, parentPid: 20, name: "conhost.exe", startedAtMs: 2_001, rssBytes: 20, handles: 2 },
+      ],
+      listeners: [
+        { pid: 21, port: 8080 },
+        { pid: 23, port: 43123 },
+      ],
+    }),
+  });
+
+  assert.deepEqual(result.processIds, [20, 23]);
+  assert.deepEqual(result.listeningPorts, [43123]);
+  assert.equal(result.handles, 12);
+});

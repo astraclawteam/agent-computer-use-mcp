@@ -352,6 +352,12 @@ Development follows red-green-refactor for every behavior change.
 - released ONNX OCR and perception providers against the quick corpus;
 - process, port, and handle cleanup after injected faults.
 
+Windows process ownership is identity- and time-bound. A root is identified by
+PID plus process creation time (or a bounded retirement time), and a descendant
+is owned only when its creation time is not earlier than its matched parent.
+Bare historical PIDs and PPID equality alone are invalid evidence because
+Windows may reuse a PID while older processes retain that numeric PPID.
+
 ### Environment Evidence
 
 - installed application discovery and adapter flows;

@@ -130,8 +130,9 @@ git commit -m "feat: calculate commercial soak thresholds"
 - Create: `test/windows-runtime-probe.test.mjs`
 
 **Interfaces:**
-- Produces: `probeOwnedRuntime({ rootPids, runPowerShell? }) -> Promise<RuntimeProbe>`.
+- Produces: `probeOwnedRuntime({ rootPids | rootProcesses, runPowerShell? }) -> Promise<RuntimeProbe>`.
 - `RuntimeProbe` contains process identities, aggregate RSS/handles, owned TCP listeners, overlay processes, and cursor processes.
+- `rootProcesses` binds cleanup probes to exact creation time or a retirement-time boundary. Descendant traversal also requires child creation time to be at or after the matched parent so PID/PPID reuse cannot absorb unrelated processes.
 
 - [ ] **Step 1: Write failing parser and sanitization tests**
 

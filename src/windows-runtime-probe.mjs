@@ -201,7 +201,8 @@ function normalizeListeners(rows) {
 }
 
 function collectOwnedPids(rootPids, rootProcesses, rows) {
-  const owned = new Set(rootPids);
+  const rowsByPid = new Map(rows.map((row) => [row.pid, row]));
+  const owned = new Set(rootPids.filter((pid) => rowsByPid.has(pid)));
   for (const root of rootProcesses) {
     const row = rows.find((candidate) => candidate.pid === root.pid);
     if (!row || row.startedAtMs === null) continue;
@@ -214,7 +215,10 @@ function collectOwnedPids(rootPids, rootProcesses, rows) {
   while (changed) {
     changed = false;
     for (const row of rows) {
-      if (owned.has(row.parentPid) && !owned.has(row.pid)) {
+      const parent = rowsByPid.get(row.parentPid);
+      const followsParentCreation = parent
+        && (parent.startedAtMs === null || row.startedAtMs === null || row.startedAtMs >= parent.startedAtMs);
+      if (owned.has(row.parentPid) && followsParentCreation && !owned.has(row.pid)) {
         owned.add(row.pid);
         changed = true;
       }
