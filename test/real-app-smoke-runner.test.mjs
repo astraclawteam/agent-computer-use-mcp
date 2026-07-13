@@ -98,11 +98,13 @@ test("real app smoke retries one transport timeout but never weakens evidence va
 });
 
 test("Notepad smoke owns and terminates every process it creates", async () => {
-  const source = await readFile("src/real-cua-notepad-file-sequence.mjs", "utf8");
+  const entrypoint = await readFile("src/real-cua-notepad-file-sequence.mjs", "utf8");
+  const source = await readFile("src/app-adapters/notepad.mjs", "utf8");
+  assert.match(entrypoint, /createNotepadAdapter/u);
+  assert.match(entrypoint, /runAppAdapter/u);
   assert.match(source, /callTool\("launch_app", \{/u);
   assert.match(source, /Microsoft\.WindowsNotepad_8wekyb3d8bbwe!App/u);
-  assert.match(source, /Date\.now\(\) - started < 20_000/u);
-  assert.match(source, /async function waitForEditorState/u);
+  assert.match(source, /waitForWindow/u);
   assert.match(source, /Number\.isInteger\(item\.pid\)/u);
   assert.match(source, /const ownedPids = new Set\(\);/u);
   assert.match(source, /ownedPids\.add\(window\.pid\)/u);

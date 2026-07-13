@@ -4,6 +4,10 @@ import {
   runAppAdapter,
   sanitizeExecutableIdentity,
 } from "./adapter-contract.mjs";
+import { createBrowserFixtureAdapter } from "./browser-fixture.mjs";
+import { createNativeFixtureAdapter } from "./native-fixture.mjs";
+import { createNotepadAdapter } from "./notepad.mjs";
+import { createVisualFixtureAdapter } from "./visual-fixture.mjs";
 
 export {
   APP_ADAPTER_METHODS,
@@ -11,6 +15,13 @@ export {
   runAppAdapter,
   sanitizeExecutableIdentity,
 };
+
+export const TIER_A_ADAPTER_FACTORIES = Object.freeze({
+  "notepad-file": createNotepadAdapter,
+  "native-form": createNativeFixtureAdapter,
+  "browser-local": createBrowserFixtureAdapter,
+  "visual-fixture": createVisualFixtureAdapter,
+});
 
 export function createAppAdapterRegistry(adapters = {}) {
   if (adapters === null || typeof adapters !== "object" || Array.isArray(adapters)) {

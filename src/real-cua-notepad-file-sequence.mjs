@@ -1,182 +1,36 @@
-import { mkdtemp, readFile, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { basename, join } from "node:path";
+import { runAppAdapter } from "./app-adapters/adapter-contract.mjs";
+import { createNotepadAdapter } from "./app-adapters/notepad.mjs";
+import { inspectWindowsExecutableIdentity } from "./app-adapters/shared.mjs";
 import { CuaDriverMcpClient } from "./cua-driver-mcp-driver.mjs";
 
 const driverPath = process.env.AGENT_COMPUTER_USE_CUA_DRIVER
   ?? process.env.XIAOZHICLAW_CUA_DRIVER
   ?? `${process.env.LOCALAPPDATA}\\Programs\\Cua\\cua-driver\\bin\\cua-driver.exe`;
-const session = "agent-computer-use-phase-0-6-notepad";
-const overlayTargetRectFile = process.env.AGENT_COMPUTER_USE_OVERLAY_TARGET_RECT_FILE
-  ?? process.env.XIAOZHICLAW_CUA_OVERLAY_TARGET_RECT_FILE;
+const executablePath = `${process.env.WINDIR ?? "C:\\Windows"}\\System32\\notepad.exe`;
 const expectedText = `agent computer use native desktop file test\nSaved through cua-driver MCP at ${new Date().toISOString()}\n`;
 const mcp = new CuaDriverMcpClient({ driverPath });
 
-const dir = await mkdtemp(join(tmpdir(), "agent-computer-use-notepad-"));
-const filePath = join(dir, `${basename(dir)}-native-file.txt`);
-await writeFile(filePath, "", "utf8");
-const ownedPids = new Set();
+const executable = await inspectWindowsExecutableIdentity(executablePath);
+const result = await runAppAdapter(createNotepadAdapter({
+  mcp,
+  executable,
+  expectedText,
+  session: "agent-computer-use-phase-0-6-notepad",
+  overlayTargetRectFile: process.env.AGENT_COMPUTER_USE_OVERLAY_TARGET_RECT_FILE
+    ?? process.env.XIAOZHICLAW_CUA_OVERLAY_TARGET_RECT_FILE,
+}), { controlLease: { id: "phase-0-6-notepad", status: "active" } });
 
-function getStructured(result) {
-  return result.structuredContent ?? result;
-}
-
-function textFromResult(result) {
-  return (result.content ?? []).map((item) => item.text ?? "").join("\n");
-}
-
-async function waitForWindow(titlePart) {
-  const started = Date.now();
-  while (Date.now() - started < 20_000) {
-    const windowsResult = await mcp.callTool("list_windows", { on_screen_only: false });
-    const windows = getStructured(windowsResult).windows ?? [];
-    const window = windows.find((item) => item.title?.includes(titlePart));
-    if (window) return window;
-    await new Promise((resolve) => setTimeout(resolve, 250));
-  }
-  throw new Error(`window.not_found: ${titlePart}`);
-}
-
-function findEditor(elements) {
-  return elements.find((element) => element.role === "Edit" && /Text editor|鏂囨湰缂栬緫鍣▅cua-native-file|缂栬緫/.test(element.label ?? ""))
-    ?? elements.find((element) => element.role === "Document" && element.actions?.includes("set_value"))
-    ?? elements.find((element) => element.role === "Document" && element.frame?.h > 200 && element.frame?.w > 300)
-    ?? elements.find((element) => element.role === "Edit");
-}
-
-async function waitForEditorState({ pid, windowId }) {
-  const started = Date.now();
-  let lastElements = [];
-  let lastState = {};
-  while (Date.now() - started < 10_000) {
-    const result = await mcp.callTool("get_window_state", {
-      pid,
-      window_id: windowId,
-      include_screenshot: false,
-      max_elements: 1000,
-      max_depth: 30,
-      session,
-    });
-    const state = getStructured(result);
-    lastState = state;
-    lastElements = state.elements ?? [];
-    const editor = findEditor(lastElements);
-    if (editor) return { state, editor };
-    await new Promise((resolve) => setTimeout(resolve, 250));
-  }
-  const summary = lastElements.slice(0, 30).map((element) => ({
-    role: element.role,
-    label: element.label,
-    actions: element.actions,
-  }));
-  throw new Error(`element.not_found: Notepad editor; state=${JSON.stringify({
-    keys: Object.keys(lastState),
-    content: lastState.content,
-    isError: lastState.isError,
-    elements: summary,
-  })}`);
-}
-
-try {
-  await mcp.start();
-  const launch = getStructured(await mcp.callTool("launch_app", {
-    aumid: "Microsoft.WindowsNotepad_8wekyb3d8bbwe!App",
-    additional_arguments: [filePath],
-  }));
-  if (launch.pid != null) ownedPids.add(launch.pid);
-  const window = launch.windows?.find((item) => Number.isInteger(item.pid) && item.title?.includes(basename(filePath)))
-    ?? await waitForWindow(basename(filePath));
-  const pid = window.pid;
-  ownedPids.add(window.pid);
-  if (overlayTargetRectFile && window.bounds) {
-    await writeFile(overlayTargetRectFile, JSON.stringify({
-      windowId: window.window_id,
-      x: window.bounds.x,
-      y: window.bounds.y,
-      width: window.bounds.width,
-      height: window.bounds.height,
-      title: window.title ?? "",
-    }), "utf8");
-  }
-
-  const { state: before, editor } = await waitForEditorState({ pid, windowId: window.window_id });
-
-  const typeResult = await mcp.callTool("set_value", {
-    pid,
-    window_id: window.window_id,
-    element_index: editor.element_index,
-    value: expectedText,
-    session,
-  });
-
-  const saveResult = await saveNotepadByElement({ pid, windowId: window.window_id, elements: before.elements ?? [] });
-
-  await new Promise((resolve) => setTimeout(resolve, 700));
-  const diskText = await readFile(filePath, "utf8");
-  const normalizedDiskText = diskText.replace(/^\uFEFF/u, "").replaceAll("\r\n", "\n");
-  const passed = normalizedDiskText === expectedText;
-
-  console.log(JSON.stringify({
-    status: passed ? "passed" : "failed",
-    evidenceKind: "real-app",
-    observationProvider: "uia-som",
-    usedGuessedCoordinates: false,
-    includeUserOverlay: false,
-    fixtureFileName: basename(filePath),
-    window: { pid, window_id: window.window_id, title: window.title },
-    editor: { element_index: editor.element_index, element_token: editor.element_token, label: editor.label },
-    typeText: textFromResult(typeResult),
-    save: textFromResult(saveResult),
-    normalizedDiskTextVerified: passed,
-  }, null, 2));
-  process.exitCode = passed ? 0 : 1;
-
-} catch (error) {
-  console.error(JSON.stringify({
-    status: "failed",
-    evidenceKind: "real-app",
-    observationProvider: "uia-som",
-    usedGuessedCoordinates: false,
-    includeUserOverlay: false,
-    fixtureFileName: basename(filePath),
-    error: error instanceof Error ? error.message : String(error),
-    stderr: mcp.stderrText().slice(-4000),
-  }, null, 2));
-  process.exitCode = 1;
-} finally {
-  for (const pid of ownedPids) {
-    await mcp.callTool("kill_app", { pid }).catch(() => {});
-  }
-  await mcp.close();
-}
-
-async function saveNotepadByElement({ pid, windowId, elements }) {
-  const fileMenu = elements.find((element) => /^(File|文件)$/iu.test(element.label ?? ""));
-  if (!fileMenu) throw new Error("element.not_found: Notepad File menu");
-  await mcp.callTool("click", {
-    pid,
-    window_id: windowId,
-    element_index: fileMenu.element_index,
-    delivery_mode: "background",
-    session,
-  });
-  await new Promise((resolvePromise) => setTimeout(resolvePromise, 150));
-  const menuResult = await mcp.callTool("get_window_state", {
-    pid,
-    window_id: windowId,
-    include_screenshot: false,
-    max_elements: 1000,
-    max_depth: 30,
-    session,
-  });
-  const menu = getStructured(menuResult);
-  const save = (menu.elements ?? []).find((element) => /^(Save|保存)$/iu.test(element.label ?? ""));
-  if (!save) throw new Error("element.not_found: Notepad Save menu item");
-  return mcp.callTool("click", {
-    pid,
-    window_id: windowId,
-    element_index: save.element_index,
-    delivery_mode: "background",
-    session,
-  });
-}
+const passed = result.status === "pass";
+const report = {
+  status: passed ? "passed" : "failed",
+  reason: result.reason,
+  evidenceKind: "real-app",
+  observationProvider: "uia-som",
+  usedGuessedCoordinates: false,
+  includeUserOverlay: false,
+  executable: result.executable,
+  finalState: result.finalState,
+  cleanup: result.cleanup,
+};
+(passed ? process.stdout : process.stderr).write(`${JSON.stringify(report, null, 2)}\n`);
+process.exitCode = passed ? 0 : 1;
