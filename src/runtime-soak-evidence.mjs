@@ -8,17 +8,17 @@ import {
   verifyEvidenceDirectory,
 } from "./commercial-evidence.mjs";
 import { runRuntimeSoak } from "./runtime-soak-runner.mjs";
+import { resolveSoakGate } from "./soak-gate-policy.mjs";
 
 const execFileAsync = promisify(execFile);
-const PULL_REQUEST_DURATION_MS = 900_000;
 
 export function parseRuntimeSoakArgs(args, environment = process.env) {
   const values = {
     gate: environment.AGENT_COMPUTER_USE_SOAK_GATE ?? null,
-    durationMs: Number(environment.AGENT_COMPUTER_USE_SOAK_DURATION_MS ?? 60_000),
-    clientCount: Number(environment.AGENT_COMPUTER_USE_SOAK_CLIENTS ?? 2),
-    concurrency: Number(environment.AGENT_COMPUTER_USE_SOAK_CONCURRENCY ?? 2),
-    faultEveryRounds: Number(environment.AGENT_COMPUTER_USE_SOAK_FAULT_EVERY_ROUNDS ?? 20),
+    durationMs: optionalNumber(environment.AGENT_COMPUTER_USE_SOAK_DURATION_MS),
+    clientCount: optionalNumber(environment.AGENT_COMPUTER_USE_SOAK_CLIENTS),
+    concurrency: optionalNumber(environment.AGENT_COMPUTER_USE_SOAK_CONCURRENCY),
+    faultEveryRounds: optionalNumber(environment.AGENT_COMPUTER_USE_SOAK_FAULT_EVERY_ROUNDS),
     evidenceRoot: environment.AGENT_COMPUTER_USE_SOAK_EVIDENCE_ROOT ?? null,
     seed: Number(environment.AGENT_COMPUTER_USE_SOAK_SEED ?? 20260713),
   };
@@ -41,8 +41,9 @@ export function parseRuntimeSoakArgs(args, environment = process.env) {
 
 export function validateRuntimeSoakOptions(options = {}) {
   const gate = options.gate == null || options.gate === "" ? null : String(options.gate);
+  if (gate) return validateNamedGateOptions(gate, options);
   const values = {
-    gate,
+    gate: null,
     durationMs: positiveInteger(options.durationMs ?? 60_000, "runtime.soak_duration_invalid"),
     clientCount: positiveInteger(options.clientCount ?? 2, "runtime.soak_clients_invalid"),
     concurrency: positiveInteger(options.concurrency ?? 2, "runtime.soak_concurrency_invalid"),
@@ -51,13 +52,48 @@ export function validateRuntimeSoakOptions(options = {}) {
     seed: nonNegativeInteger(options.seed ?? 20260713, "runtime.soak_seed_invalid"),
     ...(options.runId ? { runId: String(options.runId) } : {}),
   };
-  if (gate && gate !== "pull-request") throw new Error(`runtime.soak_gate_unknown: ${gate}`);
-  if (gate === "pull-request" && values.durationMs !== PULL_REQUEST_DURATION_MS) {
-    throw new Error(`runtime.soak_duration_mismatch: expected ${PULL_REQUEST_DURATION_MS}`);
-  }
-  if (gate && !values.evidenceRoot) throw new Error("runtime.soak_evidence_root_required");
-  if (!gate && values.evidenceRoot) throw new Error("runtime.soak_gate_required_for_evidence");
+  if (values.evidenceRoot) throw new Error("runtime.soak_gate_required_for_evidence");
   return values;
+}
+
+function validateNamedGateOptions(gateName, options) {
+  const durationMs = positiveInteger(options.durationMs, "runtime.soak_duration_invalid");
+  const policy = resolveSoakGate(gateName, durationMs);
+  const evidenceRoot = options.evidenceRoot == null || options.evidenceRoot === ""
+    ? null
+    : String(options.evidenceRoot);
+  if (!evidenceRoot) throw new Error("runtime.soak_evidence_root_required");
+  assertGateParameter(options, "clientCount", policy.clientCount, positiveInteger, "runtime.soak_clients_invalid");
+  assertGateParameter(options, "concurrency", policy.concurrency, positiveInteger, "runtime.soak_concurrency_invalid");
+  assertGateParameter(options, "faultEveryRounds", policy.faultEveryRounds, nonNegativeInteger, "runtime.soak_fault_cadence_invalid");
+  assertGateParameter(options, "sampleIntervalMs", policy.sampleIntervalMs, positiveInteger, "runtime.soak_sample_interval_invalid");
+  assertGateParameter(options, "minimumCheckpointCount", policy.minimumCheckpointCount, positiveInteger, "runtime.soak_checkpoint_count_invalid");
+  for (const [name, expected] of Object.entries(policy.thresholds)) {
+    assertGateParameter(options, name, expected, nonNegativeNumber, `runtime.soak_${name}_invalid`);
+  }
+  return {
+    gate: policy.id,
+    durationMs: policy.durationMs,
+    evidenceRoot,
+    seed: nonNegativeInteger(options.seed ?? 20260713, "runtime.soak_seed_invalid"),
+    clientCount: policy.clientCount,
+    concurrency: policy.concurrency,
+    faultEveryRounds: policy.faultEveryRounds,
+    sampleIntervalMs: policy.sampleIntervalMs,
+    minimumCheckpointCount: policy.minimumCheckpointCount,
+    maxRssGrowthBytes: policy.thresholds.maxRssGrowthBytes,
+    maxHandleGrowth: policy.thresholds.maxHandleGrowth,
+    maxFailureRate: policy.thresholds.maxFailureRate,
+    ...(options.runId ? { runId: String(options.runId) } : {}),
+  };
+}
+
+function assertGateParameter(options, name, expected, normalize, errorCode) {
+  if (options[name] === undefined) return;
+  const actual = normalize(options[name], errorCode);
+  if (actual !== expected) {
+    throw new Error(`runtime.soak_gate_parameter_mismatch: ${name}`);
+  }
 }
 
 export async function executeRuntimeSoakPhase(rawOptions = {}, dependencies = {}) {
@@ -232,6 +268,16 @@ function nonNegativeInteger(value, code) {
   const number = Number(value);
   if (!Number.isSafeInteger(number) || number < 0) throw new TypeError(code);
   return number;
+}
+
+function nonNegativeNumber(value, code) {
+  const number = Number(value);
+  if (!Number.isFinite(number) || number < 0) throw new TypeError(code);
+  return number;
+}
+
+function optionalNumber(value) {
+  return value === undefined ? undefined : Number(value);
 }
 
 function sha256(value) {
