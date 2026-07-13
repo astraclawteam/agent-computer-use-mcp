@@ -1,9 +1,7 @@
-const LANGUAGE_CLASSES = new Set(["chinese", "english", "numeric", "mixed"]);
+import { normalizeRecognizedUiText } from "./ui-text-normalization.mjs";
 
 export function normalizeUiText(text, languageClass) {
-  if (!LANGUAGE_CLASSES.has(languageClass)) throw metricError("perception.metric_language_invalid");
-  if (typeof text !== "string") throw metricError("perception.metric_text_invalid");
-  return text.normalize("NFKC").replace(/\s+/gu, " ").trim();
+  return normalizeRecognizedUiText(text, { languageClass });
 }
 
 export function calculateOcrMetrics(samples) {
