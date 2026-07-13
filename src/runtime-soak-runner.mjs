@@ -147,6 +147,7 @@ export async function runRuntimeSoak(options = {}) {
     closeFailureCount,
     cleanupProbeAttempts,
     cleanupWaitMs: Math.max(0, wallClock() - cleanupStartedAt),
+    processClasses: classifyCleanupProcesses(cleanupProbe.processes, processRoots),
   }).catch(() => {
     cleanup.completed = false;
   });
@@ -335,6 +336,17 @@ function isProbeClean(probe) {
     && probe.listeningPorts.length === 0
     && probe.overlayProcessIds.length === 0
     && probe.cursorProcessIds.length === 0;
+}
+
+function classifyCleanupProcesses(processes, processRoots) {
+  const rootPids = new Set(processRoots.map((root) => root.pid));
+  const classes = { root: 0, consoleHost: 0, other: 0 };
+  for (const process of processes ?? []) {
+    if (rootPids.has(process.pid)) classes.root += 1;
+    else if (/^conhost(?:\.exe)?$/iu.test(String(process.name ?? ""))) classes.consoleHost += 1;
+    else classes.other += 1;
+  }
+  return classes;
 }
 
 function positiveInteger(value, name) {

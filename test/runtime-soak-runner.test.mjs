@@ -381,6 +381,56 @@ test("runtime soak waits for exact owned identities to exit before declaring cle
   assert.equal(report.status, "passed");
 });
 
+test("runtime soak emits privacy-safe cleanup process classes after timeout", async () => {
+  let now = 0;
+  const events = [];
+  const report = await runRuntimeSoak({
+    durationMs: 1,
+    clientCount: 1,
+    concurrency: 1,
+    faultEveryRounds: 0,
+    now: () => now,
+    wallClock: () => 50_000 + now,
+    sleep: async (ms) => { now += ms; },
+    cleanupDelayMs: 0,
+    cleanupTimeoutMs: 100,
+    cleanupPollIntervalMs: 100,
+    eventSink: { async append(type, payload) { events.push({ type, payload }); } },
+    createSession: async () => ({
+      pid: 101,
+      async callTool() {
+        now += 1;
+        return { isError: false, structuredContent: { includeUserOverlay: false } };
+      },
+      async fault() {},
+      async close() {},
+    }),
+    probeRuntime: async ({ rootPids = [], rootProcesses = [] }) => {
+      if (rootProcesses.length > 0) {
+        return {
+          ...runtimeProbe({ rssBytes: 200, handles: 20, processIds: [101, 102, 103] }),
+          processes: [
+            { pid: 101, name: "node.exe", startedAtMs: 1, rssBytes: 100, handles: 10 },
+            { pid: 102, name: "conhost.exe", startedAtMs: 2, rssBytes: 50, handles: 5 },
+            { pid: 103, name: "helper.exe", startedAtMs: 3, rssBytes: 50, handles: 5 },
+          ],
+        };
+      }
+      return runtimeProbe({ rssBytes: 100, handles: 10, processIds: rootPids });
+    },
+  });
+
+  const cleanup = events.find((event) => event.type === "runtime.cleanup.completed").payload;
+  assert.equal(report.status, "failed");
+  assert.deepEqual(cleanup.processClasses, {
+    root: 1,
+    consoleHost: 1,
+    other: 1,
+  });
+  assert.equal(JSON.stringify(cleanup).includes("node.exe"), false);
+  assert.equal(JSON.stringify(cleanup).includes("helper.exe"), false);
+});
+
 test("runtime soak is exposed through the standard health phase catalog", async () => {
   const { ComputerUseProviderRouter } = await import("../src/computer-use-provider-router.mjs");
   const health = await new ComputerUseProviderRouter().health({ fast: true });
