@@ -27,7 +27,9 @@ export function compareRuntimeEvidence(current, history = []) {
     const historicalValues = matching.map((entry) => metricNumber(readMetric(entry), name));
     const baseline = median(historicalValues);
     const changeRatio = baseline === null ? null : ratio(currentValue, baseline);
-    const regressed = changeRatio !== null && changeRatio >= REGRESSION_RATIO - Number.EPSILON;
+    const regressedFromZero = baseline === 0 && currentValue > 0;
+    const regressed = regressedFromZero
+      || (changeRatio !== null && changeRatio >= REGRESSION_RATIO - Number.EPSILON);
     metrics[name] = {
       current: currentValue,
       median: baseline,

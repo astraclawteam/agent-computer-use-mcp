@@ -173,6 +173,7 @@ function manifestFixture(options = {}) {
     sampleIntervalMs: options.sampleIntervalMs ?? 10_000,
     checkpointIntervalMs: options.checkpointIntervalMs ?? 600_000,
     minimumCheckpointCount: options.minimumCheckpointCount ?? 48,
+    retainCallDetails: false,
     startedAt: "2026-07-13T00:00:00.000Z",
     privacyPolicyVersion: 1,
   };

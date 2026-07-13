@@ -18,6 +18,7 @@ test("commercial soak gates freeze exact durations workloads thresholds and chec
   assert.equal(SOAK_GATES.nightly.clientCount, 4);
   assert.equal(SOAK_GATES.nightly.concurrency, 3);
   assert.equal(SOAK_GATES.nightly.faultEveryRounds, 100);
+  assert.equal(SOAK_GATES.nightly.retainCallDetails, false);
   assert.equal(SOAK_GATES.nightly.thresholds.maxRssGrowthBytes, 128 * 1024 * 1024);
   assert.equal(SOAK_GATES.nightly.thresholds.maxHandleGrowth, 128);
   assert.equal(SOAK_GATES.nightly.thresholds.maxFailureRate, 0.001);
@@ -66,6 +67,7 @@ test("named gates supply every immutable runner parameter when no override is pr
     sampleIntervalMs: 10_000,
     checkpointIntervalMs: 600_000,
     minimumCheckpointCount: 48,
+    retainCallDetails: false,
     maxRssGrowthBytes: 128 * 1024 * 1024,
     maxHandleGrowth: 128,
     maxFailureRate: 0.001,

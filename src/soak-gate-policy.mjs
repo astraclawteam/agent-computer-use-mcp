@@ -43,6 +43,7 @@ function gate(options) {
     ...options,
     sampleIntervalMs: 10_000,
     checkpointIntervalMs: 600_000,
+    retainCallDetails: false,
     thresholds: THRESHOLDS,
   });
 }

@@ -67,6 +67,9 @@ test("pull-request phase seals verified evidence bound to the candidate identity
   });
   assert.equal(verified.status, "passed");
   assert.equal(verified.report.durationMs, 900_001);
+  assert.equal(verified.report.calls, undefined);
+  assert.equal(verified.report.samples, undefined);
+  assert.deepEqual(verified.report.metrics, { cleanup: { completed: true } });
 });
 
 test("phase fails closed when the measured workload is shorter or the worktree is dirty", async () => {
@@ -139,6 +142,7 @@ function passingReport(durationMs) {
     phase: "8.0",
     benchmark: "runtime-soak",
     durationMs,
+    samples: [{ elapsedMs: 0, rssBytes: 1, handles: 1 }],
     calls: [{ tool: "computer.health", status: "passed", durationMs: 1 }],
     metrics: { cleanup: { completed: true } },
     violations: [],

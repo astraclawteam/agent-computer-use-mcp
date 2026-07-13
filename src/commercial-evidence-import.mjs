@@ -92,6 +92,7 @@ function validateGateManifest(manifest, gate) {
     sampleIntervalMs: gate.sampleIntervalMs,
     checkpointIntervalMs: gate.checkpointIntervalMs,
     minimumCheckpointCount: gate.minimumCheckpointCount,
+    retainCallDetails: gate.retainCallDetails,
   };
   if (Object.entries(expected).some(([name, value]) => manifest[name] !== value)) {
     throw new Error("commercial.evidence_gate_policy_invalid");

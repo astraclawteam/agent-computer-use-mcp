@@ -18,14 +18,13 @@ const FAILED_CALL_STATUSES = new Set([
 export function buildRuntimeMetrics(options = {}) {
   const samples = validateSamples(options.samples);
   const calls = validateCalls(options.calls ?? []);
+  const callSummary = options.callSummary === undefined
+    ? summarizeCalls(calls)
+    : validateCallSummary(options.callSummary);
+  const sortedDurations = [...callSummary.durations].sort((left, right) => left - right);
   const cleanup = validateCleanup(options.cleanup ?? {});
   const rssValues = samples.map((sample) => sample.rssBytes);
   const handleValues = samples.map((sample) => sample.handles);
-  const failedCalls = calls.filter((call) => call.failed === true || FAILED_CALL_STATUSES.has(call.status)).length;
-  const durations = calls.map((call) => call.durationMs);
-  const policyNotFailClosedCount = calls.filter(
-    (call) => call.kind === "policy-error" && call.failClosed !== true,
-  ).length;
 
   return {
     schemaVersion: 1,
@@ -33,19 +32,52 @@ export function buildRuntimeMetrics(options = {}) {
     rss: buildResourceSeries(samples, rssValues, "Bytes"),
     handles: buildResourceSeries(samples, handleValues, ""),
     calls: {
-      total: calls.length,
-      passed: calls.length - failedCalls,
-      failed: failedCalls,
-      failureRate: calls.length === 0 ? 0 : failedCalls / calls.length,
-      policyNotFailClosedCount,
+      total: callSummary.total,
+      passed: callSummary.total - callSummary.failed,
+      failed: callSummary.failed,
+      failureRate: callSummary.total === 0 ? 0 : callSummary.failed / callSummary.total,
+      policyNotFailClosedCount: callSummary.policyNotFailClosedCount,
       latencyMs: {
-        p50: percentile(durations, 0.5),
-        p95: percentile(durations, 0.95),
-        p99: percentile(durations, 0.99),
-        maximum: durations.length === 0 ? 0 : Math.max(...durations),
+        p50: percentile(sortedDurations, 0.5),
+        p95: percentile(sortedDurations, 0.95),
+        p99: percentile(sortedDurations, 0.99),
+        maximum: sortedDurations.at(-1) ?? 0,
       },
     },
     cleanup,
+  };
+}
+
+function summarizeCalls(calls) {
+  return {
+    total: calls.length,
+    failed: calls.filter((call) => call.failed === true || FAILED_CALL_STATUSES.has(call.status)).length,
+    policyNotFailClosedCount: calls.filter(
+      (call) => call.kind === "policy-error" && call.failClosed !== true,
+    ).length,
+    durations: calls.map((call) => call.durationMs),
+  };
+}
+
+function validateCallSummary(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new TypeError("runtime.call_summary_invalid");
+  }
+  const total = nonNegativeInteger(value.total, "runtime.call_summary_total_invalid");
+  const failed = nonNegativeInteger(value.failed, "runtime.call_summary_failed_invalid");
+  const policyNotFailClosedCount = nonNegativeInteger(
+    value.policyNotFailClosedCount,
+    "runtime.call_summary_policy_invalid",
+  );
+  if (failed > total || policyNotFailClosedCount > total || !Array.isArray(value.durations)
+      || value.durations.length !== total) {
+    throw new TypeError("runtime.call_summary_invalid");
+  }
+  return {
+    total,
+    failed,
+    policyNotFailClosedCount,
+    durations: value.durations.map((duration) => nonNegativeNumber(duration, "runtime.call_summary_duration_invalid")),
   };
 }
 
@@ -124,9 +156,8 @@ function leastSquaresSlopePerHour(samples, values) {
 
 function percentile(values, ratio) {
   if (values.length === 0) return 0;
-  const sorted = [...values].sort((left, right) => left - right);
-  const index = Math.min(sorted.length - 1, Math.ceil(sorted.length * ratio) - 1);
-  return sorted[index];
+  const index = Math.min(values.length - 1, Math.ceil(values.length * ratio) - 1);
+  return values[index];
 }
 
 function validateSamples(samples) {

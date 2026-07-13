@@ -69,6 +69,9 @@ function validateNamedGateOptions(gateName, options) {
   assertGateParameter(options, "sampleIntervalMs", policy.sampleIntervalMs, positiveInteger, "runtime.soak_sample_interval_invalid");
   assertGateParameter(options, "checkpointIntervalMs", policy.checkpointIntervalMs, positiveInteger, "runtime.soak_checkpoint_interval_invalid");
   assertGateParameter(options, "minimumCheckpointCount", policy.minimumCheckpointCount, positiveInteger, "runtime.soak_checkpoint_count_invalid");
+  if (options.retainCallDetails !== undefined && options.retainCallDetails !== policy.retainCallDetails) {
+    throw new Error("runtime.soak_gate_parameter_mismatch: retainCallDetails");
+  }
   for (const [name, expected] of Object.entries(policy.thresholds)) {
     assertGateParameter(options, name, expected, nonNegativeNumber, `runtime.soak_${name}_invalid`);
   }
@@ -83,6 +86,7 @@ function validateNamedGateOptions(gateName, options) {
     sampleIntervalMs: policy.sampleIntervalMs,
     checkpointIntervalMs: policy.checkpointIntervalMs,
     minimumCheckpointCount: policy.minimumCheckpointCount,
+    retainCallDetails: policy.retainCallDetails,
     maxRssGrowthBytes: policy.thresholds.maxRssGrowthBytes,
     maxHandleGrowth: policy.thresholds.maxHandleGrowth,
     maxFailureRate: policy.thresholds.maxFailureRate,
@@ -128,6 +132,7 @@ export async function executeRuntimeSoakPhase(rawOptions = {}, dependencies = {}
     sampleIntervalMs: options.sampleIntervalMs,
     checkpointIntervalMs: options.checkpointIntervalMs,
     minimumCheckpointCount: options.minimumCheckpointCount,
+    retainCallDetails: options.retainCallDetails,
     startedAt,
     privacyPolicyVersion: 1,
   };
@@ -163,7 +168,7 @@ export async function executeRuntimeSoakPhase(rawOptions = {}, dependencies = {}
     });
   }
   const sealedReport = {
-    ...report,
+    ...compactCommercialReport(report),
     status: report.status === "passed" && violations.length === 0 ? "passed" : "failed",
     gate: options.gate,
     requestedDurationMs: options.durationMs,
@@ -180,6 +185,11 @@ export async function executeRuntimeSoakPhase(rawOptions = {}, dependencies = {}
     ...sealedReport,
     evidence: { runId, verified: true },
   };
+}
+
+function compactCommercialReport(report) {
+  const { calls: _calls, samples: _samples, ...summary } = report;
+  return summary;
 }
 
 function createCheckpointingEventSink(evidence, options) {

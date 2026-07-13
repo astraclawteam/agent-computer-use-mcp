@@ -127,6 +127,12 @@ test("verification checks the expected candidate identity", async () => {
   assert.ok(verification.violations.some((item) => item.code === "evidence.identity_mismatch"));
 });
 
+test("verification streams JSONL events instead of retaining the complete long-run log", async () => {
+  const source = await readFile("src/commercial-evidence.mjs", "utf8");
+  assert.match(source, /createInterface/u);
+  assert.doesNotMatch(source, /readFile\(join\(runPath, "events\.jsonl"\)/u);
+});
+
 function validManifest() {
   return {
     schemaVersion: 1,

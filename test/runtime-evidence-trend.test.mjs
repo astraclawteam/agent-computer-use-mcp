@@ -91,6 +91,18 @@ test("runtime trend accepts negative RSS slopes and treats movement toward growt
   assert.equal(result.metrics.rssSlopeBytesPerHour.regressed, true);
 });
 
+test("runtime trend warns when a metric regresses from a zero baseline", () => {
+  const result = compareRuntimeEvidence(
+    evidence({ failureRate: 0.0001 }),
+    [evidence({ failureRate: 0 })],
+  );
+
+  assert.equal(result.metrics.failureRate.median, 0);
+  assert.equal(result.metrics.failureRate.changeRatio, null);
+  assert.equal(result.metrics.failureRate.regressed, true);
+  assert.ok(result.warnings.some((warning) => warning.metric === "failureRate"));
+});
+
 function evidence(options = {}) {
   const durationMs = options.durationMs ?? 7_200_000;
   return {

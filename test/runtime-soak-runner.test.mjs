@@ -431,6 +431,37 @@ test("runtime soak emits privacy-safe cleanup process classes after timeout", as
   assert.equal(JSON.stringify(cleanup).includes("helper.exe"), false);
 });
 
+test("commercial soak can discard call detail objects while retaining exact metrics", async () => {
+  let now = 0;
+  const report = await runRuntimeSoak({
+    durationMs: 2,
+    clientCount: 1,
+    concurrency: 1,
+    faultEveryRounds: 0,
+    retainCallDetails: false,
+    now: () => now,
+    sleep: async () => {},
+    cleanupDelayMs: 0,
+    createSession: async () => ({
+      pid: 111,
+      async callTool() {
+        now += 1;
+        return { isError: false, structuredContent: { includeUserOverlay: false } };
+      },
+      async fault() {},
+      async close() {},
+    }),
+    probeRuntime: async () => runtimeProbe({ rssBytes: 100, handles: 10, processIds: [] }),
+  });
+
+  assert.deepEqual(report.calls, []);
+  assert.equal(report.metrics.calls.total, 2);
+  assert.equal(report.metrics.calls.passed, 2);
+  assert.equal(report.metrics.calls.failed, 0);
+  assert.equal(report.status, "passed");
+  assert.equal(report.violations.some((violation) => violation.code === "runtime.no_calls"), false);
+});
+
 test("runtime soak is exposed through the standard health phase catalog", async () => {
   const { ComputerUseProviderRouter } = await import("../src/computer-use-provider-router.mjs");
   const health = await new ComputerUseProviderRouter().health({ fast: true });

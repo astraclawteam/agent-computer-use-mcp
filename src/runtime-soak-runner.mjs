@@ -26,6 +26,7 @@ export async function runRuntimeSoak(options = {}) {
   const cleanupDelayMs = nonNegativeInteger(options.cleanupDelayMs ?? 0, "cleanupDelayMs");
   const cleanupTimeoutMs = positiveInteger(options.cleanupTimeoutMs ?? 10_000, "cleanupTimeoutMs");
   const cleanupPollIntervalMs = positiveInteger(options.cleanupPollIntervalMs ?? 100, "cleanupPollIntervalMs");
+  const retainCallDetails = booleanValue(options.retainCallDetails ?? true, "retainCallDetails");
   const now = options.now ?? (() => performance.now());
   const wallClock = options.wallClock ?? Date.now;
   const sleep = options.sleep ?? ((ms) => new Promise((resolvePromise) => setTimeout(resolvePromise, ms)));
@@ -38,6 +39,12 @@ export async function runRuntimeSoak(options = {}) {
   const observedProcesses = new Map();
   const samples = [];
   const calls = [];
+  const callSummary = {
+    total: 0,
+    failed: 0,
+    policyNotFailClosedCount: 0,
+    durations: [],
+  };
   const operationalViolations = [];
   let reconnectCount = 0;
   let inFlight = 0;
@@ -152,7 +159,7 @@ export async function runRuntimeSoak(options = {}) {
     cleanup.completed = false;
   });
 
-  const metrics = buildRuntimeMetrics({ samples, calls, cleanup });
+  const metrics = buildRuntimeMetrics({ samples, calls, callSummary, cleanup });
   const violations = [
     ...operationalViolations,
     ...evaluateRuntimeTargets(metrics, {
@@ -167,7 +174,7 @@ export async function runRuntimeSoak(options = {}) {
   if (desktopControlStartCount > 0) {
     violations.push({ code: "runtime.unexpected_desktop_control", actual: desktopControlStartCount, maximum: 0 });
   }
-  if (calls.length === 0) violations.push({ code: "runtime.no_calls" });
+  if (metrics.calls.total === 0) violations.push({ code: "runtime.no_calls" });
 
   return {
     schemaVersion: 2,
@@ -226,7 +233,11 @@ export async function runRuntimeSoak(options = {}) {
       ...(policyError ? { kind: "policy-error", failClosed: true } : {}),
       ...(errorCode ? { errorCode } : {}),
     };
-    calls.push(call);
+    callSummary.total += 1;
+    callSummary.durations.push(call.durationMs);
+    if (status === "product-failure") callSummary.failed += 1;
+    if (call.kind === "policy-error" && call.failClosed !== true) callSummary.policyNotFailClosedCount += 1;
+    if (retainCallDetails) calls.push(call);
     await emit("runtime.call", call);
   }
 
@@ -356,6 +367,11 @@ function positiveInteger(value, name) {
 
 function nonNegativeInteger(value, name) {
   if (!Number.isSafeInteger(value) || value < 0) throw new TypeError(`${name} must be a non-negative integer`);
+  return value;
+}
+
+function booleanValue(value, name) {
+  if (typeof value !== "boolean") throw new TypeError(`${name} must be a boolean`);
   return value;
 }
 
