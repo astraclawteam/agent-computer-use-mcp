@@ -30,7 +30,7 @@ export async function runRuntimeSoak(options = {}) {
   const probeRuntime = options.probeRuntime ?? probeOwnedRuntime;
   const isProcessAlive = options.isProcessAlive ?? defaultIsProcessAlive;
   const emit = createEventEmitter(options.eventSink);
-  const startedAt = now();
+  const lifecycleStartedAt = now();
   const sessions = [];
   const allPids = new Set();
   const samples = [];
@@ -43,6 +43,8 @@ export async function runRuntimeSoak(options = {}) {
   let nextSampleAt = 0;
   let observationOverlayLeakCount = 0;
   let desktopControlStartCount = 0;
+  let workloadStartedAt = null;
+  let workloadEndedAt = null;
 
   await emit("runtime.soak.started", {
     durationMs,
@@ -59,14 +61,16 @@ export async function runRuntimeSoak(options = {}) {
       if (session.pid) allPids.add(session.pid);
       await emit("runtime.session.started", { clientIndex: index, pid: session.pid ?? null, reconnect: false });
     }
-    await takeSample("initial", true);
+    await takeSample("initial", true, 0);
+    workloadStartedAt = now();
+    nextSampleAt = sampleIntervalMs;
 
-    while (now() - startedAt < durationMs) {
+    while (now() - workloadStartedAt < durationMs) {
       await Promise.all(sessions.flatMap((session, clientIndex) => (
         Array.from({ length: concurrency }, (_, workerIndex) => runCall({ session, clientIndex, workerIndex }))
       )));
       round += 1;
-      if (faultEveryRounds > 0 && round % faultEveryRounds === 0 && now() - startedAt < durationMs) {
+      if (faultEveryRounds > 0 && round % faultEveryRounds === 0 && now() - workloadStartedAt < durationMs) {
         const index = reconnectCount % sessions.length;
         const previous = sessions[index];
         await previous.fault();
@@ -78,20 +82,25 @@ export async function runRuntimeSoak(options = {}) {
         await emit("runtime.session.started", { clientIndex: index, pid: replacement.pid ?? null, reconnect: true });
       }
       await takeSample("interval", false);
-      const remaining = durationMs - (now() - startedAt);
+      const remaining = durationMs - (now() - workloadStartedAt);
       if (remaining > 0) await sleep(Math.min(10, Math.max(1, remaining)));
     }
-    await takeSample("final", true);
+    workloadEndedAt = now();
+    await takeSample("final", true, Math.max(0, workloadEndedAt - workloadStartedAt));
   } catch (error) {
+    workloadStartedAt ??= now();
+    workloadEndedAt = now();
     operationalViolations.push({ code: "runtime.operational_error", message: safeErrorCode(error) });
     await emit("runtime.soak.error", { code: safeErrorCode(error) }).catch(() => {});
     if (samples.length === 0) await takeSample("error", true).catch(() => {});
   }
 
   if (samples.length === 0) {
-    samples.push({ elapsedMs: Math.max(0, now() - startedAt), rssBytes: 0, handles: 0 });
+    samples.push({ elapsedMs: 0, rssBytes: 0, handles: 0 });
   }
-  const measuredDurationMs = Math.max(0, now() - startedAt);
+  workloadStartedAt ??= lifecycleStartedAt;
+  workloadEndedAt ??= now();
+  const measuredDurationMs = Math.max(0, workloadEndedAt - workloadStartedAt);
 
   const closeResults = await Promise.allSettled(sessions.map((session) => session.close()));
   const closeFailureCount = closeResults.filter((result) => result.status === "rejected").length;
@@ -134,6 +143,7 @@ export async function runRuntimeSoak(options = {}) {
   if (desktopControlStartCount > 0) {
     violations.push({ code: "runtime.unexpected_desktop_control", actual: desktopControlStartCount, maximum: 0 });
   }
+  if (calls.length === 0) violations.push({ code: "runtime.no_calls" });
 
   return {
     schemaVersion: 2,
@@ -196,8 +206,8 @@ export async function runRuntimeSoak(options = {}) {
     await emit("runtime.call", call);
   }
 
-  async function takeSample(reason, force) {
-    const elapsedMs = Math.max(0, now() - startedAt);
+  async function takeSample(reason, force, elapsedOverride = undefined) {
+    const elapsedMs = elapsedOverride ?? Math.max(0, now() - (workloadStartedAt ?? now()));
     if (!force && elapsedMs < nextSampleAt) return;
     const probe = await probeRuntime({ rootPids: [...allPids] });
     const sample = {

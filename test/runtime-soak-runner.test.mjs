@@ -175,6 +175,35 @@ test("runtime soak duration excludes cleanup delay and cleanup probe time", asyn
   assert.equal(report.durationMs, 1);
 });
 
+test("runtime soak duration starts after sessions and the baseline probe are ready", async () => {
+  let now = 0;
+  const report = await runRuntimeSoak({
+    durationMs: 2,
+    clientCount: 1,
+    concurrency: 1,
+    faultEveryRounds: 0,
+    now: () => now,
+    sleep: async () => {},
+    cleanupDelayMs: 0,
+    createSession: async () => {
+      now += 100;
+      return {
+        pid: 15,
+        async callTool() { now += 1; return { isError: false, structuredContent: { includeUserOverlay: false } }; },
+        async close() {},
+        async fault() {},
+      };
+    },
+    probeRuntime: async () => {
+      now += 50;
+      return runtimeProbe({ rssBytes: 1, handles: 1, processIds: [] });
+    },
+    isProcessAlive: async () => false,
+  });
+  assert.equal(report.calls.length, 2);
+  assert.ok(report.durationMs >= 2);
+});
+
 test("runtime soak is exposed through the standard health phase catalog", async () => {
   const { ComputerUseProviderRouter } = await import("../src/computer-use-provider-router.mjs");
   const health = await new ComputerUseProviderRouter().health({ fast: true });
