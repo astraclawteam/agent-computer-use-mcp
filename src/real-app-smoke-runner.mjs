@@ -3,7 +3,20 @@ import { spawn } from "node:child_process";
 import { readFile, stat } from "node:fs/promises";
 import { basename, resolve } from "node:path";
 
+import { REAL_APP_RESULT_STATUSES, parseRealAppCatalog } from "./real-app-catalog.mjs";
+
+const TRANSIENT_REASONS = new Set([
+  "app.smoke_timeout",
+  "driver.transport_interrupted",
+  "window.transient_unavailable",
+]);
+
 export async function runRealAppSmokeCatalog(options = {}) {
+  if (options.catalog?.schemaVersion === 2) return runSchemaV2Catalog(options);
+  return runLegacyCatalog(options);
+}
+
+async function runLegacyCatalog(options = {}) {
   const catalog = options.catalog ?? [];
   const resolveExecutable = options.resolveExecutable ?? defaultResolveExecutable;
   const execute = options.execute ?? executeSmoke;
@@ -89,6 +102,103 @@ export async function runRealAppSmokeCatalog(options = {}) {
     violations,
     includeUserOverlay: false,
   };
+}
+
+async function runSchemaV2Catalog(options) {
+  const catalog = parseRealAppCatalog(options.catalog);
+  const filters = normalizeFilters(options.filters);
+  const entries = catalog.apps.filter((entry) => matchesFilters(entry, filters));
+  const executeAdapter = options.executeAdapter;
+  if (typeof executeAdapter !== "function") throw new Error("app.adapter_executor_required");
+  const overlay = options.startOverlay ? await options.startOverlay() : null;
+  const results = [];
+  try {
+    for (const entry of entries) {
+      const attempts = [];
+      let attempt = await executeAdapter(entry, { attemptNumber: 1, targetRectFile: overlay?.targetRectFile });
+      attempts.push(sanitizeAttempt(attempt, 1));
+      if (isTransient(attempt)) {
+        attempt = await executeAdapter(entry, { attemptNumber: 2, targetRectFile: overlay?.targetRectFile });
+        attempts.push(sanitizeAttempt(attempt, 2));
+      }
+      const finalAttempt = attempts.at(-1);
+      const repeatedTransient = attempts.length === 2 && attempts.every((item) => isTransient(item));
+      const result = Object.freeze({
+        appId: entry.appId,
+        appName: entry.appName,
+        category: entry.category,
+        role: entry.role,
+        expectedStatus: entry.expectedStatus,
+        status: repeatedTransient ? "product-failure" : finalAttempt.status,
+        reason: repeatedTransient ? "app.repeated_transient_failure" : finalAttempt.reason,
+        attempts: Object.freeze(attempts),
+      });
+      results.push(result);
+      await options.evidenceRun?.append("application.attempts-completed", {
+        appId: entry.appId,
+        role: entry.role,
+        status: result.status,
+        attemptCount: attempts.length,
+      });
+    }
+  } finally {
+    await overlay?.stop?.();
+  }
+
+  const counts = Object.fromEntries(REAL_APP_RESULT_STATUSES.map((status) => [
+    status,
+    results.filter((result) => result.status === status).length,
+  ]));
+  const fullMatrix = filters.roles.length === 0 && filters.appIds.length === 0;
+  const report = Object.freeze({
+    schemaVersion: 2,
+    phase: "6.2",
+    benchmark: "real-app-perception-smoke",
+    status: results.every((result) => result.status === result.expectedStatus) ? "passed" : "failed",
+    fullMatrix,
+    filters,
+    selectedCount: entries.length,
+    catalogCount: catalog.apps.length,
+    counts,
+    results: Object.freeze(results),
+    includeUserOverlay: false,
+  });
+  await options.evidenceRun?.seal(report);
+  return report;
+}
+
+function normalizeFilters(value = {}) {
+  const roles = [...new Set(value.roles ?? [])].sort();
+  const appIds = [...new Set(value.appIds ?? [])].sort();
+  return Object.freeze({ roles: Object.freeze(roles), appIds: Object.freeze(appIds) });
+}
+
+function matchesFilters(entry, filters) {
+  return (filters.roles.length === 0 || filters.roles.includes(entry.role))
+    && (filters.appIds.length === 0 || filters.appIds.includes(entry.appId));
+}
+
+function sanitizeAttempt(attempt, attemptNumber) {
+  const status = REAL_APP_RESULT_STATUSES.includes(attempt?.status) ? attempt.status : "product-failure";
+  return Object.freeze({
+    attemptNumber,
+    status,
+    reason: typeof attempt?.reason === "string" ? attempt.reason : null,
+    cleanup: attempt?.cleanup?.status === "passed"
+      ? Object.freeze({ status: "passed" })
+      : Object.freeze({ status: "failed", reason: attempt?.cleanup?.reason ?? "app.cleanup_failed" }),
+    ...(attempt?.finalState ? { finalState: Object.freeze({ ...attempt.finalState }) } : {}),
+    ...(attempt?.executable ? { executable: Object.freeze({
+      fileName: attempt.executable.fileName,
+      version: attempt.executable.version,
+      sizeBytes: attempt.executable.sizeBytes,
+      sha256: attempt.executable.sha256,
+    }) } : {}),
+  });
+}
+
+function isTransient(attempt) {
+  return attempt?.status === "infrastructure-error" && TRANSIENT_REASONS.has(attempt.reason);
 }
 
 async function defaultResolveExecutable(entry) {

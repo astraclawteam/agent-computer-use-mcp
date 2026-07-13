@@ -33,39 +33,19 @@ test("Phase 6.0 app smoke matrix is an executable release artifact", async () =>
   assert.equal(report.status, "passed");
   assert.equal(report.phase, "6.0");
   assert.equal(report.benchmark, "app-smoke-matrix-contract");
-  assert.equal(report.matrixPath, "docs/productization/app-smoke-matrix.md");
+  assert.equal(report.matrixPath, "docs/productization/real-app-smoke-catalog.json");
   assert.equal(report.includeUserOverlay, false);
   assert.ok(report.rowCount >= 15);
-  assert.equal(report.invalidRows.length, 0);
-  for (const category of REQUIRED_CATEGORIES) {
-    assert.equal(report.coverage.requiredCategories[category], true, `${category} must be covered`);
-  }
-  for (const status of ALLOWED_STATUS) {
-    assert.equal(typeof report.statusCounts[status], "number", `${status} must be counted`);
-  }
+  assert.ok(report.roleCounts["required-fixture"] >= 10);
+  assert.ok(report.roleCounts["installed-evidence"] >= 8);
+  assert.ok(report.roleCounts["policy-only"] >= 2);
 });
 
-test("app smoke matrix rows use productized status and capability vocabularies", async () => {
-  const { parseAppSmokeMatrix } = await import("../src/app-smoke-matrix.mjs");
-  const matrix = parseAppSmokeMatrix(readFileSync("docs/productization/app-smoke-matrix.md", "utf8"));
-  assert.ok(matrix.rows.length >= 15);
-  assert.equal(matrix.rows.some((row) => row.status === "pending"), false);
-
-  const categories = new Set(matrix.rows.map((row) => row.category));
-  for (const category of REQUIRED_CATEGORIES) {
-    assert.equal(categories.has(category), true, `${category} must be represented`);
-  }
-  for (const row of matrix.rows) {
-    assert.ok(ALLOWED_STATUS.includes(row.status), `${row.appId} has invalid status ${row.status}`);
-    assert.ok(row.capabilitySources.length > 0, `${row.appId} must declare capability sources`);
-    for (const source of row.capabilitySources) {
-      assert.ok(ALLOWED_SOURCES.includes(source), `${row.appId} has invalid source ${source}`);
-    }
-    assert.equal(row.includeUserOverlay, false);
-    if (row.status === "insufficient") {
-      assert.match(row.notes, /observation\.insufficient|unsafe|provider/i);
-    }
-  }
+test("app smoke catalog uses explicit productized roles", async () => {
+  const { parseRealAppCatalog } = await import("../src/real-app-catalog.mjs");
+  const catalog = parseRealAppCatalog(JSON.parse(readFileSync("docs/productization/real-app-smoke-catalog.json", "utf8")));
+  assert.ok(catalog.apps.length >= 20);
+  assert.equal(catalog.apps.some((app) => Object.hasOwn(app, "required")), false);
 });
 
 function runNode(args) {

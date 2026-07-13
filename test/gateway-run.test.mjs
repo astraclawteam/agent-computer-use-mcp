@@ -15,15 +15,17 @@ test("Gateway run script starts desktop overlay before real CUA and always stops
 });
 
 test("WinForms real sequence declares cua-driver session and enables cursor rendering", async () => {
-  const script = await readFile(new URL("../src/real-cua-winforms-file-sequence.mjs", import.meta.url), "utf8");
+  const entrypoint = await readFile(new URL("../src/real-cua-winforms-file-sequence.mjs", import.meta.url), "utf8");
+  const script = await readFile(new URL("../src/app-adapters/native-fixture.mjs", import.meta.url), "utf8");
 
-  assert.match(script, /callTool\("start_session"/);
+  assert.match(entrypoint, /createNativeFixtureAdapter/u);
+  assert.match(script, /startDriverSession/u);
   assert.match(script, /callTool\("set_agent_cursor_enabled"/);
   assert.match(script, /callTool\("set_agent_cursor_style"/);
-  assert.match(script, /callTool\("end_session"/);
+  assert.match(script, /enabled: false/u);
+  assert.match(script, /stopDriverSession/u);
   assert.match(script, /publishOverlayTargetRect/);
-  assert.match(script, /window\.bounds/);
-  assert.match(script, /windowId:\s*window\.window_id/);
+  assert.match(script, /overlayTargetRectFile/u);
 });
 
 test("Desktop gateway overlay freezes the layered native rendering contract", async () => {

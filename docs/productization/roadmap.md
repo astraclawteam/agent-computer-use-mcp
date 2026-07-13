@@ -1,5 +1,14 @@
 # Productization Roadmap
 
+## PR7A Evidence Status
+
+The schema-v2 real application runner, adapter lifecycle, privacy-only policy
+boundary, sealed evidence output, and evidence-only matrix renderer are
+implemented. Commercial application coverage remains blocked until the
+hash-locked fixture pack is published and a full app-lab run produces verified
+evidence. Local development failures remain visible and are not release pass
+claims.
+
 ## Complete
 
 - Standard MCP server/client package and strict tool schemas.

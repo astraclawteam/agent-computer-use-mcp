@@ -1,0 +1,43 @@
+{
+  "schemaVersion": 1,
+  "packId": "agent-computer-use-app-fixtures",
+  "version": "0.0.0-unpublished",
+  "platform": "win32-x64",
+  "fixtures": [
+    {
+      "id": "fixture-wpf",
+      "category": "wpf",
+      "identityStatus": "pending",
+      "executable": { "target": "wpf/AgentComputerUseWpfFixture.exe", "sizeBytes": null, "sha256": null },
+      "license": { "target": "wpf/LICENSE.txt", "sizeBytes": null, "sha256": null, "spdx": "MIT" }
+    },
+    {
+      "id": "fixture-qt",
+      "category": "qt",
+      "identityStatus": "pending",
+      "executable": { "target": "qt/AgentComputerUseQtFixture.exe", "sizeBytes": null, "sha256": null },
+      "license": { "target": "qt/LICENSE.txt", "sizeBytes": null, "sha256": null, "spdx": "MIT" }
+    },
+    {
+      "id": "fixture-skia-imgui",
+      "category": "skia-imgui",
+      "identityStatus": "pending",
+      "executable": { "target": "skia-imgui/AgentComputerUseVisualFixture.exe", "sizeBytes": null, "sha256": null },
+      "license": { "target": "skia-imgui/LICENSE.txt", "sizeBytes": null, "sha256": null, "spdx": "MIT" }
+    },
+    {
+      "id": "fixture-cad-like",
+      "category": "cad-like",
+      "identityStatus": "pending",
+      "executable": { "target": "cad-like/AgentComputerUseCadFixture.exe", "sizeBytes": null, "sha256": null },
+      "license": { "target": "cad-like/LICENSE.txt", "sizeBytes": null, "sha256": null, "spdx": "MIT" }
+    },
+    {
+      "id": "fixture-timeline",
+      "category": "timeline",
+      "identityStatus": "pending",
+      "executable": { "target": "timeline/AgentComputerUseTimelineFixture.exe", "sizeBytes": null, "sha256": null },
+      "license": { "target": "timeline/LICENSE.txt", "sizeBytes": null, "sha256": null, "spdx": "MIT" }
+    }
+  ]
+}
