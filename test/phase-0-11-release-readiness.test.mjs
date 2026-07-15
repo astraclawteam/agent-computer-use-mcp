@@ -90,6 +90,14 @@ test("stable 1.x readiness requires matching verified Commercial 1.0 evidence", 
   assert.equal(passed.releaseGate, "stable-commercial");
   assert.equal(passed.commercialEligible, true);
   assert.ok(passed.evidence.some((entry) => entry.id === "commercial-promotion-evidence" && entry.required === true));
+  assert.ok(passed.evidence.some((entry) => entry.id === "agent-e2e-qualification-evidence" && entry.required === true));
+
+  const legacy = promotionEvidence();
+  delete legacy.agentE2eEligible;
+  const legacyGate = buildReleaseReadinessGate({ packageJson, commercialPromotion: legacy });
+  assert.equal(legacyGate.status, "failed");
+  assert.equal(legacyGate.commercialEligible, false);
+  assert.equal(legacyGate.violations.some((entry) => entry.code === "commercial-evidence-required"), true);
 });
 
 test("release readiness validation fails closed when a required script or invariant is missing", async () => {
@@ -160,6 +168,7 @@ function promotionEvidence(overrides = {}) {
     phase: "9.0",
     benchmark: "commercial-promotion-evidence",
     eligible: true,
+    agentE2eEligible: true,
     releaseTag: "v1.0.0",
     candidateIdentity: {
       gitCommit: "1".repeat(40),

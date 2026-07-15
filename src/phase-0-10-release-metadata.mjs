@@ -25,8 +25,6 @@ process.stdout.write(`${JSON.stringify({
   packageName: metadata.packageName,
   packageVersion: metadata.packageVersion,
   releaseTag: metadata.releaseTag,
-  commercialRequired: metadata.commercialRequired,
-  commercialEligible: metadata.commercialEligible,
   changelogEntryPresent: validation.changelogEntryPresent,
   artifactCount: validation.artifactCount,
   violations: validation.violations,

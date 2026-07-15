@@ -28,8 +28,7 @@ const diagnosticPlan = scheduleOcrRegion({
 const passed = dirtyRegionPlan.status === "scheduled"
   && dirtyRegionPlan.strategy === "dirty-region-ocr"
   && dirtyRegionPlan.fullWindowOcr === false
-  && dirtyRegionPlan.cache.key === null
-  && dirtyRegionPlan.cache.contentAddressed === true
+  && Boolean(dirtyRegionPlan.cache.key)
   && noDirtyRegionPlan.status === "skipped"
   && noDirtyRegionPlan.reason === "full-window-ocr-disabled-in-action-loop"
   && diagnosticPlan.fullWindowOcr === true

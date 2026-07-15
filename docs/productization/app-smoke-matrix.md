@@ -1,5 +1,11 @@
 # Real Application Smoke Matrix
 
+> Phase 6.2 is application harness evidence, not Agent E2E qualification.
+> Its scripted adapters may validate fixture, policy, lifecycle, and verifier
+> contracts, but they do not prove autonomous Agent observation or decisions.
+> Every installed application remains `unqualified` until matching sealed
+> Phase 10 Agent E2E evidence exists.
+
 This file is generated only by `scripts/render-app-smoke-matrix.mjs` from a
 sealed, independently verified, full-matrix evidence directory. Filtered,
 tampered, or incomplete runs cannot update it. Until the app-lab publishes that

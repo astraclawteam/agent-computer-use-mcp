@@ -124,7 +124,10 @@ export function buildReleaseMetadata(options = {}) {
       required: true,
     },
   ];
-  if (commercialRequired) artifacts.push({ name: "commercial-promotion-evidence", command: "npm run phase:9.0", required: true });
+  if (commercialRequired) {
+    artifacts.push({ name: "agent-e2e-qualification-evidence", command: "npm run phase:10.4", required: true });
+    artifacts.push({ name: "commercial-promotion-evidence", command: "npm run phase:9.0", required: true });
+  }
   return {
     phase: "0.10",
     packageName: packageJson.name,
@@ -136,6 +139,7 @@ export function buildReleaseMetadata(options = {}) {
     commercialPromotion: commercialEligible ? {
       releaseTag: options.commercialPromotion.releaseTag,
       candidateIdentity: options.commercialPromotion.candidateIdentity,
+      agentE2eEligible: options.commercialPromotion.agentE2eEligible,
     } : null,
     publicContract: versionPolicy.publicContract,
     upgradeStrategy: versionPolicy.upgradeStrategy,
@@ -189,6 +193,7 @@ export function validateReleaseMetadata(metadata, options = {}) {
     });
   }
   if (isStableVersion(packageJson.version) && (metadata.commercialRequired !== true || metadata.commercialEligible !== true
+    || metadata.commercialPromotion?.agentE2eEligible !== true
     || metadata.commercialPromotion?.releaseTag !== `v${packageJson.version}`
     || !matchesCommercialCandidateIdentity(metadata.commercialPromotion?.candidateIdentity, packageJson))) {
     violations.push({ code: "commercial-evidence-required" });
@@ -206,7 +211,7 @@ export function validateReleaseMetadata(metadata, options = {}) {
 }
 
 function commercialEvidenceMatches(report, packageJson) {
-  return report?.status === "passed" && report?.eligible === true && report?.phase === "9.0"
+  return report?.status === "passed" && report?.eligible === true && report?.agentE2eEligible === true && report?.phase === "9.0"
     && report?.benchmark === "commercial-promotion-evidence" && report?.releaseTag === `v${packageJson.version}`
     && report?.candidateIdentity?.corePackage?.name === packageJson.name
     && matchesCommercialCandidateIdentity(report?.candidateIdentity, packageJson)

@@ -91,7 +91,6 @@ export async function verifyEvidenceDirectory(path, expected = undefined) {
     schemaVersion: 1,
     status: violations.length === 0 ? "passed" : "failed",
     runId: manifest?.runId ?? null,
-    manifest,
     eventCount,
     files: checksumEntries,
     report,

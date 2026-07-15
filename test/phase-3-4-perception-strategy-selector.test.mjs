@@ -102,25 +102,6 @@ test("perception strategy selector uses local template/CV or SOM proposals for s
   assert.equal(somPlan.pixelLimitedAction, true);
 });
 
-test("perception strategy selector routes OCR plus SOM through calibrated local fusion", async () => {
-  const { selectPerceptionStrategy } = await import("../src/perception-strategy-selector.mjs");
-  const plan = selectPerceptionStrategy({
-    mode: "action-loop",
-    window: { id: "canvas-2", title: "Canvas Tool" },
-    semanticObservation: { elements: [] },
-    image: { width: 640, height: 480 },
-    imagePath: "C:\\captures\\canvas.png",
-    surface: "canvas",
-    capabilities: { ocr: true, template: false, somProposal: true },
-  });
-
-  assert.equal(plan.status, "selected");
-  assert.equal(plan.strategy, "local-proposal-fusion");
-  assert.deepEqual(plan.providers, ["ocr", "som-proposal"]);
-  assert.equal(plan.pixelLimitedAction, true);
-  assert.equal(plan.request.includeUserOverlay, false);
-});
-
 test("perception strategy selector fails closed before optional VLM unless explicitly enabled", async () => {
   const { selectPerceptionStrategy } = await import("../src/perception-strategy-selector.mjs");
 
@@ -176,7 +157,6 @@ test("Phase 3.4 has an executable perception strategy selector smoke script", as
     "uia-som-semantic",
     "dirty-region-ocr",
     "template-cv",
-    "local-proposal-fusion",
     "som-proposal",
     "optional-vlm",
   ]);

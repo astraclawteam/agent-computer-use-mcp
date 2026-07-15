@@ -2,72 +2,6 @@ export const MCP_RESULT_SCHEMA_VERSION = "5.3";
 
 const ANY_OBJECT = { type: "object", additionalProperties: true };
 const ANY_ARRAY = { type: "array", items: {} };
-const BOX_SCHEMA = {
-  type: "object",
-  required: ["x", "y", "width", "height"],
-  properties: {
-    x: { type: "number" },
-    y: { type: "number" },
-    width: { type: "number" },
-    height: { type: "number" },
-  },
-  additionalProperties: false,
-};
-const MODEL_IDENTITY_SCHEMA = {
-  type: "object",
-  properties: {
-    provider: { type: "string" },
-    model: { type: "string" },
-    modelPack: { type: "string" },
-    modelFormat: { type: "string" },
-    runtime: { type: "string" },
-    executionProvider: { type: "string" },
-  },
-  additionalProperties: false,
-};
-const PERCEPTION_ELEMENT_ARRAY = {
-  type: "array",
-  items: {
-    type: "object",
-    properties: {
-      elementToken: { type: "string" },
-      elementIndex: { type: "number" },
-      role: { type: "string" },
-      name: { type: "string" },
-      value: { type: "string" },
-      state: ANY_OBJECT,
-      actions: { type: "array", items: { type: "string" } },
-      bounds: BOX_SCHEMA,
-      sourceRegion: BOX_SCHEMA,
-      confidence: { type: "number" },
-      source: { type: "string" },
-      proposalId: { type: "string" },
-      templateId: { type: "string" },
-      pixelLimitedAction: { type: "boolean" },
-      guessedAction: { type: "boolean" },
-      support: {
-        type: "array",
-        items: {
-          type: "object",
-          properties: {
-            provider: { type: "string" },
-            confidence: { type: "number" },
-            proposalId: { type: "string" },
-          },
-          additionalProperties: false,
-        },
-      },
-      modelIdentity: MODEL_IDENTITY_SCHEMA,
-      rawTextSha256: { type: "string" },
-      exact: { type: "boolean" },
-      approvedActionLabel: { type: "boolean" },
-      passwordRegion: { type: "boolean" },
-      paymentRegion: { type: "boolean" },
-      privateRegion: { type: "boolean" },
-    },
-    additionalProperties: false,
-  },
-};
 
 const COMMON_OUTPUT_PROPERTIES = {
   resultSchemaVersion: { const: MCP_RESULT_SCHEMA_VERSION },
@@ -346,7 +280,7 @@ export const COMPUTER_USE_MCP_TOOLS = [
       provider: { type: "string" },
       source: { type: "string" },
       mode: { type: "string" },
-      elements: PERCEPTION_ELEMENT_ARRAY,
+      elements: ANY_ARRAY,
       artifact: ANY_OBJECT,
       capture: ANY_OBJECT,
     }),

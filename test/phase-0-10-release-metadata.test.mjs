@@ -67,6 +67,7 @@ test("stable metadata includes matching Commercial 1.0 promotion evidence", asyn
     phase: "9.0",
     benchmark: "commercial-promotion-evidence",
     eligible: true,
+    agentE2eEligible: true,
     releaseTag: "v1.0.0",
     candidateIdentity: {
       gitCommit: "1".repeat(40),
@@ -85,7 +86,9 @@ test("stable metadata includes matching Commercial 1.0 promotion evidence", asyn
   assert.equal(metadata.channel, "stable");
   assert.equal(metadata.commercialRequired, true);
   assert.equal(metadata.commercialEligible, true);
+  assert.equal(metadata.commercialPromotion.agentE2eEligible, true);
   assert.ok(metadata.artifacts.some((entry) => entry.name === "commercial-promotion-evidence" && entry.command === "npm run phase:9.0"));
+  assert.ok(metadata.artifacts.some((entry) => entry.name === "agent-e2e-qualification-evidence" && entry.command === "npm run phase:10.4"));
   assert.equal(validation.status, "passed");
 
   const incomplete = structuredClone(metadata);
@@ -99,6 +102,12 @@ test("stable metadata includes matching Commercial 1.0 promotion evidence", asyn
   const missingRuntime = structuredClone(metadata);
   delete missingRuntime.commercialPromotion.candidateIdentity.ocrRuntime;
   assert.equal(validateReleaseMetadata(missingRuntime, { packageJson, changelogText: "## 1.0.0\n" }).status, "failed");
+
+  const legacyPromotion = structuredClone(promotion);
+  delete legacyPromotion.agentE2eEligible;
+  const legacyMetadata = buildReleaseMetadata({ packageJson, commercialPromotion: legacyPromotion });
+  assert.equal(legacyMetadata.commercialEligible, false);
+  assert.equal(validateReleaseMetadata(legacyMetadata, { packageJson, changelogText: "## 1.0.0\n" }).status, "failed");
 });
 
 test("release metadata validation fails closed for missing changelog or mismatched tag", async () => {

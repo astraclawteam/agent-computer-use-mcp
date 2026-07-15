@@ -7,13 +7,6 @@ import { computeDirtyRegion } from "./image-diff.mjs";
 import { ComputerUseMcpError, fail } from "./computer-use-errors.mjs";
 import { OcrSidecarSession, normalizeOcrSidecarResponse } from "./ocr-sidecar.mjs";
 import { runInstallCacheDoctor } from "./install-cache-doctor.mjs";
-import {
-  PerceptionRegionCache,
-  createPerceptionRegionCacheKey,
-  readOverlayFreeRegionPixels,
-} from "./perception-region-cache.mjs";
-import { UI_TEXT_NORMALIZATION_VERSION } from "./ui-text-normalization.mjs";
-import { admitPerceptionAction } from "./perception-action-admission.mjs";
 import { buildDiagnosticsPolicy } from "./diagnostics-policy.mjs";
 import { captureWindowPngByTitle } from "./real-window-capture.mjs";
 import { createComputerUsePolicy } from "./computer-use-policy.mjs";
@@ -23,8 +16,6 @@ import { cleanupRuntimeState } from "./runtime-cleanup.mjs";
 export class ComputerUseProviderRouter {
   constructor(options = {}) {
     this.ocr = options.ocrSession ?? new OcrSidecarSession();
-    this.perceptionCache = options.perceptionCache ?? new PerceptionRegionCache();
-    this.ocrIdentity = options.ocrIdentity ?? null;
     this.driver = options.driver ?? null;
     this.overlayRuntime = options.overlayRuntime ?? null;
     this.processSupervisor = options.processSupervisor ?? null;
@@ -142,7 +133,6 @@ export class ComputerUseProviderRouter {
         "7.8": "platform-package-integrity",
         "7.9": "offline-package-identity",
         "8.0": "runtime-soak",
-        "9.0": "commercial-promotion-evidence",
       },
       providers: {
         windowCapture: process.platform === "win32" ? "PrintWindow" : "unsupported",
@@ -677,9 +667,6 @@ export class ComputerUseProviderRouter {
     this.lastCapture = {
       ...observation,
       provider: observation.provider ?? "gateway-managed",
-      window: observation.window ?? { id: controllerWindowId(this.activeController.window), title: this.activeController.window.title },
-      controllerId: this.activeController.controllerId,
-      expiresAt: Math.min(this.activeController.expiresAt, this.clock.now() + 5000),
       includeUserOverlay: false,
     };
     this.recordAudit("computer.capture.created", {
@@ -881,32 +868,6 @@ export class ComputerUseProviderRouter {
       fail("ocr_region.requires_imagePath_or_titlePart", "ocr_region requires either imagePath or titlePart");
     }
 
-    const windowId = String(args.windowId ?? capture?.title ?? this.activeController?.window?.id
-      ?? this.activeController?.window?.title ?? "artifact");
-    const pixels = await this.awaitExternal(ticket, () => readOverlayFreeRegionPixels(imagePath, args.crop ?? null));
-    const keyOptions = {
-      windowId,
-      region: args.crop ?? { x: 0, y: 0, width: 1, height: 1 },
-      pixels,
-      normalizationVersion: UI_TEXT_NORMALIZATION_VERSION,
-      includeUserOverlay: false,
-    };
-    if (this.ocrIdentity) {
-      const key = createPerceptionRegionCacheKey({ ...keyOptions, modelIdentity: this.ocrIdentity });
-      const cached = this.perceptionCache.get(key);
-      if (cached) {
-        return {
-          status: "ok",
-          provider: "gateway-managed",
-          mode: "ocr-region",
-          imagePath,
-          capture,
-          observation: { ...cached, cacheHit: true, timings: { ...(cached.timings ?? {}), totalMs: 0 } },
-          includeUserOverlay: false,
-        };
-      }
-    }
-
     const response = await this.awaitExternal(ticket, () => this.ocr.recognize({
       imagePath,
       crop: args.crop,
@@ -917,13 +878,6 @@ export class ComputerUseProviderRouter {
     const observation = normalizeOcrSidecarResponse(response, {
       observationId: `ocr-region-${Date.now()}`,
       window: capture ? { title: capture.title } : undefined,
-      languageClass: args.languageClass ?? "mixed",
-    });
-    this.ocrIdentity = pickOcrIdentity(response);
-    const cacheKey = createPerceptionRegionCacheKey({ ...keyOptions, modelIdentity: this.ocrIdentity });
-    this.perceptionCache.set(cacheKey, observation, {
-      windowId,
-      sensitive: args.sensitiveRegion === true || args.passwordRegion === true || args.paymentRegion === true || args.privateRegion === true,
     });
 
     return {
@@ -1263,18 +1217,6 @@ export class ComputerUseProviderRouter {
       observation: this.lastCapture,
     });
     this.enforcePolicyDecision(decision);
-    const element = resolveObservationElement(this.lastCapture, action);
-    const admission = admitPerceptionAction({
-      observation: this.lastCapture,
-      element,
-      action: {
-        ...action,
-        windowId: controllerWindowId(this.activeController.window),
-        controllerId: this.activeController.controllerId,
-      },
-      now: this.clock.now(),
-    });
-    if (!admission.allowed) fail(admission.code, admission.code, admission);
   }
 
   enforcePolicyDecision(decision) {
@@ -1606,28 +1548,6 @@ export class ComputerUseProviderRouter {
       release();
     }
   }
-}
-
-function pickOcrIdentity(response) {
-  const identity = {};
-  for (const key of ["provider", "model", "modelPack", "modelFormat", "runtime", "executionProvider"]) {
-    if (typeof response?.[key] === "string" && response[key].trim() !== "") identity[key] = response[key];
-  }
-  if (!identity.provider) identity.provider = "xiaozhiclaw-ocr-sidecar";
-  return identity;
-}
-
-function resolveObservationElement(observation, action) {
-  const elements = observation?.elements ?? observation?.observation?.elements ?? [];
-  if (typeof action?.elementToken === "string") {
-    return elements.find((element) => element.elementToken === action.elementToken) ?? null;
-  }
-  if (Number.isSafeInteger(action?.elementIndex) && action.elementIndex >= 0) return elements[action.elementIndex] ?? null;
-  return null;
-}
-
-function controllerWindowId(window = {}) {
-  return String(window.id ?? window.windowId ?? window.window_id ?? window.title ?? "unknown-window");
 }
 
 function lifecycleClosedError() {

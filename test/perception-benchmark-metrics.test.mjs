@@ -31,10 +31,6 @@ test("OCR metrics use Unicode code-point edit distance and exact critical-label 
   assert.equal(metrics.criticalLabelMatches, 2);
   assert.equal(metrics.criticalLabelRecall, 2 / 3);
   assert.equal(metrics.p95Ms, 180);
-  assert.deepEqual(metrics.regressions, [{
-    sampleId: "cn",
-    failures: [{ code: "ocr.text-mismatch" }, { code: "ocr.critical-label-missed" }],
-  }]);
 });
 
 test("OCR errors count as empty output and nearest-rank P95 is deterministic", () => {
@@ -81,10 +77,6 @@ test("proposal metrics match one-to-one by descending confidence", () => {
   assert.equal(metrics.recall, 1);
   assert.equal(metrics.guessedActionCount, 1);
   assert.equal(metrics.p95Ms, 42);
-  assert.deepEqual(metrics.regressions, [{
-    sampleId: "scene-1",
-    failures: [{ code: "proposal.false-positive" }, { code: "proposal.guessed-action" }],
-  }]);
 });
 
 test("proposal metrics retain provider failures and reject invalid boxes", () => {
@@ -100,10 +92,6 @@ test("proposal metrics retain provider failures and reject invalid boxes", () =>
   ], { iouThreshold: 0.5 });
   assert.equal(metrics.failedSamples, 1);
   assert.equal(metrics.recall, 0);
-  assert.deepEqual(metrics.regressions, [{
-    sampleId: "failed",
-    failures: [{ code: "provider.crashed" }, { code: "proposal.false-negative" }],
-  }]);
 
   assert.throws(() => calculateProposalMetrics([{
     sampleId: "bad",

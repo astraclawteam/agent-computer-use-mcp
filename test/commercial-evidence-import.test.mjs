@@ -182,8 +182,7 @@ function manifestFixture(options = {}) {
     platformPackage: { name: "@xiaozhiclaw/agent-computer-use-win32-x64", version: "0.0.1", sha256: "2".repeat(64) },
     driver: { id: "cua-driver-windows-x64", version: "0.7.1", sha256: "3".repeat(64) },
     overlay: { id: "gateway-overlay", sha256: "4".repeat(64) },
-    ocrRuntime: { id: "onnxruntime-node", version: "1.27.0", sha256: "5".repeat(64) },
-    modelPack: { id: "pp-ocr-v6-small", sha256: "6".repeat(64) },
+    modelPack: { id: "pp-ocr-v6-small", sha256: "5".repeat(64) },
     machine: { platform: "win32", arch: "x64", nodeVersion: "24.12.0" },
     gate: "release-candidate",
     requestedDurationMs: 28_800_000,
@@ -208,7 +207,6 @@ function expectedIdentity(manifest) {
     platformPackage: manifest.platformPackage,
     driver: manifest.driver,
     overlay: manifest.overlay,
-    ocrRuntime: manifest.ocrRuntime,
     modelPack: manifest.modelPack,
   };
 }

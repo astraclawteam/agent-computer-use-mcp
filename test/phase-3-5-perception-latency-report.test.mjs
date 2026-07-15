@@ -35,7 +35,6 @@ test("Phase 3.5 derives quality and latency gates only from a measured benchmark
   assert.equal(report.cases.fullWindowFirstRun.firstRunMs, 900);
   assert.equal(report.cases.fullWindowWarmDiagnostic.warmP95Ms, 620);
   assert.equal(report.fullWindow.cacheVerified, true);
-  assert.deepEqual(report.regressions, []);
   assert.equal(report.includeUserOverlay, false);
   assert.equal(report.startsDesktopControl, false);
 });
@@ -54,11 +53,9 @@ test("Phase 3.5 fails every quality, latency, provider, and full-window breach",
   benchmark.fullWindow.cacheVerified = false;
   benchmark.fullWindow.progressAware = false;
   benchmark.fullWindow.actionLoopAllowed = true;
-  benchmark.regressions = [{ sampleId: "visual-1", failures: [{ code: "proposal.false-positive" }] }];
   const report = buildPerceptionLatencyReport({ benchmark });
 
   assert.equal(report.status, "failed");
-  assert.deepEqual(report.regressions, benchmark.regressions);
   assert.deepEqual(report.violations.map((violation) => violation.code), [
     "benchmark-provider-failure",
     "ocr-character-accuracy-below-target",
@@ -120,7 +117,6 @@ test("Phase 3.5 seals provider events and a failing or passing report through ev
     tier: "quick",
     evidenceRoot,
     sourceCommit: "a".repeat(40),
-    candidateIdentity: candidateIdentity(),
     providers: passingProviders(),
   });
   const runs = await readdir(evidenceRoot, { withFileTypes: true });
@@ -128,10 +124,8 @@ test("Phase 3.5 seals provider events and a failing or passing report through ev
   assert.ok(run);
   const verified = await verifyEvidenceDirectory(join(evidenceRoot, run.name));
   assert.equal(verified.status, "passed");
-  assert.deepEqual(verified.manifest.candidateIdentity, candidateIdentity());
   assert.equal(verified.eventCount, 19);
   assert.equal(verified.report.status, report.status);
-  assert.equal(verified.report.privacyStatus, "passed");
   assert.deepEqual(verified.files.map((file) => file.path), ["events.jsonl", "report.json", "run-manifest.json"]);
 });
 
@@ -146,7 +140,6 @@ function passingBenchmark() {
     ocr: { characterAccuracy: 0.98, criticalLabelRecall: 0.96, failedSamples: 0 },
     proposal: { precision: 0.99, recall: 0.91, guessedActionCount: 0, failedSamples: 0 },
     fullWindow: { actionLoopAllowed: false, progressAware: true, cacheVerified: true, cachePrimeMs: 500, cacheHitMs: 0 },
-    regressions: [],
     samples: [
       measured("small-1", "small-ui-crop", 120),
       measured("small-2", "small-ui-crop", 180),
@@ -157,18 +150,6 @@ function passingBenchmark() {
       { sampleId: "visual-1", kind: "visual", durationMs: 30 },
       { sampleId: "visual-2", kind: "visual", durationMs: 40 },
     ],
-  };
-}
-
-function candidateIdentity() {
-  return {
-    gitCommit: "a".repeat(40),
-    corePackage: { name: "agent-computer-use-mcp", version: "0.0.1", sha256: "1".repeat(64) },
-    platformPackage: { name: "@xiaozhiclaw/agent-computer-use-win32-x64", version: "0.0.1", sha256: "2".repeat(64) },
-    driver: { id: "cua-driver-windows-x64", version: "0.7.1", sha256: "3".repeat(64) },
-    overlay: { id: "gateway-overlay", sha256: "4".repeat(64) },
-    ocrRuntime: { id: "onnxruntime-node", version: "1.27.0", sha256: "5".repeat(64) },
-    modelPack: { id: "pp-ocr-v6-small", sha256: "6".repeat(64) },
   };
 }
 

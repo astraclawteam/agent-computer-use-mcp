@@ -17,16 +17,6 @@ test("all public MCP tools declare strict output schemas", () => {
   }
 });
 
-test("capture element schema freezes perception provenance fields", () => {
-  const capture = COMPUTER_USE_MCP_TOOLS.find((tool) => tool.name === "computer.capture");
-  const element = capture.outputSchema.properties.elements.items;
-  assert.equal(element.type, "object");
-  assert.equal(element.additionalProperties, false);
-  for (const field of ["sourceRegion", "modelIdentity", "proposalId", "confidence", "support", "guessedAction", "pixelLimitedAction"]) {
-    assert.ok(element.properties[field], field);
-  }
-});
-
 test("Phase 5.3 has an executable strict tool schema smoke script", async () => {
   const packageJson = JSON.parse(readFileSync("package.json", "utf8"));
   assert.equal(packageJson.scripts["phase:5.3"], "node src/phase-5-3-tool-schemas.mjs");

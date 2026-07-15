@@ -1,5 +1,22 @@
 # Productization Roadmap
 
+## Agent E2E Status
+
+Phase 6.2 is application harness evidence, not Agent E2E qualification. Its
+scripted adapters and mocks cannot qualify an installed application. All
+installed applications remain `unqualified` until real Codex, Claude Desktop,
+and both Xiaozhi Claw model lanes produce matching sealed Phase 10 evidence.
+
+Phase 10.0, 10.1, 10.3, 10.4, and the stable-promotion portion of 10.5 are
+implemented: the repository now freezes the four-lane contract, environment-
+only adapter boundary, canonical task pack, retry rules, seven-file privacy-
+safe evidence, and `3/3` aggregation. Windows discovery currently confirms
+Codex Desktop `26.707.3748.0`, Claude Desktop `1.20186.1.0`, and the configured
+Xiaozhi Claw page. The real qualification campaign remains blocked because no
+`qualification-host-v1` session bridge is configured for any lane. Discovery,
+contract tests, and fake bridge tests set `qualificationClaim: false` and do
+not count as Agent E2E evidence.
+
 ## PR7A Evidence Status
 
 The schema-v2 real application runner, adapter lifecycle, privacy-only policy

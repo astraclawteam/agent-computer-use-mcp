@@ -7,6 +7,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 
 import { createEvidenceRun } from "../src/commercial-evidence.mjs";
+import { createQualificationEvidenceRun } from "../src/agent-e2e/qualification-evidence.mjs";
 import { evaluateCommercialPromotion } from "../src/commercial-promotion.mjs";
 
 const HASH = "a".repeat(64);
@@ -22,7 +23,7 @@ const IDENTITY = Object.freeze({
 
 test("promotion is eligible only for one fully verified candidate identity", async (t) => {
   const fixture = await evidenceFixture(t);
-  const report = await evaluateCommercialPromotion({ evidenceDirectories: fixture.paths, expected: IDENTITY });
+  const report = await evaluateCommercialPromotion({ evidenceDirectories: fixture.paths, agentE2eEvidenceDirectories: fixture.agentPaths, expected: IDENTITY });
 
   assert.equal(report.eligible, true);
   assert.equal(report.status, "passed");
@@ -33,48 +34,56 @@ test("promotion is eligible only for one fully verified candidate identity", asy
   assert.deepEqual(report.violations, []);
 });
 
+test("stable promotion fails closed when Agent E2E evidence is missing", async (t) => {
+  const fixture = await evidenceFixture(t);
+  const report = await evaluateCommercialPromotion({ evidenceDirectories: fixture.paths, expected: IDENTITY });
+  assert.equal(report.eligible, false);
+  assert.equal(report.agentE2eEligible, false);
+  assert.equal(report.violations.some((entry) => entry.code === "promotion.agent_e2e_missing"), true);
+});
+
 test("promotion rejects missing short failed or identity-mismatched soak evidence", async (t) => {
   const missing = await evidenceFixture(t);
-  assert.equal((await evaluateCommercialPromotion({ evidenceDirectories: missing.paths.slice(1), expected: IDENTITY })).eligible, false);
+  assert.equal((await evaluateCommercialPromotion({ evidenceDirectories: missing.paths.slice(1), agentE2eEvidenceDirectories: missing.agentPaths, expected: IDENTITY })).eligible, false);
 
   const short = await evidenceFixture(t, { soakOverrides: { nightly: { durationMs: 60_000 } } });
-  const shortReport = await evaluateCommercialPromotion({ evidenceDirectories: short.paths, expected: IDENTITY });
+  const shortReport = await evaluateCommercialPromotion({ evidenceDirectories: short.paths, agentE2eEvidenceDirectories: short.agentPaths, expected: IDENTITY });
   assert.equal(shortReport.eligible, false);
   assert.equal(shortReport.violations.some((entry) => entry.code === "promotion.soak_duration_short"), true);
 
   const mismatched = await evidenceFixture(t, { identityOverrides: { gitCommit: "2".repeat(40) }, mismatchKind: "perception" });
-  const mismatchReport = await evaluateCommercialPromotion({ evidenceDirectories: mismatched.paths, expected: IDENTITY });
+  const mismatchReport = await evaluateCommercialPromotion({ evidenceDirectories: mismatched.paths, agentE2eEvidenceDirectories: mismatched.agentPaths, expected: IDENTITY });
   assert.equal(mismatchReport.eligible, false);
   assert.equal(mismatchReport.violations.some((entry) => entry.code === "promotion.identity_mismatch"), true);
 
   const incomplete = await evidenceFixture(t, { identityOverridesAll: { ocrRuntime: undefined } });
-  const incompleteReport = await evaluateCommercialPromotion({ evidenceDirectories: incomplete.paths });
+  const incompleteReport = await evaluateCommercialPromotion({ evidenceDirectories: incomplete.paths, agentE2eEvidenceDirectories: incomplete.agentPaths });
   assert.equal(incompleteReport.eligible, false);
   assert.equal(incompleteReport.violations.some((entry) => entry.code === "promotion.candidate_identity_incomplete"), true);
 });
 
 test("promotion rejects app coverage cleanup perception and privacy failures", async (t) => {
   const apps = await evidenceFixture(t, { appOverrides: { omitCategory: "Office", cleanupFailed: true } });
-  const appReport = await evaluateCommercialPromotion({ evidenceDirectories: apps.paths, expected: IDENTITY });
+  const appReport = await evaluateCommercialPromotion({ evidenceDirectories: apps.paths, agentE2eEvidenceDirectories: apps.agentPaths, expected: IDENTITY });
   assert.equal(appReport.eligible, false);
   assert.equal(appReport.violations.some((entry) => entry.code === "promotion.app_category_missing" && entry.category === "Office"), true);
   assert.equal(appReport.violations.some((entry) => entry.code === "promotion.cleanup_failed"), true);
 
   const perception = await evidenceFixture(t, { perceptionOverrides: { proposalPrecision: 0.97, privacyStatus: "failed" } });
-  const perceptionReport = await evaluateCommercialPromotion({ evidenceDirectories: perception.paths, expected: IDENTITY });
+  const perceptionReport = await evaluateCommercialPromotion({ evidenceDirectories: perception.paths, agentE2eEvidenceDirectories: perception.agentPaths, expected: IDENTITY });
   assert.equal(perceptionReport.eligible, false);
   assert.equal(perceptionReport.violations.some((entry) => entry.code === "promotion.perception_target_failed"), true);
   assert.equal(perceptionReport.violations.some((entry) => entry.code === "promotion.privacy_failed"), true);
 
   const missingPrivacy = await evidenceFixture(t, { perceptionOverrides: { omitPrivacyStatus: true } });
-  const missingPrivacyReport = await evaluateCommercialPromotion({ evidenceDirectories: missingPrivacy.paths, expected: IDENTITY });
+  const missingPrivacyReport = await evaluateCommercialPromotion({ evidenceDirectories: missingPrivacy.paths, agentE2eEvidenceDirectories: missingPrivacy.agentPaths, expected: IDENTITY });
   assert.equal(missingPrivacyReport.eligible, false);
   assert.equal(missingPrivacyReport.violations.some((entry) => entry.code === "promotion.privacy_failed"), true);
 });
 
 test("a newer pass never hides an earlier failed run for the same candidate", async (t) => {
   const fixture = await evidenceFixture(t, { addFailedPullRequestRun: true });
-  const report = await evaluateCommercialPromotion({ evidenceDirectories: fixture.paths, expected: IDENTITY });
+  const report = await evaluateCommercialPromotion({ evidenceDirectories: fixture.paths, agentE2eEvidenceDirectories: fixture.agentPaths, expected: IDENTITY });
 
   assert.equal(report.eligible, false);
   assert.equal(report.failedRunIds.length, 1);
@@ -129,7 +138,42 @@ async function evidenceFixture(t, options = {}) {
       violations: [{ code: "runtime.failure_rate" }],
     }, IDENTITY));
   }
-  return { root, paths };
+  const agentPaths = await agentEvidenceFixture(root, identityFor(options, "agent-e2e"));
+  return { root, paths, agentPaths };
+}
+
+async function agentEvidenceFixture(root, candidateIdentity) {
+  const paths = [];
+  const lanes = ["codex", "claude-desktop", "xiaozhi-deepseek-v4-flash", "xiaozhi-claude-sonnet-5"];
+  for (const lane of lanes) {
+    for (let repetition = 1; repetition <= 3; repetition += 1) {
+      const runId = `agent-e2e-${lane}-${repetition}`;
+      const run = await createQualificationEvidenceRun({
+        root,
+        runId,
+        manifest: {
+          schemaVersion: 1,
+          evidenceKind: "real-agent-e2e",
+          campaignId: "commercial-1-0",
+          taskId: "text-save-001",
+          lane,
+          repetition,
+          retry: 0,
+          initialStateSeed: `seed-${repetition}`,
+          promptSha256: "9".repeat(64),
+          candidateIdentity,
+          hostIdentity: { hostId: lane.startsWith("xiaozhi") ? "xiaozhi-web" : lane, version: "qualified" },
+          modelIdentity: { provider: lane, modelId: `${lane}-qualified` },
+        },
+      });
+      await run.seal({
+        verification: { status: "passed", verifierId: "exact-file-bytes", invariantKind: "file-bytes" },
+        cleanup: { status: "passed", ownedProcessesRemaining: 0, temporaryPathsRemaining: 0 },
+      });
+      paths.push(run.path);
+    }
+  }
+  return paths;
 }
 
 function appReport(options = {}) {

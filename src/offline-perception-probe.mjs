@@ -1,8 +1,6 @@
 import { OcrSidecarSession } from "./ocr-sidecar.mjs";
-import { fusePerceptionProposals } from "./perception-proposal-fusion.mjs";
 import { selectPerceptionStrategy } from "./perception-strategy-selector.mjs";
 import { proposeSomFromImageFile } from "./som-proposal-provider.mjs";
-import { normalizeRecognizedUiText } from "./ui-text-normalization.mjs";
 
 export async function runOfflinePerceptionProbe(client, requestOptions) {
   const result = await client.callTool({
@@ -27,7 +25,6 @@ export async function runOfflinePerceptionProbe(client, requestOptions) {
 }
 
 export function createReleasedPerceptionProviders(options = {}) {
-  let activeOcrSession = null;
   const sessionFactory = options.ocrSessionFactory ?? (() => new OcrSidecarSession({
     environment: options.environment ?? { ...process.env, AGENT_COMPUTER_USE_NETWORK_DISABLED: "1" },
   }));
@@ -41,7 +38,6 @@ export function createReleasedPerceptionProviders(options = {}) {
           await session.close().catch(() => {});
           throw providerError("release.offline_ocr_not_verified");
         }
-        activeOcrSession = session;
         const identity = ocrIdentity(doctor);
         return Object.freeze({
           identity,
@@ -66,15 +62,13 @@ export function createReleasedPerceptionProviders(options = {}) {
           },
           async close() {
             await session.close();
-            if (activeOcrSession === session) activeOcrSession = null;
           },
         });
       },
     }),
     visual: Object.freeze({
-      identity: Object.freeze({ provider: "local-proposal-fusion", model: "som-ocr-v1" }),
+      identity: Object.freeze({ provider: "som-proposal", model: "local-components-v1" }),
       async run(request) {
-        if (!activeOcrSession) throw providerError("observation.insufficient");
         const surface = normalizeBenchmarkSurface(request.sample.annotation.surfaceClass);
         const strategy = selectPerceptionStrategy({
           capabilities: { ocr: false, template: false, somProposal: true, vlm: false },
@@ -85,48 +79,19 @@ export function createReleasedPerceptionProviders(options = {}) {
         if (strategy.status !== "selected" || strategy.strategy !== "som-proposal") {
           throw providerError("observation.insufficient");
         }
-        const somResult = await proposeSomFromImageFile({
+        const result = await proposeSomFromImageFile({
           imagePath: request.imagePath,
           surface,
           minConfidence: options.somMinConfidence ?? 0.7,
         });
-        const ocrResult = await recognize(activeOcrSession, request);
-        const fusion = fusePerceptionProposals({
-          template: [],
-          som: (somResult.proposals ?? []).map((proposal) => ({
-            provider: "som-proposal",
-            proposalId: proposal.proposalId,
-            box: proposal.bounds,
-            confidence: proposal.confidence,
-            role: proposal.role,
-            label: proposal.label,
-          })),
-          ocr: (ocrResult.items ?? []).flatMap((item, index) => {
-            const label = normalizeRecognizedUiText(String(item.text ?? ""), { languageClass: "mixed" });
-            if (!label || !item.bounds) return [];
-            return [{
-              provider: "ocr",
-              proposalId: `ocr-${index + 1}`,
-              box: item.bounds,
-              confidence: Number(item.confidence ?? 0),
-              role: "text",
-              label,
-            }];
-          }),
-          ignored: request.sample.annotation.ignored ?? [],
-        });
         return {
-          proposals: fusion.proposals.map((proposal) => ({
-            box: proposal.box,
+          proposals: (result.proposals ?? []).map((proposal) => ({
+            box: proposal.bounds,
             confidence: proposal.confidence,
             guessedAction: false,
             provider: proposal.source,
-            proposalId: proposal.proposalId,
-            label: proposal.label,
-            support: proposal.support,
           })),
-          observationProposals: fusion.observationProposals,
-          identity: { provider: "local-proposal-fusion", model: "som-ocr-v1" },
+          identity: { provider: "som-proposal", model: "local-components-v1" },
         };
       },
     }),

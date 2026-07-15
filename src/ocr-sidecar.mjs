@@ -1,10 +1,7 @@
 import { spawn } from "node:child_process";
-import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
 import { delimiter, dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-
-import { normalizeRecognizedUiText } from "./ui-text-normalization.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const DEFAULT_SIDECAR_PATH = resolveOcrSidecarPath();
@@ -91,24 +88,19 @@ export function selectOcrRuntime(availableProviders = []) {
 }
 
 export function normalizeOcrSidecarResponse(response, options = {}) {
-  const elements = (response.items ?? []).map((item, index) => {
-    const rawText = String(item.text ?? "");
-    const text = normalizeRecognizedUiText(rawText, { languageClass: options.languageClass ?? "mixed" });
-    return {
-      elementToken: `ocr-${index + 1}`,
-      elementIndex: index,
-      role: "text",
-      name: text,
-      value: text,
-      rawTextSha256: createHash("sha256").update(rawText, "utf8").digest("hex"),
-      state: {},
-      actions: ["click"],
-      bounds: normalizeBounds(item.bounds),
-      confidence: Number(item.confidence ?? 0),
-      source: "ocr",
-      pixelLimitedAction: true,
-    };
-  });
+  const elements = (response.items ?? []).map((item, index) => ({
+    elementToken: `ocr-${index + 1}`,
+    elementIndex: index,
+    role: "text",
+    name: String(item.text ?? ""),
+    value: String(item.text ?? ""),
+    state: {},
+    actions: ["click"],
+    bounds: normalizeBounds(item.bounds),
+    confidence: Number(item.confidence ?? 0),
+    source: "ocr",
+    pixelLimitedAction: true,
+  }));
 
   return {
     observationId: options.observationId ?? `ocr-obs-${Date.now()}`,

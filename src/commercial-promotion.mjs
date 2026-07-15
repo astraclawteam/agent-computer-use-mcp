@@ -1,5 +1,6 @@
 import { verifyEvidenceDirectory } from "./commercial-evidence.mjs";
 import { normalizeCommercialCandidateIdentity } from "./commercial-candidate-identity.mjs";
+import { evaluateQualificationEvidenceDirectories } from "./agent-e2e/qualification-evidence-aggregator.mjs";
 
 const SOAK_REQUIREMENTS = Object.freeze({
   "pull-request": 900_000,
@@ -9,7 +10,7 @@ const SOAK_REQUIREMENTS = Object.freeze({
 const REQUIRED_APP_CATEGORIES = Object.freeze(["Browser", "Electron", "Office", "Complex Canvas"]);
 const REQUIRED_COMPLEX_METRICS = Object.freeze(["CAD-like", "Timeline"]);
 
-export async function evaluateCommercialPromotion({ evidenceDirectories, expected } = {}) {
+export async function evaluateCommercialPromotion({ evidenceDirectories, agentE2eEvidenceDirectories = [], expected } = {}) {
   if (!Array.isArray(evidenceDirectories) || evidenceDirectories.length === 0) {
     return promotionReport([], [{ code: "promotion.evidence_missing" }], []);
   }
@@ -41,14 +42,24 @@ export async function evaluateCommercialPromotion({ evidenceDirectories, expecte
   const failedRunIds = summaries.flatMap((group) => group.failedRunIds).sort();
   const eligible = violations.length === 0 && summaries.length === 1 && selected?.violations.length === 0;
   const candidateIdentity = selected?.candidateIdentity ?? null;
+  const agentE2e = await evaluateQualificationEvidenceDirectories(agentE2eEvidenceDirectories);
+  const agentIdentityMatches = candidateIdentity !== null
+    && stableStringify(agentE2e.candidateIdentity) === stableStringify(candidateIdentity);
+  if (!agentE2e.agentE2eEligible) violations.push(...agentE2e.violations);
+  if (agentE2e.agentE2eEligible && !agentIdentityMatches) {
+    violations.push({ code: "promotion.agent_e2e_identity_mismatch" });
+  }
+  const agentE2eEligible = agentE2e.agentE2eEligible && agentIdentityMatches;
+  const finalEligible = eligible && agentE2eEligible && violations.length === 0;
   const releaseTag = typeof candidateIdentity?.corePackage?.version === "string"
     ? `v${candidateIdentity.corePackage.version}`
     : null;
   return Object.freeze({
-    status: eligible ? "passed" : "failed",
+    status: finalEligible ? "passed" : "failed",
     phase: "9.0",
     benchmark: "commercial-promotion-evidence",
-    eligible,
+    eligible: finalEligible,
+    agentE2eEligible,
     releaseTag,
     candidateIdentity,
     candidateGroups: Object.freeze(summaries),
@@ -146,6 +157,7 @@ function promotionReport(candidateGroups, violations, failedRunIds) {
     phase: "9.0",
     benchmark: "commercial-promotion-evidence",
     eligible: false,
+    agentE2eEligible: false,
     candidateGroups: Object.freeze(candidateGroups),
     failedRunIds: Object.freeze(failedRunIds),
     violations: Object.freeze(violations.map((entry) => Object.freeze(entry))),

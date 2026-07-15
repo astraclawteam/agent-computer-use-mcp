@@ -61,8 +61,6 @@ Release-focused commands:
 - `npm run release:windows:size-report`: enforce the 310 MiB complete ZIP limit.
 - `npm run soak:pr`: run the exact 900,000 ms pull-request soak and seal commercial runtime evidence.
 - `npm run evidence:verify -- <evidence-directory>`: recompute evidence identities, inventory, and SHA-256 checksums.
-- `npm run perception:quick`: run the released offline OCR plus calibrated SOM/OCR proposal fusion against the deterministic quick corpus.
-- `npm run phase:9.0 -- --evidence <sealed-run> ...`: evaluate sealed evidence without running tests, downloading assets, or starting desktop control.
 
 The pull-request soak uses real official-SDK stdio clients, fault/reconnect cycles,
 Windows process-tree sampling, and a post-cleanup probe. It enforces at most
@@ -71,24 +69,6 @@ Windows process-tree sampling, and a post-cleanup probe. It enforces at most
 leaks. Its sealed directory contains `run-manifest.json`, `events.jsonl`,
 `report.json`, and `checksums.txt`. Complete screenshots and user documents are
 forbidden from commercial runtime evidence.
-
-## Commercial 1.0 Eligibility
-
-Preview releases remain publishable with `commercialEligible: false`. A stable
-`1.x` release fails closed unless Phase 9.0 verifies one candidate identity
-across all of the following:
-
-- exact 900,000 ms pull-request, 7,200,000 ms nightly, and 28,800,000 ms release-candidate soak evidence;
-- passing Tier A and installed Browser, Electron, Office, Complex Canvas,
-  CAD-like, and Timeline evidence with successful cleanup;
-- at least 97% OCR character accuracy, 95% critical-label recall, 98% proposal
-  precision, 90% proposal recall, and zero guessed actions;
-- matching Git commit, core/platform package, driver, overlay, OCR model pack,
-  release version, and `v*` tag identities.
-
-Failed evidence remains part of the decision even when a later retry passes.
-The deterministic quick corpus currently validates the mechanism; it does not
-replace the separately locked full corpus or long-run/app-lab evidence.
 
 The repository root is private to npm publication. Only generated release staging packages are publishable. They contain protected runtime code, exact manifests, licenses, checksums, and SBOM data without first-party source or source maps. Obfuscation is defense in depth, not a secrecy boundary.
 
