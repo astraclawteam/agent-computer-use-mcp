@@ -4,6 +4,7 @@ export const PERCEPTION_STRATEGY_ORDER = [
   "uia-som-semantic",
   "dirty-region-ocr",
   "template-cv",
+  "local-proposal-fusion",
   "som-proposal",
   "optional-vlm",
 ];
@@ -78,6 +79,28 @@ export function selectPerceptionStrategy(options = {}) {
       cache: {
         policy: "template-local",
         key: buildVisualCacheKey("template", options),
+        ttlMs: options.cacheTtlMs ?? 5000,
+      },
+      pixelLimitedAction: true,
+    };
+  }
+
+  if (capabilities.ocr && capabilities.somProposal && isSelfDrawnLikeSurface(options.surface)) {
+    return {
+      ...base,
+      status: "selected",
+      strategy: "local-proposal-fusion",
+      reason: "independent-local-providers-available",
+      providers: ["ocr", "som-proposal"],
+      request: {
+        imagePath: options.imagePath,
+        surface: options.surface ?? "unknown",
+        ocrScope: "som-regions-only",
+        includeUserOverlay: false,
+      },
+      cache: {
+        policy: "content-addressed-region-fusion",
+        key: null,
         ttlMs: options.cacheTtlMs ?? 5000,
       },
       pixelLimitedAction: true,

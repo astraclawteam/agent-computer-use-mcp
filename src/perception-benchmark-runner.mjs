@@ -73,6 +73,7 @@ export async function runPerceptionBenchmark(options = {}) {
     }),
     ocr: ocrMetrics,
     proposal: proposalMetrics,
+    regressions: Object.freeze([...ocrMetrics.regressions, ...proposalMetrics.regressions]),
     fullWindow: Object.freeze({
       actionLoopAllowed: false,
       progressAware: true,

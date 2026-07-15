@@ -20,6 +20,8 @@ export async function proposeSomFromImageFile(options = {}) {
         height: component.height,
       },
       confidence: scoreComponent(component),
+      rawConfidence: scoreComponent(component),
+      calibrationVersion: "som-geometry-v1",
       source: "som-proposal",
       pixelLimitedAction: true,
       actions: ["click"],

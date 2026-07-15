@@ -89,22 +89,41 @@ test("released OCR benchmark provider keeps one verified offline ONNX session", 
   assert.equal(requests.every((entry) => !Object.hasOwn(entry, "includeUserOverlay")), true);
 });
 
-test("released visual benchmark provider executes the local SOM implementation", async (t) => {
+test("released visual benchmark provider fuses local SOM with the active OCR session", async (t) => {
   const root = await mkdtemp(join(tmpdir(), "acu-released-visual-"));
   t.after(() => rm(root, { recursive: true, force: true }));
   const manifest = await generateQuickCorpus({ outputRoot: root, seed: 20260713 });
   const sample = manifest.samples.find((entry) => entry.kind === "visual" && entry.annotation.surfaceClass === "canvas");
-  const providers = createReleasedPerceptionProviders({ somMinConfidence: 0.55 });
+  const target = sample.annotation.targets[0].box;
+  const providers = createReleasedPerceptionProviders({
+    somMinConfidence: 0.55,
+    ocrSessionFactory: () => ({
+      async start() {},
+      async doctor() { return identity({ status: "healthy", networkDisabled: true }); },
+      async recognize() {
+        return identity({
+          items: [{
+            text: sample.annotation.targets[0].label,
+            bounds: { x: target.x - 4, y: target.y - 4, width: target.width + 8, height: target.height + 8 },
+            confidence: 0.999,
+          }],
+        });
+      },
+      async close() {},
+    }),
+  });
+  const ocr = await providers.ocr.open();
   const result = await providers.visual.run({
     sampleId: sample.id,
     sample,
     imagePath: join(root, ...sample.image.target.split("/")),
     includeUserOverlay: false,
   });
+  await ocr.close();
 
-  assert.equal(result.identity.provider, "som-proposal");
-  assert.equal(result.proposals.length > 0, true);
-  assert.equal(result.proposals.every((proposal) => proposal.provider === "som-proposal"), true);
+  assert.equal(result.identity.provider, "local-proposal-fusion");
+  assert.equal(result.proposals.length, 1);
+  assert.deepEqual(result.proposals[0].support.map((entry) => entry.provider), ["ocr", "som-proposal"]);
   assert.equal(result.proposals.every((proposal) => proposal.guessedAction === false), true);
 });
 

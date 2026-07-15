@@ -7,6 +7,7 @@ import {
   createEvidenceRun,
   verifyEvidenceDirectory,
 } from "./commercial-evidence.mjs";
+import { normalizeCommercialCandidateIdentity } from "./commercial-candidate-identity.mjs";
 import { runRuntimeSoak } from "./runtime-soak-runner.mjs";
 import { resolveSoakGate } from "./soak-gate-policy.mjs";
 
@@ -121,7 +122,9 @@ export async function executeRuntimeSoakPhase(rawOptions = {}, dependencies = {}
     platformPackage: identity.platformPackage,
     driver: identity.driver,
     overlay: identity.overlay,
+    ocrRuntime: identity.ocrRuntime,
     modelPack: identity.modelPack,
+    candidateIdentity: normalizeCommercialCandidateIdentity(identity),
     machine: identity.machine,
     gate: options.gate,
     requestedDurationMs: options.durationMs,
@@ -208,13 +211,15 @@ function createCheckpointingEventSink(evidence, options) {
 }
 
 export async function resolveRuntimeSoakIdentity() {
-  const [packageBytes, lockBytes, gitCommitResult, gitStatusResult] = await Promise.all([
+  const [packageBytes, packageLockBytes, lockBytes, gitCommitResult, gitStatusResult] = await Promise.all([
     readFile("package.json"),
+    readFile("package-lock.json"),
     readFile("release/windows-x64-assets.lock.json"),
     runGit(["rev-parse", "HEAD"]),
     runGit(["status", "--porcelain", "--untracked-files=normal"]),
   ]);
   const packageJson = JSON.parse(packageBytes.toString("utf8"));
+  const packageLock = JSON.parse(packageLockBytes.toString("utf8"));
   const lock = JSON.parse(lockBytes.toString("utf8"));
   const driver = requiredAsset(lock, "cua-driver-windows-x64");
   const modelAssets = [
@@ -223,6 +228,7 @@ export async function resolveRuntimeSoakIdentity() {
     requiredAsset(lock, "ocr-model-pp-ocrv6-small-rec-metadata"),
   ];
   const gitCommit = gitCommitResult.trim();
+  const ocrRuntime = requiredOcrRuntime(packageLock);
   if (!/^[a-f0-9]{40}$/u.test(gitCommit)) throw new Error("runtime.soak_git_identity_invalid");
   return {
     gitCommit,
@@ -235,6 +241,7 @@ export async function resolveRuntimeSoakIdentity() {
     },
     driver: { id: driver.id, version: driver.version, sha256: driver.source.sha256 },
     overlay: { id: "gateway-overlay", sha256: sha256(Buffer.from(gitCommit, "utf8")) },
+    ocrRuntime,
     modelPack: {
       id: "pp-ocr-v6-small",
       sha256: sha256(Buffer.from(JSON.stringify(modelAssets.map((asset) => ({
@@ -260,7 +267,21 @@ function expectedIdentity(identity) {
     platformPackage: identity.platformPackage,
     driver: identity.driver,
     overlay: identity.overlay,
+    ocrRuntime: identity.ocrRuntime,
     modelPack: identity.modelPack,
+  };
+}
+
+function requiredOcrRuntime(packageLock) {
+  const runtime = packageLock.packages?.["node_modules/onnxruntime-node"];
+  if (typeof runtime?.version !== "string" || typeof runtime?.integrity !== "string") {
+    throw new Error("runtime.soak_ocr_runtime_identity_missing");
+  }
+  const lockedIdentity = { id: "onnxruntime-node", version: runtime.version, integrity: runtime.integrity };
+  return {
+    id: lockedIdentity.id,
+    version: lockedIdentity.version,
+    sha256: sha256(Buffer.from(JSON.stringify(lockedIdentity), "utf8")),
   };
 }
 

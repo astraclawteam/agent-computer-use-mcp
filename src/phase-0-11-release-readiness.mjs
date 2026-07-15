@@ -9,6 +9,8 @@ process.stdout.write(`${JSON.stringify({
   phase: "0.11",
   benchmark: "release-readiness-gate",
   releaseGate: gate.releaseGate,
+  commercialRequired: gate.commercialRequired,
+  commercialEligible: gate.commercialEligible,
   executionMode: gate.executionMode,
   commandCount: validation.commandCount,
   evidenceCount: validation.evidenceCount,

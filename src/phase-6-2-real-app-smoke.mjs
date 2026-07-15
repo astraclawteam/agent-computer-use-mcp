@@ -4,19 +4,25 @@ import { resolve } from "node:path";
 import { runAppAdapter } from "./app-adapters/adapter-contract.mjs";
 import { INSTALLED_APP_ADAPTER_FACTORIES, PRIVACY_APP_ADAPTER_FACTORIES, TIER_A_ADAPTER_FACTORIES } from "./app-adapters/index.mjs";
 import { inspectWindowsExecutableIdentity } from "./app-adapters/shared.mjs";
+import { normalizeCommercialCandidateIdentity } from "./commercial-candidate-identity.mjs";
 import { createEvidenceRun } from "./commercial-evidence.mjs";
 import { CuaDriverMcpClient } from "./cua-driver-mcp-driver.mjs";
 import { startGatewayManagedOverlay } from "./gateway-overlay-session.mjs";
 import { runRealAppSmokeCatalog } from "./real-app-smoke-runner.mjs";
+import { buildRealAppEvidenceManifest } from "./real-app-evidence-manifest.mjs";
+import { resolveRuntimeSoakIdentity } from "./runtime-soak-evidence.mjs";
 
 const args = parseArguments(process.argv.slice(2));
 const catalog = JSON.parse(await readFile("docs/productization/real-app-smoke-catalog.json", "utf8"));
 const packageJson = JSON.parse(await readFile("package.json", "utf8"));
 const filters = { roles: args.roles, appIds: args.appIds };
+const runtimeIdentity = await resolveRuntimeSoakIdentity();
+if (runtimeIdentity.dirtyWorktree) throw new Error("app.real_smoke_dirty_worktree");
+const candidateIdentity = normalizeCommercialCandidateIdentity(runtimeIdentity);
 const evidenceRun = await createEvidenceRun({
   root: resolve(args.evidenceRoot ?? process.env.AGENT_COMPUTER_USE_REAL_APP_EVIDENCE_ROOT ?? "evidence/real-app"),
   runId: process.env.AGENT_COMPUTER_USE_REAL_APP_RUN_ID ?? `real-app-${new Date().toISOString().replaceAll(/[:.]/gu, "-")}`,
-  manifest: { schemaVersion: 1, phase: "6.2", package: { name: packageJson.name, version: packageJson.version }, platform: process.platform, architecture: process.arch, filters },
+  manifest: buildRealAppEvidenceManifest({ packageJson, candidateIdentity, platform: process.platform, architecture: process.arch, filters }),
 });
 const report = await runRealAppSmokeCatalog({ catalog, filters, evidenceRun, startOverlay: () => startGatewayManagedOverlay(), executeAdapter });
 process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
