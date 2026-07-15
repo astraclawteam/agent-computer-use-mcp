@@ -70,7 +70,9 @@
   download assets, start desktop control, or infer missing results.
 - Preview `0.x` releases report `commercialEligible: false` but keep their
   existing publication behavior.
-- Stable `1.x` release metadata requires `eligible: true` from Phase 9.0 and a
+- Stable `1.x` release metadata requires both `eligible: true` and
+  `agentE2eEligible: true` from Phase 9.0, plus a passing Phase 10.4 check of
+  the underlying seven-file Agent E2E attempt directories. It also requires a
   matching `vX.Y.Z` tag, package version, Git commit, platform package, driver,
   overlay, OCR runtime/model identity, and zero promotion violations.
 - One candidate identity must contain passing pull-request, nightly, release-
@@ -78,6 +80,9 @@
   candidate identities cannot be combined.
 - Any verified failed run remains disqualifying. A newer passing retry never
   hides or replaces its run ID.
+- Contract tests, fake host bridges, Phase 6 harness evidence, and host
+  discovery reports always have `qualificationClaim: false` and cannot satisfy
+  the stable gate.
 
 ## Perception Evidence
 

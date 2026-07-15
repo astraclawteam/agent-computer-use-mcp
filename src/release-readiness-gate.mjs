@@ -146,7 +146,9 @@ export const REQUIRED_RELEASE_EVIDENCE = [
 export function buildReleaseReadinessGate(options = {}) {
   const packageJson = options.packageJson ?? readPackageJson();
   const commercialRequired = isStableVersion(packageJson.version);
-  const commandContract = commercialRequired ? [...ALPHA_RELEASE_COMMANDS, "npm run phase:9.0"] : ALPHA_RELEASE_COMMANDS;
+  const commandContract = commercialRequired
+    ? [...ALPHA_RELEASE_COMMANDS, "npm run phase:10.4", "npm run phase:9.0"]
+    : ALPHA_RELEASE_COMMANDS;
   const commands = commandContract.map((command, index) => ({
     id: commandId(command),
     order: index + 1,
@@ -161,7 +163,10 @@ export function buildReleaseReadinessGate(options = {}) {
     command,
     required: true,
   }));
-  if (commercialRequired) evidence.push({ id: "commercial-promotion-evidence", command: "npm run phase:9.0", required: true });
+  if (commercialRequired) {
+    evidence.push({ id: "agent-e2e-qualification-evidence", command: "npm run phase:10.4", required: true });
+    evidence.push({ id: "commercial-promotion-evidence", command: "npm run phase:9.0", required: true });
+  }
   const commercial = commercialSummary(options.commercialPromotion, packageJson, commercialRequired);
   const gate = {
     phase: "0.11",
@@ -223,6 +228,10 @@ export function validateReleaseReadinessGate(gate, options = {}) {
     }
   }
   if (gate.commercialRequired === true) {
+    if (!gate.evidence?.some((candidate) => candidate.id === "agent-e2e-qualification-evidence"
+      && candidate.command === "npm run phase:10.4" && candidate.required === true)) {
+      violations.push({ code: "missing-evidence", id: "agent-e2e-qualification-evidence", command: "npm run phase:10.4" });
+    }
     if (!gate.evidence?.some((candidate) => candidate.id === "commercial-promotion-evidence"
       && candidate.command === "npm run phase:9.0" && candidate.required === true)) {
       violations.push({ code: "missing-evidence", id: "commercial-promotion-evidence", command: "npm run phase:9.0" });
@@ -251,7 +260,7 @@ export function validateReleaseReadinessGate(gate, options = {}) {
 
 function commercialSummary(report, packageJson, required) {
   if (!required) return Object.freeze({ required: false, eligible: false, violations: Object.freeze([]) });
-  if (report?.status !== "passed" || report?.eligible !== true || report?.phase !== "9.0"
+  if (report?.status !== "passed" || report?.eligible !== true || report?.agentE2eEligible !== true || report?.phase !== "9.0"
     || report?.benchmark !== "commercial-promotion-evidence" || !Array.isArray(report?.violations)
     || report.violations.length > 0) {
     return Object.freeze({
