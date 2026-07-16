@@ -59,6 +59,9 @@ test("manual package release is preview-only unless --publish is explicit", asyn
     publish: async (tarballPath) => {
       calls.push(["publish", tarballPath]);
     },
+    sourceVersion: async () => "1.2.3",
+    sourceArtifactSha512: async () => "verified-sha512",
+    sha512: async () => "verified-sha512",
   };
 
   const preview = await runNpmPackageRelease(
@@ -87,6 +90,36 @@ test("manual package release rejects implicit or ambiguous input", async () => {
   await assert.rejects(
     () => runNpmPackageRelease(["--package", "one.tgz", "--force"]),
     /release\.argument_unknown/u,
+  );
+});
+
+test("manual package release rejects renamed stale and content-drifted tarballs", async () => {
+  const operations = {
+    inspect: async () => ({ name: "agent-computer-use-mcp", version: "1.2.3" }),
+    sourceVersion: async () => "1.2.3",
+    sourceArtifactSha512: async () => "expected-sha512",
+    sha512: async () => "actual-sha512",
+    registryVersion: async () => null,
+    publish: async () => assert.fail("publish must remain unreachable"),
+  };
+
+  await assert.rejects(
+    () => runNpmPackageRelease(["--package", "renamed.tgz", "--publish"], operations),
+    /release\.package_filename_mismatch/u,
+  );
+  await assert.rejects(
+    () => runNpmPackageRelease(
+      ["--package", "agent-computer-use-mcp-1.1.0.tgz", "--publish"],
+      { ...operations, inspect: async () => ({ name: "agent-computer-use-mcp", version: "1.1.0" }) },
+    ),
+    /release\.source_version_mismatch/u,
+  );
+  await assert.rejects(
+    () => runNpmPackageRelease(
+      ["--package", "agent-computer-use-mcp-1.2.3.tgz", "--publish"],
+      operations,
+    ),
+    /release\.artifact_mismatch/u,
   );
 });
 
@@ -124,15 +157,18 @@ test("explicit publication sends exactly one tarball to the public registry", as
     }
     return { exitCode: 0, stdout: "published", stderr: "" };
   });
+  operations.sourceVersion = async () => "1.2.3";
+  operations.sourceArtifactSha512 = async () => "verified-sha512";
+  operations.sha512 = async () => "verified-sha512";
 
   const report = await runNpmPackageRelease(
-    ["--package", "candidate.tgz", "--publish"],
+    ["--package", "agent-computer-use-mcp-1.2.3.tgz", "--publish"],
     operations,
   );
 
   assert.equal(report.status, "published");
   assert.deepEqual(calls, [
-    ["pack", resolve("candidate.tgz"), "--dry-run", "--json"],
+    ["pack", resolve("agent-computer-use-mcp-1.2.3.tgz"), "--dry-run", "--json"],
     [
       "view",
       "agent-computer-use-mcp@1.2.3",
@@ -143,7 +179,7 @@ test("explicit publication sends exactly one tarball to the public registry", as
     ],
     [
       "publish",
-      resolve("candidate.tgz"),
+      resolve("agent-computer-use-mcp-1.2.3.tgz"),
       "--access",
       "public",
       "--ignore-scripts",
@@ -151,4 +187,16 @@ test("explicit publication sends exactly one tarball to the public registry", as
       "https://registry.npmjs.org/",
     ],
   ]);
+});
+
+test("workflow build and protected pack entrypoints cannot mutate release channels", async () => {
+  const sources = await Promise.all([
+    readFile("scripts/build-platform-release.mjs", "utf8"),
+    readFile("scripts/pack-protected-npm-package.mjs", "utf8"),
+  ]);
+  for (const source of sources) {
+    assert.doesNotMatch(source, /\bnpm\s+(?:publish|unpublish|deprecate|dist-tag|owner|access|token)\b/iu);
+    assert.doesNotMatch(source, /--publish\b|\bgit\b[\s\S]*?\bpush\b/iu);
+    assert.doesNotMatch(source, /\bgh\s+(?:api|release)\b|gitee/iu);
+  }
 });

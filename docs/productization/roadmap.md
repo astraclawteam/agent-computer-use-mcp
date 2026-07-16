@@ -37,8 +37,8 @@ claims.
 - Exact Windows x64 optional platform package with immutable SHA-256 inventory.
 - Complete offline ZIP assembled from the same platform stage.
 - 310 MiB compressed ZIP gate and official MCP SDK offline smoke.
-- Tag-only draft-first GitHub/npm workflow with provenance and post-publish clean install smoke.
-- Idempotent Gitee Release transport mirror with quota-safe parts, remote hashes, and reconstructed GitHub identity verification.
+- Tag-only artifact workflow that uploads two verified npm tarballs without registry, GitHub Release, Gitee, or Git writes.
+- Explicit one-package npm publication with clean-source rebuild and exact tarball identity verification.
 - Real 900,000 ms pull-request soak with official MCP clients, fault injection,
   Windows resource probes, immutable JSON/JSONL evidence, and fail-closed
   checksum verification.
@@ -59,7 +59,8 @@ claims.
   evidence on prepared Windows runners; the PR6B mechanism is implemented but
   implementation tests do not substitute for those long runs.
 - Run clean-runner release rehearsals and retain failed evidence beside passing retries.
-- Publish Windows x64 preview versions and validate npm trusted publishing plus GitHub/Gitee recovery procedures.
+- Publish Windows x64 preview versions through the explicit source-bound command and retain clean install evidence.
+- Define and validate any future GitHub/Gitee release publication as a separate, explicitly authorized operator workflow.
 - Continue OCR screenshot regression and warm region latency tracking.
 - Publish and lock the external full corpus (at least 400 OCR and 200 visual
   samples), then retain passing full-corpus results from the app-lab runner.

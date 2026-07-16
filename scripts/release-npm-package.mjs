@@ -1,6 +1,8 @@
 import { spawn } from "node:child_process";
-import { existsSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { createHash, randomUUID } from "node:crypto";
+import { createReadStream, existsSync } from "node:fs";
+import { mkdir, readFile, rm } from "node:fs/promises";
+import { basename, dirname, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
 const PUBLIC_PACKAGES = new Set([
@@ -17,6 +19,19 @@ export async function runNpmPackageRelease(args, operations = createNpmReleaseOp
   }
   if (typeof inspected.version !== "string" || inspected.version.length === 0) {
     throw new Error("release.version_missing");
+  }
+  const sourceVersion = await operations.sourceVersion();
+  if (inspected.version !== sourceVersion) {
+    throw new Error(`release.source_version_mismatch: expected ${sourceVersion}, received ${inspected.version}`);
+  }
+  const canonicalFilename = canonicalTarballFilename(inspected.name, sourceVersion);
+  if (basename(options.packagePath) !== canonicalFilename) {
+    throw new Error(`release.package_filename_mismatch: expected ${canonicalFilename}`);
+  }
+  const expectedSha512 = await operations.sourceArtifactSha512(inspected.name, sourceVersion);
+  const actualSha512 = await operations.sha512(options.packagePath);
+  if (actualSha512 !== expectedSha512) {
+    throw new Error("release.artifact_mismatch: tarball does not match the current clean source");
   }
 
   const registryVersion = await operations.registryVersion(inspected.name, inspected.version);
@@ -60,6 +75,11 @@ function parseArgs(args) {
 
 export function createNpmReleaseOperations(run = runNpm) {
   return {
+    async sourceVersion() {
+      return JSON.parse(await readFile("package.json", "utf8")).version;
+    },
+    sourceArtifactSha512: buildSourceArtifactSha512,
+    sha512: fileSha512,
     async inspect(packagePath) {
       const result = await run([
         "pack",
@@ -99,10 +119,76 @@ export function createNpmReleaseOperations(run = runNpm) {
   };
 }
 
+async function buildSourceArtifactSha512(name, version) {
+  await assertCleanSource();
+  const root = resolve("artifacts", `npm-release-verification-${randomUUID()}`);
+  try {
+    const packageRoot = join(root, "package");
+    const releaseRoot = join(root, "release");
+    await mkdir(releaseRoot, { recursive: true });
+    if (name === "agent-computer-use-mcp") {
+      const { packProtectedNpmPackage } = await import("./pack-protected-npm-package.mjs");
+      const report = await packProtectedNpmPackage({ packageRoot, releaseRoot });
+      assertBuiltIdentity(report.packageName, report.packageVersion, name, version);
+      return fileSha512(report.tarballPath);
+    }
+
+    const head = await runGit(["rev-parse", "HEAD"]);
+    if (head.exitCode !== 0) throw commandError("release.git_head_failed", head);
+    const sourceCommit = head.stdout.trim();
+    const { buildWindowsPlatformPackage } = await import("../src/windows-platform-package.mjs");
+    await buildWindowsPlatformPackage({
+      outputRoot: packageRoot,
+      version,
+      sourceCommit,
+      allowNetwork: true,
+    });
+    const packed = await runNpm(["pack", packageRoot, "--json", "--pack-destination", releaseRoot]);
+    if (packed.exitCode !== 0) throw commandError("release.npm_pack_failed", packed);
+    const [report] = JSON.parse(packed.stdout);
+    assertBuiltIdentity(report.name, report.version, name, version);
+    return fileSha512(join(releaseRoot, report.filename));
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+}
+
+async function assertCleanSource() {
+  const result = await runGit(["status", "--porcelain", "--untracked-files=normal"]);
+  if (result.exitCode !== 0) throw commandError("release.git_status_failed", result);
+  if (result.stdout.trim() !== "") throw new Error("release.source_dirty");
+}
+
+function canonicalTarballFilename(name, version) {
+  return name === "agent-computer-use-mcp"
+    ? `agent-computer-use-mcp-${version}.tgz`
+    : `agent-computer-use-win32-x64-${version}.tgz`;
+}
+
+function assertBuiltIdentity(name, version, expectedName, expectedVersion) {
+  if (name !== expectedName || version !== expectedVersion) {
+    throw new Error(`release.source_artifact_identity_mismatch: ${name}@${version}`);
+  }
+}
+
+async function fileSha512(path) {
+  const hash = createHash("sha512");
+  for await (const chunk of createReadStream(path)) hash.update(chunk);
+  return hash.digest("hex");
+}
+
+function runGit(args) {
+  return runCommand("git", args);
+}
+
 function runNpm(args) {
   const npm = resolveNpmCli();
+  return runCommand(npm.command, [...npm.prefixArgs, ...args]);
+}
+
+function runCommand(command, args) {
   return new Promise((resolvePromise, reject) => {
-    const child = spawn(npm.command, [...npm.prefixArgs, ...args], {
+    const child = spawn(command, args, {
       cwd: process.cwd(),
       stdio: ["ignore", "pipe", "pipe"],
       windowsHide: true,
