@@ -23,14 +23,23 @@
 
 ## Release Contract
 
-- Only a verified `v*` tag on main can release.
-- GitHub draft exists before npm publication.
-- Platform npm publishes before core npm; both use provenance.
-- A clean runner installs only `agent-computer-use-mcp@X.Y.Z` from public npm and passes MCP smoke before GitHub Release is published.
-- GitHub Release includes exactly both npm tarballs, complete ZIP, `checksums.txt`, `release-manifest.json`, and `SBOM.cdx.json`.
-- Gitee keeps each asset at or below 90 MiB byte-identical and deterministically splits larger assets into 90 MiB parts.
-- The Gitee manifest, every part hash, and each reconstructed original size and SHA-256 must match the published GitHub inventory. Any mismatch fails closed.
-- A Gitee repair run consumes an immutable published GitHub tag and assets; it cannot rebuild, publish npm, or move a tag.
+- Only a verified `v*` tag on main can produce release artifacts.
+- Tag CI has read-only repository permissions, no registry credentials, uploads
+  only the two npm tarballs, and performs no npm, Git, GitHub Release, or Gitee
+  mutation.
+- A maintainer uses the exact clean source checkout and runs the one-package
+  command without `--publish` before explicitly adding that flag.
+- The command accepts only the canonical filename and current package version,
+  rebuilds through the protected staging/inventory path, and requires an exact
+  SHA-512 match.
+- Verified bytes are copied once into an exclusive private snapshot. Registry
+  lookup and the single `npm publish` use only that snapshot; it is rechecked
+  before publication and removed in `finally`.
+- Platform npm publishes before core npm. The command never bumps, commits,
+  tags, pushes, publishes a second package, creates a GitHub Release, or mutates
+  Gitee.
+- GitHub/Gitee release publication is outside the current release workflow and
+  requires a separately authorized operator design and validation.
 
 ## Product Safety
 

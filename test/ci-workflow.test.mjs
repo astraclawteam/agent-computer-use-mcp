@@ -18,7 +18,8 @@ test("ordinary CI stays offline while release workflows own real platform assets
   assert.match(validation, /build-platform-release\.mjs --allow-network/u);
   assert.match(validation, /windows-release-size-report\.mjs/u);
   assert.match(release, /build-platform-release\.mjs --allow-network/u);
-  assert.match(release, /release:windows:size-report/u);
+  assert.doesNotMatch(release, /npm publish|NODE_AUTH_TOKEN/u);
+  assert.match(release, /\/\*\.tgz/u);
 });
 
 test("pull request CI runs and retains exact commercial soak evidence", async () => {

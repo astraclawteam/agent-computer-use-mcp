@@ -77,6 +77,17 @@ npm run release:npm:pack
 npm run phase:0.14
 ```
 
+Tag CI uploads the verified npm tarballs but does not publish them. Maintainers
+must preview and then explicitly publish one downloaded tarball at a time:
+
+```sh
+npm run release:npm:package -- --package <tarball>
+npm run release:npm:package -- --package <tarball> --publish
+```
+
+Publish the platform tarball before the core tarball. This command never bumps,
+commits, tags, or pushes source changes.
+
 The generated tarball must contain only protected `dist` runtime files and approved metadata. Source trees, tests, C#/Python source, and Source Maps block release.
 
 ## Windows Candidate Assembly
@@ -89,4 +100,9 @@ npm run release:windows:assemble
 npm run phase:0.15
 ```
 
-Generated candidates stay ignored under `artifacts/windows-release/<version>/`. They are `blocked_unsigned` CI evidence and must never be uploaded or published. Only PR5's protected production-signing workflow may turn a verified candidate into distributable GitHub Release assets.
+Generated candidates stay ignored under `artifacts/windows-release/<version>/`.
+They are `blocked_unsigned` CI evidence and must never be uploaded or published.
+The current tag workflow uploads only the two verified npm tarballs as a CI
+artifact; it does not publish Windows candidates or create a GitHub Release. Any
+future signing or GitHub Release workflow requires a separately approved and
+documented release policy.

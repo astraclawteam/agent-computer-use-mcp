@@ -34,13 +34,15 @@ npm install agent-computer-use-mcp@X.Y.Z
 
 ## Offline ZIP
 
-GitHub Release publishes a complete Windows x64 ZIP with the same protected core and byte-identical platform payload used by npm:
+The release assembly can produce a complete Windows x64 ZIP with the same protected core and byte-identical platform payload used by npm:
 
 ```powershell
 node .\agent-computer-use-mcp-X.Y.Z-windows-x64\bin\agent-computer-use-mcp.mjs
 ```
 
-The ZIP requires Node.js 20 or newer. It requires no npm install, network access, elevation, or setup program. Gitee Release mirrors the published GitHub assets byte-for-byte for regional access; GitHub and public npm remain authoritative.
+The ZIP requires Node.js 20 or newer. It requires no npm install, network access,
+elevation, or setup program. The current tag workflow does not upload or publish
+this ZIP; GitHub/Gitee release distribution requires a separate operator flow.
 
 ## Development
 
@@ -54,6 +56,7 @@ Release-focused commands:
 
 - `npm run release:npm:build:core`: build the protected core package with no first-party source maps.
 - `npm run release:npm:build:win32-x64`: build the immutable platform package from locked native assets.
+- `npm run release:npm:package -- --package <tarball>`: run the read-only registry preflight for one protected package; add `--publish` only for an intentional maintainer publish.
 - `npm run phase:0.14`: verify protected npm package integrity and standard MCP compatibility.
 - `npm run phase:0.15`: assemble both npm tarballs and the complete ZIP, compare platform inventories, and run the offline MCP smoke.
 - `npm run phase:7.8`: verify exact platform resolution and read-only repair guidance.
@@ -100,16 +103,26 @@ The native overlay and branded cursor are visible only while Gateway-managed com
 
 ## Release
 
-A verified `v*` tag triggers this order:
+A verified `v*` tag validates the source, builds and smokes the protected core and
+Windows x64 packages, and uploads the two npm tarballs as a CI artifact. The
+workflow has no npm credentials and never writes to the npm registry.
 
-1. Validate tag, main ancestry, changelog, and tests.
-2. Build the core package, Windows x64 platform package, complete ZIP, checksums, manifest, and CycloneDX SBOM.
-3. Create a draft GitHub Release.
-4. Publish the platform npm package, then the core npm package, both with provenance.
-5. Install only `agent-computer-use-mcp@X.Y.Z` from public npm and run an official MCP SDK smoke.
-6. Publish GitHub Release.
-7. Mirror the same files to Gitee and download-verify every hash.
+A maintainer downloads the verified tarballs and handles each package explicitly.
+Use the clean checkout for the exact tag, run the command without `--publish`
+first, then publish the platform package before the core package:
 
-Gitee failure never rebuilds or rolls back npm/GitHub publication. Maintainers retry only the mirror jobs after the regional service recovers.
+```powershell
+npm run release:npm:package -- --package <tarball>
+npm run release:npm:package -- --package <tarball> --publish
+```
 
-See [productization docs](docs/productization/README.md) and the [approved distribution design](docs/superpowers/specs/2026-07-11-npm-platform-distribution-design.md).
+The command accepts only the canonical filename and current source version. It
+rebuilds the corresponding protected staging package and requires an exact
+SHA-512 match before registry access. It publishes exactly the named tarball and
+does not change versions, commit, tag, push, publish a second package, create a
+GitHub Release, or mutate Gitee.
+
+See the [current release pipeline policy](docs/productization/real-release-pipeline-spec.md)
+and [release gates](docs/productization/release-gates.md). The earlier
+[automatic distribution design](docs/superpowers/specs/2026-07-11-npm-platform-distribution-design.md)
+is a superseded historical record, not the current release contract.

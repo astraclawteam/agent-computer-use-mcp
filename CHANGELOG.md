@@ -11,5 +11,5 @@ All notable changes to `agent-computer-use-mcp` are tracked here.
 - Complete Windows x64 offline ZIP that runs with Node.js 20+ without npm, network access, elevation, or setup software.
 - Runtime platform verification fails closed for missing, linked, mismatched, incomplete, extra, or corrupt files before MCP starts.
 - npm owns install, upgrade, downgrade, and rollback; runtime download and self-update are absent.
-- Tag-only draft-first workflow publishes both npm packages with provenance, runs a clean public install smoke, publishes GitHub Release, and mirrors exact bytes to Gitee.
+- Tag-only CI validates, builds, smokes, and uploads only the two npm tarballs; npm publication is an explicit maintainer action for one verified tarball at a time.
 - Product gates for overlay exclusion, OCR/perception latency, MCP concurrency, runtime soak, app smoke evidence, platform inventory identity, and the 310 MiB complete ZIP limit.

@@ -1,4 +1,4 @@
-name: Release
+name: Release npm artifacts
 
 on:
   push:
@@ -35,7 +35,7 @@ jobs:
           echo "generated_at=$(git show -s --format=%cI HEAD)" >> "${GITHUB_OUTPUT}"
       - run: npm test
 
-  build-release:
+  build-npm-artifacts:
     needs: validate
     runs-on: windows-2025
     steps:
@@ -50,177 +50,13 @@ jobs:
         with:
           dotnet-version: "10.0.x"
       - run: npm ci
-      - name: Build exact npm packages and complete ZIP
+      - name: Build, smoke, and pack exact npm tarballs
         env:
           AGENT_COMPUTER_USE_RELEASE_GENERATED_AT: ${{ needs.validate.outputs.generated_at }}
         run: node scripts/build-platform-release.mjs --allow-network
-      - run: npm run release:windows:size-report
       - uses: actions/upload-artifact@v4
         with:
-          name: platform-release-assets
-          path: artifacts/platform-release/${{ needs.validate.outputs.version }}
+          name: npm-release-tarballs
+          path: artifacts/platform-release/${{ needs.validate.outputs.version }}/*.tgz
           if-no-files-found: error
           retention-days: 7
-
-  draft-github-release:
-    needs: [validate, build-release]
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    steps:
-      - uses: actions/download-artifact@v4
-        with:
-          name: platform-release-assets
-          path: release-assets
-      - name: Create immutable draft boundary
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: gh release create "${GITHUB_REF_NAME}" release-assets/* --repo "${GITHUB_REPOSITORY}" --draft --verify-tag --title "${GITHUB_REF_NAME}" --generate-notes
-
-  publish-platform-npm:
-    needs: [validate, draft-github-release]
-    runs-on: ubuntu-latest
-    environment: release
-    permissions:
-      contents: read
-      id-token: write
-    steps:
-      - uses: actions/checkout@v6
-      - uses: actions/setup-node@v6
-        with:
-          node-version: "24.12.0"
-          registry-url: https://registry.npmjs.org
-          package-manager-cache: false
-      - uses: actions/download-artifact@v4
-        with:
-          name: platform-release-assets
-          path: release-assets
-      - name: Publish Windows platform package with validated authentication
-        run: |
-          node scripts/validate-npm-auth-token.mjs
-          npm whoami --registry https://registry.npmjs.org/
-          npm publish "./release-assets/agent-computer-use-win32-x64-${{ needs.validate.outputs.version }}.tgz" --access public --provenance
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_PLATFORM_TOKEN }}
-
-  publish-core-npm:
-    needs: [validate, publish-platform-npm]
-    runs-on: ubuntu-latest
-    environment: release
-    permissions:
-      contents: read
-      id-token: write
-    steps:
-      - uses: actions/checkout@v6
-      - uses: actions/setup-node@v6
-        with:
-          node-version: "24.12.0"
-          registry-url: https://registry.npmjs.org
-          package-manager-cache: false
-      - uses: actions/download-artifact@v4
-        with:
-          name: platform-release-assets
-          path: release-assets
-      - name: Publish core package with validated authentication
-        run: |
-          node scripts/validate-npm-auth-token.mjs
-          npm whoami --registry https://registry.npmjs.org/
-          npm publish "./release-assets/agent-computer-use-mcp-${{ needs.validate.outputs.version }}.tgz" --access public --provenance
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_CORE_TOKEN }}
-
-  post-publish-npm-smoke:
-    needs: [validate, publish-core-npm]
-    runs-on: windows-2025
-    steps:
-      - uses: actions/checkout@v6
-      - uses: actions/setup-node@v6
-        with:
-          node-version: "24.12.0"
-          package-manager-cache: false
-      - run: npm ci
-      - run: node scripts/post-publish-smoke.mjs
-
-  publish-github-release:
-    needs: post-publish-npm-smoke
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    steps:
-      - name: Publish only after public npm smoke passes
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: gh release edit "${GITHUB_REF_NAME}" --repo "${GITHUB_REPOSITORY}" --draft=false
-
-  mirror-gitee-release:
-    needs: publish-github-release
-    runs-on: ubuntu-latest
-    environment: release
-    permissions:
-      contents: read
-    steps:
-      - uses: actions/checkout@v6
-        with:
-          fetch-depth: 0
-      - uses: actions/setup-node@v6
-        with:
-          node-version: "24.12.0"
-          package-manager-cache: false
-      - name: Download published GitHub bytes
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: gh release download "${GITHUB_REF_NAME}" --repo "${GITHUB_REPOSITORY}" --dir mirror-assets
-      - name: Download authoritative GitHub release notes
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: gh release view "${GITHUB_REF_NAME}" --repo "${GITHUB_REPOSITORY}" --json body --jq .body > "${RUNNER_TEMP}/github-release-notes.md"
-      - name: Fast-forward Gitee main and create the immutable release tag
-        env:
-          GITEE_OWNER: ${{ vars.GITEE_OWNER }}
-          GITEE_REPO: ${{ vars.GITEE_REPO }}
-          GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}
-          RELEASE_TAG: ${{ github.ref_name }}
-          RELEASE_SOURCE_COMMIT: ${{ github.sha }}
-          GITEE_MAIN_COMMIT: ${{ github.sha }}
-        run: node scripts/sync-gitee-release-ref.mjs
-      - name: Mirror quota-safe assets to Gitee
-        env:
-          GITEE_OWNER: ${{ vars.GITEE_OWNER }}
-          GITEE_REPO: ${{ vars.GITEE_REPO }}
-          GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}
-          RELEASE_TAG: ${{ github.ref_name }}
-          RELEASE_SOURCE_COMMIT: ${{ github.sha }}
-          RELEASE_NOTES_PATH: ${{ runner.temp }}/github-release-notes.md
-          RELEASE_ASSET_ROOT: mirror-assets
-        run: node scripts/mirror-gitee-release.mjs
-
-  verify-gitee-release:
-    needs: mirror-gitee-release
-    runs-on: ubuntu-latest
-    environment: release
-    permissions:
-      contents: read
-    steps:
-      - uses: actions/checkout@v6
-      - uses: actions/setup-node@v6
-        with:
-          node-version: "24.12.0"
-          package-manager-cache: false
-      - name: Download authoritative GitHub bytes
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: gh release download "${GITHUB_REF_NAME}" --repo "${GITHUB_REPOSITORY}" --dir mirror-assets
-      - name: Download authoritative GitHub release notes
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: gh release view "${GITHUB_REF_NAME}" --repo "${GITHUB_REPOSITORY}" --json body --jq .body > "${RUNNER_TEMP}/github-release-notes.md"
-      - name: Verify Gitee parts and reconstructed identities
-        env:
-          GITEE_OWNER: ${{ vars.GITEE_OWNER }}
-          GITEE_REPO: ${{ vars.GITEE_REPO }}
-          GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}
-          RELEASE_TAG: ${{ github.ref_name }}
-          RELEASE_SOURCE_COMMIT: ${{ github.sha }}
-          RELEASE_NOTES_PATH: ${{ runner.temp }}/github-release-notes.md
-          RELEASE_ASSET_ROOT: mirror-assets
-        run: node scripts/verify-gitee-release.mjs
