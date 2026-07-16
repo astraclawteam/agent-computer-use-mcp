@@ -1,7 +1,7 @@
 import { execFile, spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { createReadStream, createWriteStream, existsSync } from "node:fs";
-import { mkdir, mkdtemp, readFile, rm, symlink } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { Transform } from "node:stream";
@@ -301,10 +301,17 @@ export async function createReleaseSourceSnapshot(identity) {
     if (packageJson.version !== identity.version) {
       throw new Error(`release.source_version_mismatch: expected ${identity.version}, received ${packageJson.version}`);
     }
-    const dependencyRoot = resolve("node_modules");
-    if (existsSync(dependencyRoot)) {
-      await symlink(dependencyRoot, join(sourceRoot, "node_modules"), process.platform === "win32" ? "junction" : "dir");
-    }
+    const installed = await runNpm([
+      "ci",
+      "--ignore-scripts",
+      "--include=dev",
+      "--prefer-offline",
+      "--no-audit",
+      "--no-fund",
+      "--registry",
+      REGISTRY,
+    ], sourceRoot);
+    if (installed.exitCode !== 0) throw commandError("release.source_dependency_install_failed", installed);
     return {
       root: sourceRoot,
       cleanup: () => rm(root, { recursive: true, force: true }),
@@ -434,7 +441,7 @@ async function buildSourceArtifactSha512(name, version, identity) {
       "--source-commit",
       identity.commit,
       "--cache-root",
-      resolve("artifacts/release-cache"),
+      join(snapshot.root, "artifacts", "release-cache"),
       "--allow-network",
     ], snapshot.root);
     if (built.exitCode !== 0) throw commandError("release.source_platform_build_failed", built);

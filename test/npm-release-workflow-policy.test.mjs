@@ -127,16 +127,31 @@ test("release source identity accepts only the exact versioned main commit", asy
 test("release source snapshot contains only bytes from the bound commit", async () => {
   const markerName = `.release-source-snapshot-test-${process.pid}.tmp`;
   const markerPath = resolve(markerName);
+  const dependencyMarkerName = `.release-source-dependency-test-${process.pid}.tmp`;
+  const dependencyMarkerPath = resolve("node_modules", dependencyMarkerName);
   await writeFile(markerPath, "worktree-only bytes");
+  await writeFile(dependencyMarkerPath, "mutable workspace dependency bytes");
   let snapshot;
   try {
     snapshot = await createReleaseSourceSnapshot({ commit: "HEAD", version: "0.0.1" });
     await assert.rejects(() => readFile(join(snapshot.root, markerName)), /ENOENT/u);
+    await assert.rejects(
+      () => readFile(join(snapshot.root, "node_modules", dependencyMarkerName)),
+      /ENOENT/u,
+    );
     assert.notEqual(snapshot.root, process.cwd());
   } finally {
     await snapshot?.cleanup();
     await rm(markerPath, { force: true });
+    await rm(dependencyMarkerPath, { force: true });
   }
+});
+
+test("release rebuild uses only a private dependency tree and asset cache", async () => {
+  const source = await readFile("scripts/release-npm-package.mjs", "utf8");
+  assert.doesNotMatch(source, /symlink\([^\n]*node_modules|resolve\("node_modules"\)/u);
+  assert.doesNotMatch(source, /resolve\("artifacts\/release-cache"\)/u);
+  assert.match(source, /"ci",[\s\S]*?"--ignore-scripts"[\s\S]*?"--registry",\s*REGISTRY/u);
 });
 
 test("manual package release is preview-only unless --publish is explicit", async () => {
