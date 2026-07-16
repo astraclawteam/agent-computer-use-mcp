@@ -122,4 +122,7 @@ SHA-512 match before registry access. It publishes exactly the named tarball and
 does not change versions, commit, tag, push, publish a second package, create a
 GitHub Release, or mutate Gitee.
 
-See [productization docs](docs/productization/README.md) and the [approved distribution design](docs/superpowers/specs/2026-07-11-npm-platform-distribution-design.md).
+See the [current release pipeline policy](docs/productization/real-release-pipeline-spec.md)
+and [release gates](docs/productization/release-gates.md). The earlier
+[automatic distribution design](docs/superpowers/specs/2026-07-11-npm-platform-distribution-design.md)
+is a superseded historical record, not the current release contract.

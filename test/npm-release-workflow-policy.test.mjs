@@ -7,7 +7,9 @@ import { test } from "node:test";
 import { parse } from "yaml";
 
 import {
+  createVerifiedSnapshot,
   createNpmReleaseOperations,
+  hardenWindowsSnapshotDirectory,
   runNpmPackageRelease,
 } from "../scripts/release-npm-package.mjs";
 
@@ -228,6 +230,57 @@ test("registry lookup cannot swap the bytes selected for publication", async () 
     assert.notEqual(publishedPath, packagePath);
     assert.deepEqual(publishedBytes, verifiedBytes);
     await assert.rejects(() => readFile(publishedPath), /ENOENT/u);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("Windows ACL hardening failure stops before registry lookup and publication", async () => {
+  const root = await mkdtemp(join(tmpdir(), "agent-computer-use-release-acl-failure-"));
+  const packagePath = join(root, "agent-computer-use-mcp-1.2.3.tgz");
+  const bytes = Buffer.from("verified-tarball-bytes");
+  const expectedSha512 = createHash("sha512").update(bytes).digest("hex");
+  let registryCalled = false;
+  let publishCalled = false;
+  try {
+    await writeFile(packagePath, bytes);
+    const operations = {
+      inspect: async () => ({ name: "agent-computer-use-mcp", version: "1.2.3" }),
+      sourceVersion: async () => "1.2.3",
+      sourceArtifactSha512: async () => expectedSha512,
+      sha512: async () => expectedSha512,
+      snapshot: (...args) => createVerifiedSnapshot(...args, {
+        platform: "win32",
+        hardenDirectory: async () => { throw new Error("release.snapshot_acl_failed"); },
+      }),
+      registryVersion: async () => { registryCalled = true; return null; },
+      publish: async () => { publishCalled = true; },
+    };
+
+    await assert.rejects(
+      () => runNpmPackageRelease(["--package", packagePath, "--publish"], operations),
+      /release\.snapshot_acl_failed/u,
+    );
+    assert.equal(registryCalled, false);
+    assert.equal(publishCalled, false);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("Windows snapshot ACL grants write only to owner SYSTEM and Administrators", {
+  skip: process.platform !== "win32",
+}, async () => {
+  const root = await mkdtemp(join(tmpdir(), "agent-computer-use-release-acl-real-"));
+  try {
+    const report = await hardenWindowsSnapshotDirectory(root);
+    assert.deepEqual(new Set(report.entries.map(({ principal }) => principal.toLowerCase())), new Set([
+      report.accountName.toLowerCase(),
+      "nt authority\\system",
+      "builtin\\administrators",
+    ]));
+    assert.equal(report.entries.every(({ permissions }) => permissions.includes("(F)")), true);
+    assert.equal(report.entries.every(({ permissions }) => !permissions.includes("(I)")), true);
   } finally {
     await rm(root, { recursive: true, force: true });
   }

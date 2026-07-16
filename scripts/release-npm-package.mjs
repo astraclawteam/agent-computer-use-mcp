@@ -1,4 +1,4 @@
-import { spawn } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import { createReadStream, createWriteStream, existsSync } from "node:fs";
 import { mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
@@ -7,6 +7,9 @@ import { basename, dirname, join, resolve } from "node:path";
 import { Transform } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { pathToFileURL } from "node:url";
+import { promisify } from "node:util";
+
+const execFileAsync = promisify(execFile);
 
 const PUBLIC_PACKAGES = new Set([
   "agent-computer-use-mcp",
@@ -126,7 +129,7 @@ export function createNpmReleaseOperations(run = runNpm) {
   };
 }
 
-async function createVerifiedSnapshot(sourcePath, canonicalFilename, expectedSha512) {
+export async function createVerifiedSnapshot(sourcePath, canonicalFilename, expectedSha512, options = {}) {
   const root = await mkdtemp(join(tmpdir(), "agent-computer-use-npm-release-"));
   const snapshotPath = join(root, canonicalFilename);
   const hash = createHash("sha512");
@@ -137,6 +140,9 @@ async function createVerifiedSnapshot(sourcePath, canonicalFilename, expectedSha
     },
   });
   try {
+    if ((options.platform ?? process.platform) === "win32") {
+      await (options.hardenDirectory ?? hardenWindowsSnapshotDirectory)(root);
+    }
     await pipeline(
       createReadStream(sourcePath),
       hashStream,
@@ -153,6 +159,95 @@ async function createVerifiedSnapshot(sourcePath, canonicalFilename, expectedSha
     await rm(root, { recursive: true, force: true });
     throw cause;
   }
+}
+
+export async function hardenWindowsSnapshotDirectory(root) {
+  const directory = resolve(root);
+  const whoami = windowsSystemExecutable("whoami.exe");
+  const icacls = windowsSystemExecutable("icacls.exe");
+  let identity;
+  try {
+    identity = await execFileAsync(whoami, ["/user", "/fo", "csv", "/nh"], windowsExecOptions());
+  } catch (cause) {
+    throw new Error("release.snapshot_acl_identity_failed", { cause });
+  }
+  const match = identity.stdout.trim().match(/^"((?:""|[^"])*)","(S-\d+(?:-\d+)+)"\s*$/u);
+  if (!match) throw new Error("release.snapshot_acl_identity_invalid");
+  const accountName = match[1].replaceAll('""', '"');
+  const sid = match[2];
+
+  try {
+    await execFileAsync(icacls, [
+      directory,
+      "/inheritance:r",
+      "/grant:r",
+      `*${sid}:(OI)(CI)F`,
+      "*S-1-5-18:(OI)(CI)F",
+      "*S-1-5-32-544:(OI)(CI)F",
+    ], windowsExecOptions());
+  } catch (cause) {
+    throw new Error("release.snapshot_acl_hardening_failed", { cause });
+  }
+
+  let acl;
+  try {
+    acl = await execFileAsync(icacls, [directory], windowsExecOptions());
+  } catch (cause) {
+    throw new Error("release.snapshot_acl_verification_failed", { cause });
+  }
+  const entries = parseIcaclsEntries(acl.stdout, directory);
+  const expected = [
+    [accountName, sid],
+    ["NT AUTHORITY\\SYSTEM", "S-1-5-18"],
+    ["BUILTIN\\Administrators", "S-1-5-32-544"],
+  ];
+  const isExpectedPrincipal = (principal, aliases) => aliases.some(
+    (alias) => normalizeWindowsPrincipal(principal) === normalizeWindowsPrincipal(alias),
+  );
+  if (
+    entries.length !== expected.length
+    || entries.some(({ permissions }) => !permissions.includes("(F)") || permissions.includes("(I)"))
+    || expected.some((aliases) => entries.filter(({ principal }) => isExpectedPrincipal(principal, aliases)).length !== 1)
+  ) {
+    throw new Error("release.snapshot_acl_invalid");
+  }
+  return { accountName, sid, entries };
+}
+
+function windowsSystemExecutable(filename) {
+  const windowsRoot = process.env.SystemRoot ?? process.env.WINDIR;
+  if (!windowsRoot) throw new Error("release.windows_root_missing");
+  return join(windowsRoot, "System32", filename);
+}
+
+function windowsExecOptions() {
+  return {
+    encoding: "utf8",
+    windowsHide: true,
+    shell: false,
+  };
+}
+
+function parseIcaclsEntries(stdout, directory) {
+  const normalizedDirectory = directory.toLocaleLowerCase("en-US");
+  const entries = [];
+  for (const line of stdout.split(/\r?\n/u)) {
+    let value = line.trim();
+    if (value.toLocaleLowerCase("en-US").startsWith(normalizedDirectory)) {
+      value = value.slice(directory.length).trim();
+    }
+    const separator = value.indexOf(":(");
+    if (separator <= 0) continue;
+    entries.push({
+      principal: value.slice(0, separator),
+      permissions: value.slice(separator + 1),
+    });
+  }
+  return entries;
+}
+
+function normalizeWindowsPrincipal(principal) {
+  return principal.replace(/^\*/u, "").toLocaleLowerCase("en-US");
 }
 
 async function buildSourceArtifactSha512(name, version) {
