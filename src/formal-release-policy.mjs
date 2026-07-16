@@ -29,13 +29,9 @@ export function validatePlatformReleasePlan(plan = {}) {
   const expectedAssets = [
     `agent-computer-use-mcp-${plan.version}.tgz`,
     `agent-computer-use-win32-x64-${plan.version}.tgz`,
-    `agent-computer-use-mcp-${plan.version}-windows-x64.zip`,
-    "checksums.txt",
-    "release-manifest.json",
-    "SBOM.cdx.json",
   ];
   if (JSON.stringify(plan.assets) !== JSON.stringify(expectedAssets)) {
-    violations.push(violation("release.assets_invalid", "Release artifact inventory does not match the platform contract."));
+    violations.push(violation("release.assets_invalid", "CI artifact inventory must contain only the two npm tarballs."));
   }
   if (JSON.stringify(plan.npmPublishOrder) !== JSON.stringify([
     "@xiaozhiclaw/agent-computer-use-win32-x64",
@@ -43,8 +39,8 @@ export function validatePlatformReleasePlan(plan = {}) {
   ])) {
     violations.push(violation("release.npm_order_invalid", "Platform npm package must publish before core."));
   }
-  if (plan.provenance !== true) violations.push(violation("release.provenance_required", "npm provenance is required."));
-  if (plan.githubDraftFirst !== true) violations.push(violation("release.github_draft_required", "GitHub draft must exist before npm publication."));
+  if (plan.ciPublishesNpm !== false) violations.push(violation("release.ci_npm_publish_forbidden", "CI must not publish to npm."));
+  if (plan.manualPublishRequiresFlag !== true) violations.push(violation("release.manual_publish_flag_required", "Manual npm publication requires the explicit --publish flag."));
   if (plan.runtimeDownloadAllowed !== false) violations.push(violation("release.runtime_download_forbidden", "Runtime downloads are forbidden."));
   return result(violations);
 }

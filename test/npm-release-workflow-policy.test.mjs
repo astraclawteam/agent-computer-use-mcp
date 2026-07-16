@@ -25,6 +25,17 @@ test("source workspace stays private and CI only uploads packed npm tarballs", a
     /\bnpm\s+(?:publish|unpublish|deprecate|dist-tag|owner|access|token)\b/iu,
   );
   assert.doesNotMatch(source, /NODE_AUTH_TOKEN|NPM_(?:CORE|PLATFORM_)?TOKEN/iu);
+  assert.doesNotMatch(source, /--publish\b/iu);
+  assert.doesNotMatch(source, /\bgit\b[^\r\n]*\bpush\b/iu);
+  assert.doesNotMatch(source, /\bgh\s+(?:api|release)\b/iu);
+  assert.doesNotMatch(source, /gitee/iu);
+
+  assert.deepEqual(workflow.permissions, { contents: "read" });
+  for (const job of Object.values(workflow.jobs)) {
+    assert.notEqual(job.permissions, "write-all");
+    assert.notEqual(job.permissions?.contents, "write");
+    assert.notEqual(job.permissions?.["id-token"], "write");
+  }
 
   const upload = workflow.jobs["build-npm-artifacts"].steps.find(
     ({ uses }) => uses === "actions/upload-artifact@v4",

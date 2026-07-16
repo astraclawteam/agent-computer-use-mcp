@@ -27,22 +27,19 @@ test("formal release identity requires exact v-tag main commit and changelog", (
   }
 });
 
-test("formal release plan requires exact assets platform-first npm and provenance", () => {
+test("formal release plan keeps CI artifact-only and npm publication explicit", () => {
   const plan = {
     version: "0.0.1",
     assets: [
       "agent-computer-use-mcp-0.0.1.tgz",
       "agent-computer-use-win32-x64-0.0.1.tgz",
-      "agent-computer-use-mcp-0.0.1-windows-x64.zip",
-      "checksums.txt",
-      "release-manifest.json",
-      "SBOM.cdx.json",
     ],
     npmPublishOrder: ["@xiaozhiclaw/agent-computer-use-win32-x64", "agent-computer-use-mcp"],
-    provenance: true,
-    githubDraftFirst: true,
+    ciPublishesNpm: false,
+    manualPublishRequiresFlag: true,
     runtimeDownloadAllowed: false,
   };
   assert.deepEqual(validatePlatformReleasePlan(plan), { status: "passed", violations: [] });
-  assert.equal(validatePlatformReleasePlan({ ...plan, provenance: false }).status, "failed");
+  assert.equal(validatePlatformReleasePlan({ ...plan, ciPublishesNpm: true }).status, "failed");
+  assert.equal(validatePlatformReleasePlan({ ...plan, manualPublishRequiresFlag: false }).status, "failed");
 });
