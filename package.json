@@ -50,6 +50,7 @@
     "release:npm:build:win32-x64": "node scripts/build-windows-platform-package.mjs",
     "release:npm:smoke": "node scripts/protected-npm-smoke.mjs",
     "release:npm:pack": "node scripts/pack-protected-npm-package.mjs",
+    "release:npm:package": "node scripts/release-npm-package.mjs",
     "mcp": "node src/computer-use-mcp-server.mjs",
     "smoke": "node src/smoke.mjs",
     "phase:0.6": "node src/phase-0-6.mjs",

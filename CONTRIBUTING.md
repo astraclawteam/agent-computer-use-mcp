@@ -77,6 +77,17 @@ npm run release:npm:pack
 npm run phase:0.14
 ```
 
+Tag CI uploads the verified npm tarballs but does not publish them. Maintainers
+must preview and then explicitly publish one downloaded tarball at a time:
+
+```sh
+npm run release:npm:package -- --package <tarball>
+npm run release:npm:package -- --package <tarball> --publish
+```
+
+Publish the platform tarball before the core tarball. This command never bumps,
+commits, tags, or pushes source changes.
+
 The generated tarball must contain only protected `dist` runtime files and approved metadata. Source trees, tests, C#/Python source, and Source Maps block release.
 
 ## Windows Candidate Assembly
