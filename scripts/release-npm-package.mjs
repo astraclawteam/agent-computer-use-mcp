@@ -301,6 +301,7 @@ export async function createReleaseSourceSnapshot(identity) {
     if (packageJson.version !== identity.version) {
       throw new Error(`release.source_version_mismatch: expected ${identity.version}, received ${packageJson.version}`);
     }
+    await mkdir(join(root, "npm-cache"));
     const installed = await runNpm([
       "ci",
       "--ignore-scripts",
@@ -310,6 +311,8 @@ export async function createReleaseSourceSnapshot(identity) {
       "--no-fund",
       "--registry",
       REGISTRY,
+      "--cache",
+      join(root, "npm-cache"),
     ], sourceRoot);
     if (installed.exitCode !== 0) throw commandError("release.source_dependency_install_failed", installed);
     return {

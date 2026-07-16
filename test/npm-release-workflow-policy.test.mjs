@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { homedir, tmpdir } from "node:os";
+import { dirname, join, resolve } from "node:path";
 import { test } from "node:test";
 import { parse } from "yaml";
 
@@ -129,8 +129,14 @@ test("release source snapshot contains only bytes from the bound commit", async 
   const markerPath = resolve(markerName);
   const dependencyMarkerName = `.release-source-dependency-test-${process.pid}.tmp`;
   const dependencyMarkerPath = resolve("node_modules", dependencyMarkerName);
+  const cacheMarkerName = `.release-source-cache-test-${process.pid}.tmp`;
+  const defaultCacheRoot = process.platform === "win32"
+    ? join(process.env.LOCALAPPDATA, "npm-cache")
+    : join(homedir(), ".npm");
+  const defaultCacheMarkerPath = join(defaultCacheRoot, cacheMarkerName);
   await writeFile(markerPath, "worktree-only bytes");
   await writeFile(dependencyMarkerPath, "mutable workspace dependency bytes");
+  await writeFile(defaultCacheMarkerPath, "mutable default npm cache bytes");
   let snapshot;
   try {
     snapshot = await createReleaseSourceSnapshot({ commit: "HEAD", version: "0.0.1" });
@@ -139,11 +145,15 @@ test("release source snapshot contains only bytes from the bound commit", async 
       () => readFile(join(snapshot.root, "node_modules", dependencyMarkerName)),
       /ENOENT/u,
     );
+    const privateCacheRoot = join(dirname(snapshot.root), "npm-cache");
+    assert.equal((await stat(privateCacheRoot)).isDirectory(), true);
+    await assert.rejects(() => readFile(join(privateCacheRoot, cacheMarkerName)), /ENOENT/u);
     assert.notEqual(snapshot.root, process.cwd());
   } finally {
     await snapshot?.cleanup();
     await rm(markerPath, { force: true });
     await rm(dependencyMarkerPath, { force: true });
+    await rm(defaultCacheMarkerPath, { force: true });
   }
 });
 
@@ -152,6 +162,7 @@ test("release rebuild uses only a private dependency tree and asset cache", asyn
   assert.doesNotMatch(source, /symlink\([^\n]*node_modules|resolve\("node_modules"\)/u);
   assert.doesNotMatch(source, /resolve\("artifacts\/release-cache"\)/u);
   assert.match(source, /"ci",[\s\S]*?"--ignore-scripts"[\s\S]*?"--registry",\s*REGISTRY/u);
+  assert.match(source, /"--cache",\s*join\(root, "npm-cache"\)/u);
 });
 
 test("manual package release is preview-only unless --publish is explicit", async () => {
