@@ -1,8 +1,11 @@
 import { spawn } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
-import { createReadStream, existsSync } from "node:fs";
-import { mkdir, readFile, rm } from "node:fs/promises";
+import { createReadStream, createWriteStream, existsSync } from "node:fs";
+import { mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
+import { Transform } from "node:stream";
+import { pipeline } from "node:stream/promises";
 import { pathToFileURL } from "node:url";
 
 const PUBLIC_PACKAGES = new Set([
@@ -29,28 +32,31 @@ export async function runNpmPackageRelease(args, operations = createNpmReleaseOp
     throw new Error(`release.package_filename_mismatch: expected ${canonicalFilename}`);
   }
   const expectedSha512 = await operations.sourceArtifactSha512(inspected.name, sourceVersion);
-  const actualSha512 = await operations.sha512(options.packagePath);
-  if (actualSha512 !== expectedSha512) {
-    throw new Error("release.artifact_mismatch: tarball does not match the current clean source");
-  }
+  const snapshot = await operations.snapshot(options.packagePath, canonicalFilename, expectedSha512);
+  try {
+    const registryVersion = await operations.registryVersion(inspected.name, inspected.version);
+    const base = {
+      packageName: inspected.name,
+      packageVersion: inspected.version,
+      packagePath: options.packagePath,
+      publishRequested: options.publish,
+    };
+    if (registryVersion === inspected.version) {
+      return { ...base, status: "already-published" };
+    }
+    if (registryVersion !== null) {
+      throw new Error(`release.registry_identity_invalid: ${registryVersion}`);
+    }
+    if (!options.publish) return { ...base, status: "ready" };
 
-  const registryVersion = await operations.registryVersion(inspected.name, inspected.version);
-  const base = {
-    packageName: inspected.name,
-    packageVersion: inspected.version,
-    packagePath: options.packagePath,
-    publishRequested: options.publish,
-  };
-  if (registryVersion === inspected.version) {
-    return { ...base, status: "already-published" };
+    if (await operations.sha512(snapshot.path) !== expectedSha512) {
+      throw new Error("release.snapshot_mismatch");
+    }
+    await operations.publish(snapshot.path);
+    return { ...base, status: "published" };
+  } finally {
+    await snapshot.cleanup();
   }
-  if (registryVersion !== null) {
-    throw new Error(`release.registry_identity_invalid: ${registryVersion}`);
-  }
-  if (!options.publish) return { ...base, status: "ready" };
-
-  await operations.publish(options.packagePath);
-  return { ...base, status: "published" };
 }
 
 function parseArgs(args) {
@@ -80,6 +86,7 @@ export function createNpmReleaseOperations(run = runNpm) {
     },
     sourceArtifactSha512: buildSourceArtifactSha512,
     sha512: fileSha512,
+    snapshot: createVerifiedSnapshot,
     async inspect(packagePath) {
       const result = await run([
         "pack",
@@ -117,6 +124,35 @@ export function createNpmReleaseOperations(run = runNpm) {
       if (result.exitCode !== 0) throw commandError("release.publish_failed", result);
     },
   };
+}
+
+async function createVerifiedSnapshot(sourcePath, canonicalFilename, expectedSha512) {
+  const root = await mkdtemp(join(tmpdir(), "agent-computer-use-npm-release-"));
+  const snapshotPath = join(root, canonicalFilename);
+  const hash = createHash("sha512");
+  const hashStream = new Transform({
+    transform(chunk, _encoding, callback) {
+      hash.update(chunk);
+      callback(null, chunk);
+    },
+  });
+  try {
+    await pipeline(
+      createReadStream(sourcePath),
+      hashStream,
+      createWriteStream(snapshotPath, { flags: "wx", mode: 0o600 }),
+    );
+    if (hash.digest("hex") !== expectedSha512) {
+      throw new Error("release.artifact_mismatch: tarball does not match the current clean source");
+    }
+    return {
+      path: snapshotPath,
+      cleanup: () => rm(root, { recursive: true, force: true }),
+    };
+  } catch (cause) {
+    await rm(root, { recursive: true, force: true });
+    throw cause;
+  }
 }
 
 async function buildSourceArtifactSha512(name, version) {

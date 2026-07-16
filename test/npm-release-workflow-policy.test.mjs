@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
-import { resolve } from "node:path";
+import { createHash } from "node:crypto";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
 import { test } from "node:test";
 import { parse } from "yaml";
 
@@ -62,6 +64,10 @@ test("manual package release is preview-only unless --publish is explicit", asyn
     sourceVersion: async () => "1.2.3",
     sourceArtifactSha512: async () => "verified-sha512",
     sha512: async () => "verified-sha512",
+    snapshot: async (_sourcePath, canonicalFilename) => ({
+      path: resolve("private-snapshot", canonicalFilename),
+      cleanup: async () => {},
+    }),
   };
 
   const preview = await runNpmPackageRelease(
@@ -98,7 +104,8 @@ test("manual package release rejects renamed stale and content-drifted tarballs"
     inspect: async () => ({ name: "agent-computer-use-mcp", version: "1.2.3" }),
     sourceVersion: async () => "1.2.3",
     sourceArtifactSha512: async () => "expected-sha512",
-    sha512: async () => "actual-sha512",
+    sha512: async () => "expected-sha512",
+    snapshot: async () => { throw new Error("release.artifact_mismatch"); },
     registryVersion: async () => null,
     publish: async () => assert.fail("publish must remain unreachable"),
   };
@@ -160,6 +167,8 @@ test("explicit publication sends exactly one tarball to the public registry", as
   operations.sourceVersion = async () => "1.2.3";
   operations.sourceArtifactSha512 = async () => "verified-sha512";
   operations.sha512 = async () => "verified-sha512";
+  const snapshotPath = resolve("private-snapshot", "agent-computer-use-mcp-1.2.3.tgz");
+  operations.snapshot = async () => ({ path: snapshotPath, cleanup: async () => {} });
 
   const report = await runNpmPackageRelease(
     ["--package", "agent-computer-use-mcp-1.2.3.tgz", "--publish"],
@@ -179,7 +188,7 @@ test("explicit publication sends exactly one tarball to the public registry", as
     ],
     [
       "publish",
-      resolve("agent-computer-use-mcp-1.2.3.tgz"),
+      snapshotPath,
       "--access",
       "public",
       "--ignore-scripts",
@@ -187,6 +196,41 @@ test("explicit publication sends exactly one tarball to the public registry", as
       "https://registry.npmjs.org/",
     ],
   ]);
+});
+
+test("registry lookup cannot swap the bytes selected for publication", async () => {
+  const root = await mkdtemp(join(tmpdir(), "agent-computer-use-release-toctou-"));
+  const packagePath = join(root, "agent-computer-use-mcp-1.2.3.tgz");
+  const verifiedBytes = Buffer.from("verified-tarball-bytes");
+  const replacementBytes = Buffer.from("replacement-tarball-bytes");
+  const expectedSha512 = createHash("sha512").update(verifiedBytes).digest("hex");
+  let publishedPath;
+  let publishedBytes;
+  try {
+    await writeFile(packagePath, verifiedBytes);
+    const operations = createNpmReleaseOperations(async () => ({
+      exitCode: 0,
+      stdout: JSON.stringify([{ name: "agent-computer-use-mcp", version: "1.2.3" }]),
+      stderr: "",
+    }));
+    operations.sourceVersion = async () => "1.2.3";
+    operations.sourceArtifactSha512 = async () => expectedSha512;
+    operations.registryVersion = async () => {
+      await writeFile(packagePath, replacementBytes);
+      return null;
+    };
+    operations.publish = async (selectedPath) => {
+      publishedPath = selectedPath;
+      publishedBytes = await readFile(selectedPath);
+    };
+
+    assert.equal((await runNpmPackageRelease(["--package", packagePath, "--publish"], operations)).status, "published");
+    assert.notEqual(publishedPath, packagePath);
+    assert.deepEqual(publishedBytes, verifiedBytes);
+    await assert.rejects(() => readFile(publishedPath), /ENOENT/u);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
 });
 
 test("workflow build and protected pack entrypoints cannot mutate release channels", async () => {
