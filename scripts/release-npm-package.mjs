@@ -1,7 +1,7 @@
 import { execFile, spawn } from "node:child_process";
-import { createHash, randomUUID } from "node:crypto";
+import { createHash } from "node:crypto";
 import { createReadStream, createWriteStream, existsSync } from "node:fs";
-import { mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { Transform } from "node:stream";
@@ -15,7 +15,66 @@ const PUBLIC_PACKAGES = new Set([
   "agent-computer-use-mcp",
   "@xiaozhiclaw/agent-computer-use-win32-x64",
 ]);
+const CORE_PACKAGE = "agent-computer-use-mcp";
+const PLATFORM_PACKAGE = "@xiaozhiclaw/agent-computer-use-win32-x64";
 const REGISTRY = "https://registry.npmjs.org/";
+const POSTPUBLISH_ATTEMPTS = 3;
+
+export async function verifyReleaseSourceIdentity(version, run = runGit) {
+  if (!/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/u.test(version)) {
+    throw new Error("release.source_version_invalid");
+  }
+  const tag = `v${version}`;
+  await requireGit(run, ["fetch", "--quiet", "origin", "main", "--tags"], "release.git_fetch_failed");
+  const status = await requireGit(
+    run,
+    ["status", "--porcelain", "--untracked-files=normal"],
+    "release.git_status_failed",
+  );
+  if (status.stdout.trim() !== "") throw new Error("release.source_dirty");
+  const head = (await requireGit(run, ["rev-parse", "HEAD"], "release.git_head_failed")).stdout.trim();
+  const tagged = (await requireGit(run, ["rev-list", "-n", "1", tag], "release.git_tag_failed")).stdout.trim();
+  const trackedMain = (await requireGit(
+    run,
+    ["rev-parse", "refs/remotes/origin/main"],
+    "release.git_origin_main_failed",
+  )).stdout.trim();
+  const remote = await requireGit(
+    run,
+    ["ls-remote", "origin", "refs/heads/main", `refs/tags/${tag}`, `refs/tags/${tag}^{}`],
+    "release.git_remote_identity_failed",
+  );
+  const remoteRefs = new Map(remote.stdout.trim().split(/\r?\n/u).filter(Boolean).map((line) => {
+    const [commit, ref] = line.split(/\s+/u);
+    return [ref, commit];
+  }));
+  const remoteMain = remoteRefs.get("refs/heads/main");
+  const remoteTag = remoteRefs.get(`refs/tags/${tag}^{}`) ?? remoteRefs.get(`refs/tags/${tag}`);
+  if (
+    !/^[0-9a-f]{40}$/u.test(head)
+    || head !== tagged
+    || head !== trackedMain
+    || head !== remoteMain
+    || head !== remoteTag
+  ) {
+    throw new Error("release.source_commit_not_authoritative");
+  }
+  const packageSource = await requireGit(
+    run,
+    ["show", `${head}:package.json`],
+    "release.git_package_version_failed",
+  );
+  if (JSON.parse(packageSource.stdout).version !== version) {
+    throw new Error("release.source_version_mismatch");
+  }
+  return { version, tag, commit: head };
+}
+
+async function requireGit(run, args, code) {
+  const result = await run(args);
+  if (result.exitCode !== 0) throw commandError(code, result);
+  return result;
+}
 
 export async function runNpmPackageRelease(args, operations = createNpmReleaseOperations()) {
   const options = parseArgs(args);
@@ -26,7 +85,8 @@ export async function runNpmPackageRelease(args, operations = createNpmReleaseOp
   if (typeof inspected.version !== "string" || inspected.version.length === 0) {
     throw new Error("release.version_missing");
   }
-  const sourceVersion = await operations.sourceVersion();
+  const sourceIdentity = await operations.sourceIdentity(inspected.version);
+  const sourceVersion = await operations.sourceVersion(sourceIdentity);
   if (inspected.version !== sourceVersion) {
     throw new Error(`release.source_version_mismatch: expected ${sourceVersion}, received ${inspected.version}`);
   }
@@ -34,21 +94,28 @@ export async function runNpmPackageRelease(args, operations = createNpmReleaseOp
   if (basename(options.packagePath) !== canonicalFilename) {
     throw new Error(`release.package_filename_mismatch: expected ${canonicalFilename}`);
   }
-  const expectedSha512 = await operations.sourceArtifactSha512(inspected.name, sourceVersion);
+  const expectedSha512 = await operations.sourceArtifactSha512(inspected.name, sourceVersion, sourceIdentity);
+  const expectedPlatformSha512 = inspected.name === CORE_PACKAGE
+    ? await operations.sourceArtifactSha512(PLATFORM_PACKAGE, sourceVersion, sourceIdentity)
+    : null;
+  await operations.verifySourceIdentity(sourceIdentity);
   const snapshot = await operations.snapshot(options.packagePath, canonicalFilename, expectedSha512);
   try {
-    const registryVersion = await operations.registryVersion(inspected.name, inspected.version);
+    if (expectedPlatformSha512 !== null) {
+      const platform = await operations.registryPackage(PLATFORM_PACKAGE, inspected.version);
+      if (platform === null) throw new Error("release.platform_registry_missing");
+      assertRegistryPackage(platform, inspected.version, expectedPlatformSha512, "release.platform_registry");
+    }
+    const registryPackage = await operations.registryPackage(inspected.name, inspected.version);
     const base = {
       packageName: inspected.name,
       packageVersion: inspected.version,
       packagePath: options.packagePath,
       publishRequested: options.publish,
     };
-    if (registryVersion === inspected.version) {
+    if (registryPackage !== null) {
+      assertRegistryPackage(registryPackage, inspected.version, expectedSha512, "release.registry");
       return { ...base, status: "already-published" };
-    }
-    if (registryVersion !== null) {
-      throw new Error(`release.registry_identity_invalid: ${registryVersion}`);
     }
     if (!options.publish) return { ...base, status: "ready" };
 
@@ -56,6 +123,12 @@ export async function runNpmPackageRelease(args, operations = createNpmReleaseOp
       throw new Error("release.snapshot_mismatch");
     }
     await operations.publish(snapshot.path);
+    await verifyPostpublishRegistry(
+      operations,
+      inspected.name,
+      inspected.version,
+      expectedSha512,
+    );
     return { ...base, status: "published" };
   } finally {
     await snapshot.cleanup();
@@ -84,8 +157,11 @@ function parseArgs(args) {
 
 export function createNpmReleaseOperations(run = runNpm) {
   return {
-    async sourceVersion() {
-      return JSON.parse(await readFile("package.json", "utf8")).version;
+    sourceIdentity: verifyReleaseSourceIdentity,
+    async sourceVersion(identity) { return identity.version; },
+    async verifySourceIdentity(expected) {
+      const actual = await verifyReleaseSourceIdentity(expected.version);
+      if (actual.commit !== expected.commit) throw new Error("release.source_changed_after_build");
     },
     sourceArtifactSha512: buildSourceArtifactSha512,
     sha512: fileSha512,
@@ -101,19 +177,27 @@ export function createNpmReleaseOperations(run = runNpm) {
       const [report] = JSON.parse(result.stdout);
       return { name: report.name, version: report.version };
     },
-    async registryVersion(name, version) {
+    async registryPackage(name, version) {
       const result = await run([
         "view",
         `${name}@${version}`,
         "version",
+        "dist.integrity",
         "--json",
         "--registry",
         REGISTRY,
       ]);
-      if (result.exitCode === 0) return JSON.parse(result.stdout);
+      if (result.exitCode === 0) {
+        const report = JSON.parse(result.stdout);
+        return {
+          version: report.version,
+          integrity: report["dist.integrity"] ?? report.dist?.integrity,
+        };
+      }
       if (/\bE404\b|404 Not Found/iu.test(result.stderr)) return null;
       throw commandError("release.registry_preflight_failed", result);
     },
+    waitForRegistry: () => new Promise((resolvePromise) => setTimeout(resolvePromise, 1000)),
     async publish(packagePath) {
       const result = await run([
         "publish",
@@ -127,6 +211,38 @@ export function createNpmReleaseOperations(run = runNpm) {
       if (result.exitCode !== 0) throw commandError("release.publish_failed", result);
     },
   };
+}
+
+function assertRegistryPackage(actual, expectedVersion, expectedSha512, code) {
+  if (actual.version !== expectedVersion) {
+    throw new Error(`${code}_identity_invalid: ${actual.version}`);
+  }
+  if (actual.integrity !== sha512Integrity(expectedSha512)) {
+    throw new Error(`${code}_integrity_mismatch`);
+  }
+}
+
+async function verifyPostpublishRegistry(operations, name, version, expectedSha512) {
+  let lastFailure;
+  for (let attempt = 0; attempt < POSTPUBLISH_ATTEMPTS; attempt += 1) {
+    if (attempt > 0) await operations.waitForRegistry?.();
+    try {
+      const actual = await operations.registryPackage(name, version);
+      if (actual !== null) {
+        assertRegistryPackage(actual, version, expectedSha512, "release.postpublish_registry");
+        return;
+      }
+      lastFailure = new Error("release.postpublish_registry_missing");
+    } catch (cause) {
+      lastFailure = cause;
+    }
+  }
+  throw new Error("release.postpublish_verification_failed", { cause: lastFailure });
+}
+
+function sha512Integrity(sha512) {
+  if (!/^[0-9a-f]{128}$/u.test(sha512)) throw new Error("release.sha512_invalid");
+  return `sha512-${Buffer.from(sha512, "hex").toString("base64")}`;
 }
 
 export async function createVerifiedSnapshot(sourcePath, canonicalFilename, expectedSha512, options = {}) {
@@ -153,6 +269,44 @@ export async function createVerifiedSnapshot(sourcePath, canonicalFilename, expe
     }
     return {
       path: snapshotPath,
+      cleanup: () => rm(root, { recursive: true, force: true }),
+    };
+  } catch (cause) {
+    await rm(root, { recursive: true, force: true });
+    throw cause;
+  }
+}
+
+export async function createReleaseSourceSnapshot(identity) {
+  const root = await mkdtemp(join(tmpdir(), "agent-computer-use-release-source-"));
+  const sourceRoot = join(root, "source");
+  const archivePath = join(root, "source.tar");
+  try {
+    if (process.platform === "win32") await hardenWindowsSnapshotDirectory(root);
+    await mkdir(sourceRoot);
+    const archived = await runGit([
+      "archive",
+      "--format=tar",
+      `--output=${archivePath}`,
+      identity.commit,
+    ]);
+    if (archived.exitCode !== 0) throw commandError("release.source_archive_failed", archived);
+    const extracted = await runCommand(
+      process.platform === "win32" ? windowsSystemExecutable("tar.exe") : "tar",
+      ["-xf", archivePath, "-C", sourceRoot],
+    );
+    if (extracted.exitCode !== 0) throw commandError("release.source_extract_failed", extracted);
+    await rm(archivePath, { force: true });
+    const packageJson = JSON.parse(await readFile(join(sourceRoot, "package.json"), "utf8"));
+    if (packageJson.version !== identity.version) {
+      throw new Error(`release.source_version_mismatch: expected ${identity.version}, received ${packageJson.version}`);
+    }
+    const dependencyRoot = resolve("node_modules");
+    if (existsSync(dependencyRoot)) {
+      await symlink(dependencyRoot, join(sourceRoot, "node_modules"), process.platform === "win32" ? "junction" : "dir");
+    }
+    return {
+      root: sourceRoot,
       cleanup: () => rm(root, { recursive: true, force: true }),
     };
   } catch (cause) {
@@ -250,44 +404,51 @@ function normalizeWindowsPrincipal(principal) {
   return principal.replace(/^\*/u, "").toLocaleLowerCase("en-US");
 }
 
-async function buildSourceArtifactSha512(name, version) {
-  await assertCleanSource();
-  const root = resolve("artifacts", `npm-release-verification-${randomUUID()}`);
+async function buildSourceArtifactSha512(name, version, identity) {
+  if (identity?.commit === undefined || identity.version !== version) {
+    throw new Error("release.source_identity_missing");
+  }
+  const snapshot = await createReleaseSourceSnapshot(identity);
   try {
-    const packageRoot = join(root, "package");
-    const releaseRoot = join(root, "release");
+    const packageRoot = join(snapshot.root, "artifacts", "npm-release-verification", "package");
+    const releaseRoot = join(snapshot.root, "artifacts", "npm-release-verification", "release");
     await mkdir(releaseRoot, { recursive: true });
     if (name === "agent-computer-use-mcp") {
-      const { packProtectedNpmPackage } = await import("./pack-protected-npm-package.mjs");
-      const report = await packProtectedNpmPackage({ packageRoot, releaseRoot });
+      const built = await runCommand(
+        process.execPath,
+        [join(snapshot.root, "scripts", "pack-protected-npm-package.mjs")],
+        snapshot.root,
+      );
+      if (built.exitCode !== 0) throw commandError("release.source_core_build_failed", built);
+      const report = JSON.parse(built.stdout);
       assertBuiltIdentity(report.packageName, report.packageVersion, name, version);
       return fileSha512(report.tarballPath);
     }
 
-    const head = await runGit(["rev-parse", "HEAD"]);
-    if (head.exitCode !== 0) throw commandError("release.git_head_failed", head);
-    const sourceCommit = head.stdout.trim();
-    const { buildWindowsPlatformPackage } = await import("../src/windows-platform-package.mjs");
-    await buildWindowsPlatformPackage({
-      outputRoot: packageRoot,
+    const built = await runCommand(process.execPath, [
+      join(snapshot.root, "scripts", "build-windows-platform-package.mjs"),
+      "--output",
+      packageRoot,
+      "--version",
       version,
-      sourceCommit,
-      allowNetwork: true,
-    });
-    const packed = await runNpm(["pack", packageRoot, "--json", "--pack-destination", releaseRoot]);
+      "--source-commit",
+      identity.commit,
+      "--cache-root",
+      resolve("artifacts/release-cache"),
+      "--allow-network",
+    ], snapshot.root);
+    if (built.exitCode !== 0) throw commandError("release.source_platform_build_failed", built);
+    const packed = await runNpm(
+      ["pack", packageRoot, "--json", "--pack-destination", releaseRoot],
+      snapshot.root,
+    );
     if (packed.exitCode !== 0) throw commandError("release.npm_pack_failed", packed);
     const [report] = JSON.parse(packed.stdout);
     assertBuiltIdentity(report.name, report.version, name, version);
     return fileSha512(join(releaseRoot, report.filename));
   } finally {
-    await rm(root, { recursive: true, force: true });
+    await snapshot.cleanup();
   }
-}
-
-async function assertCleanSource() {
-  const result = await runGit(["status", "--porcelain", "--untracked-files=normal"]);
-  if (result.exitCode !== 0) throw commandError("release.git_status_failed", result);
-  if (result.stdout.trim() !== "") throw new Error("release.source_dirty");
 }
 
 function canonicalTarballFilename(name, version) {
@@ -312,15 +473,15 @@ function runGit(args) {
   return runCommand("git", args);
 }
 
-function runNpm(args) {
+function runNpm(args, cwd = process.cwd()) {
   const npm = resolveNpmCli();
-  return runCommand(npm.command, [...npm.prefixArgs, ...args]);
+  return runCommand(npm.command, [...npm.prefixArgs, ...args], cwd);
 }
 
-function runCommand(command, args) {
+function runCommand(command, args, cwd = process.cwd()) {
   return new Promise((resolvePromise, reject) => {
     const child = spawn(command, args, {
-      cwd: process.cwd(),
+      cwd,
       stdio: ["ignore", "pipe", "pipe"],
       windowsHide: true,
       shell: false,
