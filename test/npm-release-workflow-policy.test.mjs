@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { test } from "node:test";
@@ -134,6 +134,7 @@ test("release source snapshot contains only bytes from the bound commit", async 
     ? join(process.env.LOCALAPPDATA, "npm-cache")
     : join(homedir(), ".npm");
   const defaultCacheMarkerPath = join(defaultCacheRoot, cacheMarkerName);
+  await mkdir(defaultCacheRoot, { recursive: true });
   await writeFile(markerPath, "worktree-only bytes");
   await writeFile(dependencyMarkerPath, "mutable workspace dependency bytes");
   await writeFile(defaultCacheMarkerPath, "mutable default npm cache bytes");
@@ -303,6 +304,27 @@ test("tarball inspection is local and separate from the registry lookup", async 
     version: "1.2.3",
   });
   assert.deepEqual(calls[0], ["pack", "candidate.tgz", "--dry-run", "--json"]);
+});
+
+test("registry lookup treats only npm propagation misses as unpublished", async () => {
+  for (const code of ["E404", "ETARGET"]) {
+    const operations = createNpmReleaseOperations(async () => ({
+      exitCode: 1,
+      stdout: "",
+      stderr: `npm error code ${code}`,
+    }));
+    assert.equal(await operations.registryPackage("agent-computer-use-mcp", "1.2.3"), null, code);
+  }
+
+  const operations = createNpmReleaseOperations(async () => ({
+    exitCode: 1,
+    stdout: "",
+    stderr: "npm error code E403",
+  }));
+  await assert.rejects(
+    () => operations.registryPackage("agent-computer-use-mcp", "1.2.3"),
+    /release\.registry_preflight_failed/u,
+  );
 });
 
 test("explicit publication sends exactly one tarball to the public registry", async () => {
@@ -519,6 +541,7 @@ test("publication retries until registry version and integrity match", async () 
     { version: "1.2.3", integrity: expectedIntegrity },
   ];
   let publishCalls = 0;
+  const waitDelays = [];
   const operations = {
     inspect: async () => ({
       name: "@xiaozhiclaw/agent-computer-use-win32-x64",
@@ -534,7 +557,7 @@ test("publication retries until registry version and integrity match", async () 
       cleanup: async () => {},
     }),
     registryPackage: async () => registryResults.shift(),
-    waitForRegistry: async () => {},
+    waitForRegistry: async (delayMs) => { waitDelays.push(delayMs); },
     publish: async () => { publishCalls += 1; },
   };
 
@@ -545,7 +568,61 @@ test("publication retries until registry version and integrity match", async () 
   ], operations);
   assert.equal(report.status, "published");
   assert.equal(publishCalls, 1);
+  assert.deepEqual(waitDelays, [5_000]);
   assert.equal(registryResults.length, 0);
+});
+
+test("publication does not retry authentication or integrity failures", async () => {
+  const expectedSha512 = createHash("sha512").update("canonical-platform").digest("hex");
+  const identity = { version: "1.2.3", tag: "v1.2.3", commit: "a".repeat(40) };
+  const failures = [
+    ["authentication", async () => { throw new Error("npm error code E401"); }, /E401/u],
+    [
+      "integrity",
+      async () => ({ version: "1.2.3", integrity: `sha512-${Buffer.alloc(64).toString("base64")}` }),
+      /release\.postpublish_registry_integrity_mismatch/u,
+    ],
+  ];
+
+  for (const [name, postpublishResult, expected] of failures) {
+    let registryCalls = 0;
+    let publishCalls = 0;
+    const waitDelays = [];
+    const operations = {
+      inspect: async () => ({
+        name: "@xiaozhiclaw/agent-computer-use-win32-x64",
+        version: "1.2.3",
+      }),
+      sourceIdentity: async () => identity,
+      sourceVersion: async () => "1.2.3",
+      sourceArtifactSha512: async () => expectedSha512,
+      verifySourceIdentity: async () => {},
+      sha512: async () => expectedSha512,
+      snapshot: async (_sourcePath, canonicalFilename) => ({
+        path: resolve("private-snapshot", canonicalFilename),
+        cleanup: async () => {},
+      }),
+      registryPackage: async () => {
+        registryCalls += 1;
+        return registryCalls === 1 ? null : postpublishResult();
+      },
+      waitForRegistry: async (delayMs) => { waitDelays.push(delayMs); },
+      publish: async () => { publishCalls += 1; },
+    };
+
+    await assert.rejects(
+      () => runNpmPackageRelease([
+        "--package",
+        "agent-computer-use-win32-x64-1.2.3.tgz",
+        "--publish",
+      ], operations),
+      expected,
+      name,
+    );
+    assert.equal(registryCalls, 2, name);
+    assert.equal(publishCalls, 1, name);
+    assert.deepEqual(waitDelays, [], name);
+  }
 });
 
 test("publication fails after a bounded registry verification window", async () => {
@@ -580,7 +657,7 @@ test("publication fails after a bounded registry verification window", async () 
     ], operations),
     /release\.postpublish_verification_failed/u,
   );
-  assert.equal(registryCalls, 4);
+  assert.equal(registryCalls, 8);
   assert.equal(publishCalls, 1);
 });
 

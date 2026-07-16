@@ -18,7 +18,7 @@ const PUBLIC_PACKAGES = new Set([
 const CORE_PACKAGE = "agent-computer-use-mcp";
 const PLATFORM_PACKAGE = "@xiaozhiclaw/agent-computer-use-win32-x64";
 const REGISTRY = "https://registry.npmjs.org/";
-const POSTPUBLISH_ATTEMPTS = 3;
+const POSTPUBLISH_RETRY_DELAYS_MS = [5_000, 15_000, 30_000, 60_000, 90_000, 120_000];
 
 export async function verifyReleaseSourceIdentity(version, run = runGit) {
   if (!/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/u.test(version)) {
@@ -194,10 +194,10 @@ export function createNpmReleaseOperations(run = runNpm) {
           integrity: report["dist.integrity"] ?? report.dist?.integrity,
         };
       }
-      if (/\bE404\b|404 Not Found/iu.test(result.stderr)) return null;
+      if (/\b(?:E404|ETARGET)\b|404 Not Found|No matching version found/iu.test(result.stderr)) return null;
       throw commandError("release.registry_preflight_failed", result);
     },
-    waitForRegistry: () => new Promise((resolvePromise) => setTimeout(resolvePromise, 1000)),
+    waitForRegistry: (delayMs) => new Promise((resolvePromise) => setTimeout(resolvePromise, delayMs)),
     async publish(packagePath) {
       const result = await run([
         "publish",
@@ -224,20 +224,21 @@ function assertRegistryPackage(actual, expectedVersion, expectedSha512, code) {
 
 async function verifyPostpublishRegistry(operations, name, version, expectedSha512) {
   let lastFailure;
-  for (let attempt = 0; attempt < POSTPUBLISH_ATTEMPTS; attempt += 1) {
-    if (attempt > 0) await operations.waitForRegistry?.();
-    try {
-      const actual = await operations.registryPackage(name, version);
-      if (actual !== null) {
-        assertRegistryPackage(actual, version, expectedSha512, "release.postpublish_registry");
-        return;
-      }
-      lastFailure = new Error("release.postpublish_registry_missing");
-    } catch (cause) {
-      lastFailure = cause;
+  for (let attempt = 0; attempt <= POSTPUBLISH_RETRY_DELAYS_MS.length; attempt += 1) {
+    if (attempt > 0) {
+      await operations.waitForRegistry?.(POSTPUBLISH_RETRY_DELAYS_MS[attempt - 1]);
     }
+    const actual = await operations.registryPackage(name, version);
+    if (actual !== null) {
+      assertRegistryPackage(actual, version, expectedSha512, "release.postpublish_registry");
+      return;
+    }
+    lastFailure = new Error("release.postpublish_registry_missing");
   }
-  throw new Error("release.postpublish_verification_failed", { cause: lastFailure });
+  throw new Error(
+    "release.postpublish_verification_failed: publication may have succeeded; verify the exact registry version before republishing",
+    { cause: lastFailure },
+  );
 }
 
 function sha512Integrity(sha512) {
