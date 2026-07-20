@@ -9,6 +9,8 @@ import { pipeline } from "node:stream/promises";
 import { pathToFileURL } from "node:url";
 import { promisify } from "node:util";
 
+import { assertNoCutoverReleaseDefinition, readRetirementRecords, validateRetirementRecords } from "./block-source-publish.mjs";
+
 const execFileAsync = promisify(execFile);
 
 const PUBLIC_PACKAGES = new Set([
@@ -19,6 +21,12 @@ const CORE_PACKAGE = "agent-computer-use-mcp";
 const PLATFORM_PACKAGE = "@xiaozhiclaw/agent-computer-use-win32-x64";
 const REGISTRY = "https://registry.npmjs.org/";
 const POSTPUBLISH_RETRY_DELAYS_MS = [5_000, 15_000, 30_000, 60_000, 90_000, 120_000];
+
+export function assertReleaseCutover(records, releaseDefinitionPresent = true) {
+  validateRetirementRecords(records);
+  const cutOver = records.some((record) => record?.cutover === true && PUBLIC_PACKAGES.has(record.package));
+  if (cutOver && releaseDefinitionPresent) throw new Error("release.cut_over_definition_present");
+}
 
 export async function verifyReleaseSourceIdentity(version, run = runGit) {
   if (!/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/u.test(version)) {
@@ -76,7 +84,9 @@ async function requireGit(run, args, code) {
   return result;
 }
 
-export async function runNpmPackageRelease(args, operations = createNpmReleaseOperations()) {
+export async function runNpmPackageRelease(args, operations = createNpmReleaseOperations(), { root = process.cwd() } = {}) {
+  const retirementRecords = readRetirementRecords(root);
+  assertNoCutoverReleaseDefinition(retirementRecords, root);
   const options = parseArgs(args);
   const inspected = await operations.inspect(options.packagePath);
   if (!PUBLIC_PACKAGES.has(inspected.name)) {
