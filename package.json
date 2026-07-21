@@ -48,7 +48,6 @@
     "mcp": "node src/computer-use-mcp-server.mjs",
     "artifact:windows:build": "node scripts/build-windows-sea-artifact.mjs",
     "artifact:windows:smoke": "node scripts/smoke-windows-sea-artifact.mjs",
-    "npm:retire": "node scripts/finalize-npm-retirements.mjs",
     "smoke": "node src/smoke.mjs",
     "phase:0.6": "node src/phase-0-6.mjs",
     "phase:0.6:real": "node src/real-cua-lab-sequence.mjs",

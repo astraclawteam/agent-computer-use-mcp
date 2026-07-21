@@ -3,14 +3,14 @@
     "package": "agent-computer-use-mcp",
     "replacement": null,
     "message": "Install Computer Use from Hub through the XiaozhiClaw Runtime MCP Host.",
-    "effectiveDate": null,
-    "cutover": false
+    "effectiveDate": "2026-07-21",
+    "cutover": true
   },
   {
     "package": "@xiaozhiclaw/agent-computer-use-win32-x64",
     "replacement": null,
     "message": "Install Computer Use from Hub through the XiaozhiClaw Runtime MCP Host.",
-    "effectiveDate": null,
-    "cutover": false
+    "effectiveDate": "2026-07-21",
+    "cutover": true
   }
 ]
