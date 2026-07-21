@@ -293,7 +293,7 @@ const load = (name) => import(pathToFileURL(path.join(artifactRoot, "runtime", n
 }
 
 async function defaultArchive({ sourceRoot, outputPath }) {
-  await execFileAsync("tar", ["-czf", basename(outputPath), "artifact"], {
+  await execFileAsync("tar", ["--format=ustar", "-czf", basename(outputPath), "artifact"], {
     cwd: sourceRoot, windowsHide: true,
   });
 }
