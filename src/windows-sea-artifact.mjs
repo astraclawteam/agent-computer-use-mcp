@@ -114,6 +114,10 @@ export async function verifyWindowsSeaArtifactTree(artifactRoot, inventory) {
   if (!Array.isArray(inventory?.files) || inventory.files.length === 0) {
     throw seaError("sea.inventory_invalid", "files");
   }
+  const foreignOnnxTarget = inventory.files.find(({ path }) => (
+    /^runtime\/node_modules\/onnxruntime-node\/bin\/napi-v6\/(?!win32\/x64\/)/u.test(path)
+  ));
+  if (foreignOnnxTarget) throw seaError("sea.foreign_native_target", foreignOnnxTarget.path);
   for (const file of inventory.files) {
     const normalized = normalizeRelativePath(file.path);
     const fullPath = resolve(root, ...normalized.split("/"));
@@ -210,9 +214,21 @@ async function copyRuntimePackages(runtimeRoot) {
     await mkdir(dirname(destination), { recursive: true });
     await cp(source, destination, {
       recursive: true,
-      filter: (path) => !/\\(?:test|tests|script|docs?)\\|\.(?:map|md|ts)$/iu.test(path),
+      filter: (path) => shouldCopyRuntimePackagePath(source, path, packageName),
     });
   }
+}
+
+function shouldCopyRuntimePackagePath(sourceRoot, path, packageName) {
+  if (/\\(?:test|tests|script|docs?)\\|\.(?:map|md|ts)$/iu.test(path)) return false;
+  if (packageName !== "onnxruntime-node") return true;
+  const packagePath = relative(sourceRoot, path).replaceAll("\\", "/");
+  const nativeRoot = "bin/napi-v6";
+  if (packagePath === nativeRoot) return true;
+  if (!packagePath.startsWith(`${nativeRoot}/`)) return true;
+  return packagePath === `${nativeRoot}/win32`
+    || packagePath === `${nativeRoot}/win32/x64`
+    || packagePath.startsWith(`${nativeRoot}/win32/x64/`);
 }
 
 async function defaultBuildExecutable(artifactRoot) {

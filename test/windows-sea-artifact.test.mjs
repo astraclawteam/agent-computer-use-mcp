@@ -66,3 +66,12 @@ test("artifact tree verification rejects tampering", async (t) => {
   };
   await assert.rejects(verifyWindowsSeaArtifactTree(root, inventory), /checksum|integrity/i);
 });
+
+test("Windows SEA verification rejects foreign ONNX native targets", async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "computer-use-sea-foreign-native-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const path = "runtime/node_modules/onnxruntime-node/bin/napi-v6/linux/x64/onnxruntime_binding.node";
+  await assert.rejects(verifyWindowsSeaArtifactTree(root, {
+    files: [{ path, sizeBytes: 1, sha256: "a".repeat(64) }],
+  }), /foreign.*native|native.*target/i);
+});
