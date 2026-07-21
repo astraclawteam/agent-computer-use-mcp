@@ -61,11 +61,24 @@ export async function runComputerUseMcpServer(options = {}) {
   await server.connect(new StdioServerTransport());
 }
 
+export const main = runComputerUseMcpServer;
+
 export function createPlatformOcrSession(platformRuntime, options = {}) {
   const Session = options.Session ?? OcrSidecarSession;
   const paths = platformRuntime?.paths;
   if (!paths?.ocrModelRoot || !paths?.ocrRuntimeRoot) return new Session();
+  const processOptions = platformRuntime?.ocrProcess
+    ? {
+        node: {
+          command: platformRuntime.ocrProcess.command,
+          args: platformRuntime.ocrProcess.args ?? [],
+          label: "sea",
+        },
+        sidecarPath: platformRuntime.ocrProcess.sidecarPath,
+      }
+    : {};
   return new Session({
+    ...processOptions,
     environment: createPlatformOcrEnvironment({
       modelRoot: paths.ocrModelRoot,
       runtimeRoot: paths.ocrRuntimeRoot,
@@ -244,5 +257,5 @@ export function shouldAutoStartComputerUseMcpServer(options = {}) {
 }
 
 if (shouldAutoStartComputerUseMcpServer()) {
-  await runComputerUseMcpServer();
+  await main();
 }

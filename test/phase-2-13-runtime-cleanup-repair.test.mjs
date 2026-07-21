@@ -8,7 +8,7 @@ test("computer.doctor output schema allows runtime cleanup diagnostics", () => {
   const doctor = COMPUTER_USE_MCP_TOOLS.find((tool) => tool.name === "computer.doctor");
 
   assert.equal(doctor.outputSchema.properties.runtimeCleanup.anyOf.length, 2);
-  assert.equal(doctor.outputSchema.required.includes("runtimeCleanup"), true);
+  assert.equal(doctor.outputSchema.allOf[0].else.required.includes("runtimeCleanup"), true);
 });
 
 test("doctor exposes runtime cleanup repair actions without desktop control", async () => {

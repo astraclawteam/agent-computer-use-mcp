@@ -8,7 +8,7 @@ const schemaDeclaresPendingAccessApproval = listStateTool
   ?.pendingAccessApproval
   ?.anyOf
   ?.length === 2
-  && listStateTool.outputSchema.required.includes("pendingAccessApproval");
+  && listStateTool.outputSchema.allOf?.[0]?.else?.required?.includes("pendingAccessApproval");
 
 const router = new ComputerUseProviderRouter({
   driver: {

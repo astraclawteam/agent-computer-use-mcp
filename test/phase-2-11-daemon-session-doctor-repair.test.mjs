@@ -8,7 +8,7 @@ test("computer.doctor output schema allows daemon session diagnostics", () => {
   const doctor = COMPUTER_USE_MCP_TOOLS.find((tool) => tool.name === "computer.doctor");
 
   assert.equal(doctor.outputSchema.properties.daemonSession.anyOf.length, 2);
-  assert.equal(doctor.outputSchema.required.includes("daemonSession"), true);
+  assert.equal(doctor.outputSchema.allOf[0].else.required.includes("daemonSession"), true);
 });
 
 test("doctor includes daemon session degraded state and repair actions", async () => {

@@ -27,16 +27,36 @@ export function assertLabObservationSufficient(observation) {
 }
 
 function normalizeElement(element, index) {
+  const role = String(element.role ?? element.type ?? "unknown").toLowerCase();
   return {
     elementToken: String(element.elementToken ?? element.element_token ?? element.id ?? element.token ?? index + 1),
     elementIndex: element.elementIndex ?? element.element_index ?? index,
-    role: String(element.role ?? element.type ?? "unknown").toLowerCase(),
+    role,
     name: String(element.name ?? element.label ?? element.title ?? ""),
     value: element.value == null ? "" : String(element.value),
     state: element.state ?? {},
-    actions: element.actions ?? [],
-    bounds: element.bounds ?? element.frame,
+    actions: normalizeActions(element.actions, role),
+    bounds: normalizeBounds(element.bounds ?? element.frame),
     confidence: element.confidence ?? 1,
     source: element.source ?? "cua-driver",
+  };
+}
+
+function normalizeActions(actions, role) {
+  if (Array.isArray(actions) && actions.length > 0) return actions;
+  if (["edit", "textbox"].includes(role)) return ["set_value"];
+  if (["button", "menuitem", "link", "checkbox", "radio"].includes(role)) return ["click"];
+  return [];
+}
+
+function normalizeBounds(bounds) {
+  if (!bounds) return bounds;
+  const x = Number(bounds.x ?? bounds.left ?? 0);
+  const y = Number(bounds.y ?? bounds.top ?? 0);
+  return {
+    x,
+    y,
+    width: Number(bounds.width ?? bounds.w ?? ((bounds.right ?? x) - x)),
+    height: Number(bounds.height ?? bounds.h ?? ((bounds.bottom ?? y) - y)),
   };
 }

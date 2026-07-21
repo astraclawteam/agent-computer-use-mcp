@@ -28,8 +28,8 @@ test("CuaDriverMcpDriver maps request/capture/action to cua-driver MCP tools", a
           return {
             window: { id: 42, title: "Agent Computer Use Native Lab", pid: 1234 },
             elements: [
-              { element_index: 0, role: "Edit", label: "Name", actions: ["set_value"] },
-              { element_index: 1, role: "Button", label: "Save", actions: ["click"] },
+              { element_index: 0, role: "Edit", label: "Name", bounds: { x: 10, y: 20, w: 120, h: 24 } },
+              { element_index: 1, role: "Button", label: "Save" },
             ],
           };
         }
@@ -64,6 +64,8 @@ test("CuaDriverMcpDriver maps request/capture/action to cua-driver MCP tools", a
     [0, "Name"],
     [1, "Save"],
   ]);
+  assert.deepEqual(observation.elements[0].bounds, { x: 10, y: 20, width: 120, height: 24 });
+  assert.deepEqual(observation.elements.map(({ actions }) => actions), [["set_value"], ["click"]]);
 
   await driver.setValue({ window, elementIndex: 0, elementToken: "name", value: "agent-computer-use" });
   await driver.click({ window, elementIndex: 1, elementToken: "save", deliveryMode: "background" });

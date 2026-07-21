@@ -4,6 +4,7 @@ import { readFile } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { createCanvas, loadImage } from "ppu-ocv";
 import { PaddleOcrService } from "ppu-paddle-ocr";
 import * as ort from "onnxruntime-node";
@@ -38,27 +39,38 @@ const runtimePriority = [
   },
 ];
 
-const command = process.argv[2] ?? "doctor";
-
-try {
-  if (command === "doctor") {
-    printJson(await doctor());
-  } else if (command === "recognize") {
-    const request = JSON.parse(await readStdin());
-    printJson(await recognize(request));
-  } else if (command === "serve") {
-    await serve();
-  } else {
-    printJson({ status: "error", provider: PROVIDER, reason: `unknown command: ${command}` });
-    process.exitCode = 2;
+export async function runOcrSidecar(options = {}) {
+  const command = options.command ?? process.argv[2] ?? "doctor";
+  try {
+    if (command === "doctor") {
+      printJson(await doctor());
+    } else if (command === "recognize") {
+      const request = JSON.parse(await readStdin());
+      printJson(await recognize(request));
+    } else if (command === "serve") {
+      await serve();
+    } else {
+      printJson({ status: "error", provider: PROVIDER, reason: `unknown command: ${command}` });
+      process.exitCode = 2;
+    }
+  } catch (error) {
+    printJson({
+      status: "error",
+      provider: PROVIDER,
+      reason: error instanceof Error ? error.message : String(error),
+    });
+    process.exitCode = 1;
   }
-} catch (error) {
-  printJson({
-    status: "error",
-    provider: PROVIDER,
-    reason: error instanceof Error ? error.message : String(error),
-  });
-  process.exitCode = 1;
+}
+
+export function shouldAutoStartOcrSidecar(options = {}) {
+  const argv = options.argv ?? process.argv;
+  const moduleUrl = options.moduleUrl ?? import.meta.url;
+  return Boolean(argv[1]) && resolve(argv[1]) === fileURLToPath(moduleUrl);
+}
+
+if (shouldAutoStartOcrSidecar()) {
+  await runOcrSidecar();
 }
 
 async function doctor() {
