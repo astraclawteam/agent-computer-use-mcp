@@ -1,6 +1,6 @@
 {
   "name": "agent-computer-use-mcp",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "description": "A local MCP server for Gateway-managed computer use with cua-driver, OCR, and user-only desktop overlays.",
   "private": true,
   "license": "MIT",

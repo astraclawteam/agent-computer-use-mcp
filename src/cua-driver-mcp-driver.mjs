@@ -137,6 +137,23 @@ export class CuaDriverMcpDriver {
     });
   }
 
+  typeText({ window, elementToken, elementIndex, value, deliveryMode = "background" }) {
+    return this.runWork(async (ticket) => {
+      await this.ensureStartedResources(ticket);
+      const result = await this.client.callTool("type_text", {
+        pid: window.pid,
+        window_id: window.windowId,
+        element_index: elementIndex,
+        element_token: elementToken,
+        text: value,
+        delivery_mode: deliveryMode,
+        session: this.session,
+      });
+      this.assertWorkTicket(ticket);
+      return result;
+    });
+  }
+
   click({ window, elementToken, elementIndex, deliveryMode = "background" }) {
     return this.runWork(async (ticket) => {
       await this.ensureStartedResources(ticket);

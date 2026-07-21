@@ -2,6 +2,10 @@
 
 All notable changes to `agent-computer-use-mcp` are tracked here.
 
+## 0.0.2
+
+- Expose the existing cua-driver `type_text` capability through `computer.act` so modern Windows Notepad document surfaces can be edited without weakening observation or policy checks.
+
 ## 0.0.1
 
 - Standard MCP stdio server and client compatibility through `@modelcontextprotocol/sdk`.

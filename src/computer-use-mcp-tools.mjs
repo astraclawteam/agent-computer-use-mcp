@@ -376,7 +376,7 @@ export const COMPUTER_USE_MCP_TOOLS = [
           type: "object",
           required: ["kind"],
           properties: {
-            kind: { type: "string", enum: ["set_value", "click"] },
+            kind: { type: "string", enum: ["set_value", "type_text", "click"] },
             elementToken: { type: "string" },
             elementIndex: { type: "number" },
             value: { type: "string" },

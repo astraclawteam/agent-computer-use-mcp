@@ -131,6 +131,7 @@ test("agent-computer-use-mcp freezes the local MCP tool contract", () => {
   assert.deepEqual(act.inputSchema.required, ["action"]);
   assert.deepEqual(act.outputSchema.allOf[0].else.required, ["status", "provider", "action", "result", "pixelLimitedAction"]);
   assert.deepEqual(act.outputSchema.allOf[0].then.required, ["status", "error"]);
+  assert.deepEqual(act.inputSchema.properties.action.properties.kind.enum, ["set_value", "type_text", "click"]);
 
   const semanticCapture = COMPUTER_USE_MCP_TOOLS.find((tool) => tool.name === "computer.capture");
   for (const field of ["window", "text", "controllerId", "expiresAt"]) {
@@ -271,6 +272,7 @@ test("provider router manages request/capture/action/cancel lifecycle", async ()
         mode: args.mode,
         elements: [
           { elementToken: "name", role: "Edit", name: "Name", actions: ["set_value"] },
+          { elementToken: "document", role: "Document", name: "Text editor", actions: ["type_text"] },
           { elementToken: "save", role: "Button", name: "Save", actions: ["click"] },
         ],
         includeUserOverlay: false,
@@ -279,6 +281,10 @@ test("provider router manages request/capture/action/cancel lifecycle", async ()
     async setValue(args) {
       calls.push({ method: "setValue", args });
       return { status: "ok", action: "set_value" };
+    },
+    async typeText(args) {
+      calls.push({ method: "typeText", args });
+      return { status: "ok", action: "type_text", verify: "confirmed" };
     },
     async click(args) {
       calls.push({ method: "click", args });
@@ -306,11 +312,13 @@ test("provider router manages request/capture/action/cancel lifecycle", async ()
 
   const observation = await router.capture({ mode: "semantic" });
   assert.equal(observation.includeUserOverlay, false);
-  assert.equal(observation.elements.length, 2);
+  assert.equal(observation.elements.length, 3);
 
   const action = await router.act({ action: { kind: "set_value", elementToken: "name", value: "xiaozhi" } });
   assert.equal(action.status, "ok");
   assert.equal(action.pixelLimitedAction, false);
+  const typed = await router.act({ action: { kind: "type_text", elementToken: "document", value: "Notepad text" } });
+  assert.equal(typed.result.verify, "confirmed");
 
   const state = await router.listState();
   assert.equal(state.activeController.window.title, "Computer Use Lab");
@@ -321,7 +329,7 @@ test("provider router manages request/capture/action/cancel lifecycle", async ()
   assert.equal(cancelled.status, "cancelled");
   assert.equal((await router.listState()).activeController, null);
   assert.deepEqual(overlayCalls.map((call) => call.method), ["start", "stop"]);
-  assert.deepEqual(calls.map((call) => call.method), ["findWindow", "capture", "setValue"]);
+  assert.deepEqual(calls.map((call) => call.method), ["findWindow", "capture", "setValue", "typeText"]);
 });
 
 test("provider router enforces action safety policy", async () => {
@@ -353,7 +361,7 @@ test("provider router enforces action safety policy", async () => {
   );
   await assert.rejects(
     () => router.act({ action: { kind: "set_value", elementIndex: 0 } }),
-    /requires a string value/,
+    /require.*string value/,
   );
 
   const state = await router.listState();

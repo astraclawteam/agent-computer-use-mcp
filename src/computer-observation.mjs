@@ -45,6 +45,7 @@ function normalizeElement(element, index) {
 function normalizeActions(actions, role) {
   if (Array.isArray(actions) && actions.length > 0) return actions;
   if (["edit", "textbox"].includes(role)) return ["set_value"];
+  if (role === "document") return ["type_text"];
   if (["button", "menuitem", "link", "checkbox", "radio"].includes(role)) return ["click"];
   return [];
 }

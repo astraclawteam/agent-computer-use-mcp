@@ -74,7 +74,7 @@ export class ComputerUseProviderRouter {
     const result = {
       status: "ready",
       module: "agent-computer-use-mcp",
-      version: "0.0.1",
+      version: "0.0.2",
       phases: {
         "0.9": "contract-freeze",
         "0.10": "release-metadata-changelog",
@@ -714,6 +714,15 @@ export class ComputerUseProviderRouter {
           elementToken: action.elementToken,
           elementIndex: action.elementIndex,
           value: action.value,
+        }));
+      } else if (action.kind === "type_text") {
+        if (!this.driver?.typeText) fail("provider.unavailable", "type_text provider is not available");
+        result = await this.awaitExternal(ticket, () => this.driver.typeText({
+          window: this.activeController.window,
+          elementToken: action.elementToken,
+          elementIndex: action.elementIndex,
+          value: action.value,
+          deliveryMode: action.deliveryMode ?? "background",
         }));
       } else if (action.kind === "click") {
         if (!this.driver?.click) fail("provider.unavailable", "click provider is not available");
@@ -1720,7 +1729,7 @@ function policyMessage(decision) {
     return "Element action requires elementToken or elementIndex.";
   }
   if (decision.code === "action.value_required") {
-    return "set_value requires a string value.";
+    return "set_value and type_text require a string value.";
   }
   if (decision.code === "delivery_mode.unsupported") {
     return "Unsupported delivery mode.";

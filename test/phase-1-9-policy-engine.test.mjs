@@ -75,7 +75,7 @@ test("permission policy validates action tiers, allowlist, and secure fields", a
   }), {
     allowed: false,
     code: "action.kind_unsupported",
-    allowedKinds: ["set_value", "click"],
+    allowedKinds: ["set_value", "type_text", "click"],
     includeUserOverlay: false,
   });
 

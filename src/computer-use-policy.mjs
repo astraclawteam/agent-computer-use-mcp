@@ -1,4 +1,4 @@
-export const DEFAULT_ALLOWED_ACTION_KINDS = ["set_value", "click"];
+export const DEFAULT_ALLOWED_ACTION_KINDS = ["set_value", "type_text", "click"];
 export const DEFAULT_DELIVERY_MODES = ["background"];
 export const DEFAULT_PERMISSION_TIERS = ["observe", "full", "admin"];
 export const DEFAULT_DENIED_WINDOW_CATEGORIES = [
@@ -98,7 +98,7 @@ export function createComputerUsePolicy(options = {}) {
       if (!hasElementRef) {
         return deny("action.element_required");
       }
-      if (action.kind === "set_value" && typeof action.value !== "string") {
+      if ((action.kind === "set_value" || action.kind === "type_text") && typeof action.value !== "string") {
         return deny("action.value_required");
       }
 

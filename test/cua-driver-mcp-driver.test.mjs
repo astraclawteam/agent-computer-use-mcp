@@ -30,6 +30,7 @@ test("CuaDriverMcpDriver maps request/capture/action to cua-driver MCP tools", a
             elements: [
               { element_index: 0, role: "Edit", label: "Name", bounds: { x: 10, y: 20, w: 120, h: 24 } },
               { element_index: 1, role: "Button", label: "Save" },
+              { element_index: 2, role: "Document", label: "Text editor" },
             ],
           };
         }
@@ -63,11 +64,13 @@ test("CuaDriverMcpDriver maps request/capture/action to cua-driver MCP tools", a
   assert.deepEqual(observation.elements.map((element) => [element.elementIndex, element.name]), [
     [0, "Name"],
     [1, "Save"],
+    [2, "Text editor"],
   ]);
   assert.deepEqual(observation.elements[0].bounds, { x: 10, y: 20, width: 120, height: 24 });
-  assert.deepEqual(observation.elements.map(({ actions }) => actions), [["set_value"], ["click"]]);
+  assert.deepEqual(observation.elements.map(({ actions }) => actions), [["set_value"], ["click"], ["type_text"]]);
 
   await driver.setValue({ window, elementIndex: 0, elementToken: "name", value: "agent-computer-use" });
+  await driver.typeText({ window, elementIndex: 2, elementToken: "document", value: "Notepad text" });
   await driver.click({ window, elementIndex: 1, elementToken: "save", deliveryMode: "background" });
   await driver.stopCursor();
   await driver.stopCursor();
@@ -109,6 +112,19 @@ test("CuaDriverMcpDriver maps request/capture/action to cua-driver MCP tools", a
         element_index: 0,
         element_token: "name",
         value: "agent-computer-use",
+        session: "test-session",
+      },
+    },
+    {
+      method: "callTool",
+      name: "type_text",
+      args: {
+        pid: 1234,
+        window_id: 42,
+        element_index: 2,
+        element_token: "document",
+        text: "Notepad text",
+        delivery_mode: "background",
         session: "test-session",
       },
     },
