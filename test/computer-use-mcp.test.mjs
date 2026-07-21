@@ -6,8 +6,15 @@ import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js"
 import { COMPUTER_USE_MCP_TOOLS } from "../src/computer-use-mcp-tools.mjs";
 import {
   createPlatformOcrSession,
+  main,
+  runComputerUseMcpServer,
   shouldAutoStartComputerUseMcpServer,
 } from "../src/computer-use-mcp-server.mjs";
+
+test("source and SEA entrypoints share one MCP composition", () => {
+  assert.equal(typeof main, "function");
+  assert.equal(main, runComputerUseMcpServer);
+});
 
 test("protected imports never auto-start a second stdio server", () => {
   assert.equal(shouldAutoStartComputerUseMcpServer({
@@ -42,6 +49,32 @@ test("verified platform OCR paths are wired into the sidecar session", () => {
   assert.equal(session.options.environment.AGENT_COMPUTER_USE_OCR_MODEL_DIR, "D:\\platform\\models\\pp-ocr-v6");
   assert.equal(session.options.environment.AGENT_COMPUTER_USE_OCR_RUNTIME_DIR, "D:\\platform\\ocr-runtime");
   assert.equal(session.options.environment.AGENT_COMPUTER_USE_NETWORK_DISABLED, "1");
+});
+
+test("SEA runtime re-enters its embedded OCR sidecar without system Node", () => {
+  class FakeSession {
+    constructor(options) {
+      this.options = options;
+    }
+  }
+  const session = createPlatformOcrSession({
+    paths: {
+      ocrModelRoot: "D:\\artifact\\ocr\\models",
+      ocrRuntimeRoot: "D:\\artifact\\ocr\\runtime",
+    },
+    ocrProcess: {
+      command: "D:\\artifact\\bin\\agent-computer-use-mcp.exe",
+      args: [],
+      sidecarPath: "--ocr-sidecar",
+    },
+  }, { Session: FakeSession, platform: "win32" });
+
+  assert.deepEqual(session.options.node, {
+    command: "D:\\artifact\\bin\\agent-computer-use-mcp.exe",
+    args: [],
+    label: "sea",
+  });
+  assert.equal(session.options.sidecarPath, "--ocr-sidecar");
 });
 
 test("agent-computer-use-mcp freezes the local MCP tool contract", () => {
@@ -96,6 +129,13 @@ test("agent-computer-use-mcp freezes the local MCP tool contract", () => {
   const act = COMPUTER_USE_MCP_TOOLS.find((tool) => tool.name === "computer.act");
   assert.equal(act.annotations.phase, "1.3");
   assert.deepEqual(act.inputSchema.required, ["action"]);
+  assert.deepEqual(act.outputSchema.allOf[0].else.required, ["status", "provider", "action", "result", "pixelLimitedAction"]);
+  assert.deepEqual(act.outputSchema.allOf[0].then.required, ["status", "error"]);
+
+  const semanticCapture = COMPUTER_USE_MCP_TOOLS.find((tool) => tool.name === "computer.capture");
+  for (const field of ["window", "text", "controllerId", "expiresAt"]) {
+    assert.ok(semanticCapture.outputSchema.properties[field], `computer.capture declares ${field}`);
+  }
 
   const ocr = COMPUTER_USE_MCP_TOOLS.find((tool) => tool.name === "computer.ocr_region");
   assert.equal(ocr.annotations.phase, "1.1");

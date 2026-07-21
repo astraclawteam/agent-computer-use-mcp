@@ -52,6 +52,8 @@
     "release:npm:pack": "node scripts/pack-protected-npm-package.mjs",
     "release:npm:package": "node scripts/release-npm-package.mjs",
     "mcp": "node src/computer-use-mcp-server.mjs",
+    "artifact:windows:build": "node scripts/build-windows-sea-artifact.mjs",
+    "artifact:windows:smoke": "node scripts/smoke-windows-sea-artifact.mjs",
     "smoke": "node src/smoke.mjs",
     "phase:0.6": "node src/phase-0-6.mjs",
     "phase:0.6:real": "node src/real-cua-lab-sequence.mjs",
@@ -153,7 +155,10 @@
   "devDependencies": {
     "esbuild": "0.28.1",
     "javascript-obfuscator": "5.4.6",
+    "postject": "1.0.0-alpha.6",
     "yaml": "2.9.0"
+  },
+  "overrides": {
+    "adm-zip": "0.6.0"
   }
 }
-

@@ -77,15 +77,23 @@ const COMMON_OUTPUT_PROPERTIES = {
 };
 
 function outputSchema(properties = {}, required = []) {
-  return {
+  const schema = {
     type: "object",
-    required: ["resultSchemaVersion", "includeUserOverlay", ...required],
+    required: ["resultSchemaVersion", "includeUserOverlay"],
     properties: {
       ...COMMON_OUTPUT_PROPERTIES,
       ...properties,
     },
     additionalProperties: false,
   };
+  if (required.length > 0) {
+    schema.allOf = [{
+      if: { required: ["error"] },
+      then: { required: ["status", "error"] },
+      else: { required },
+    }];
+  }
+  return schema;
 }
 
 export const COMPUTER_USE_MCP_TOOLS = [
@@ -349,6 +357,10 @@ export const COMPUTER_USE_MCP_TOOLS = [
       elements: PERCEPTION_ELEMENT_ARRAY,
       artifact: ANY_OBJECT,
       capture: ANY_OBJECT,
+      window: ANY_OBJECT,
+      text: { type: "string" },
+      controllerId: { type: "string" },
+      expiresAt: { anyOf: [{ type: "string" }, { type: "null" }] },
     }),
   },
   {
@@ -398,6 +410,7 @@ export const COMPUTER_USE_MCP_TOOLS = [
     outputSchema: outputSchema({
       status: { type: "string" },
       previousController: { anyOf: [ANY_OBJECT, { type: "null" }] },
+      previousApproval: { anyOf: [ANY_OBJECT, { type: "null" }] },
     }, ["status", "previousController"]),
   },
   {
@@ -413,6 +426,7 @@ export const COMPUTER_USE_MCP_TOOLS = [
     outputSchema: outputSchema({
       status: { type: "string" },
       previousController: { anyOf: [ANY_OBJECT, { type: "null" }] },
+      previousApproval: { anyOf: [ANY_OBJECT, { type: "null" }] },
     }, ["status", "previousController"]),
   },
   {
