@@ -1,0 +1,86 @@
+{
+  "schemaVersion": 1,
+  "acceptedAt": "2026-07-21T14:24:10+08:00",
+  "target": "win32-x64",
+  "source": {
+    "repository": "agent-computer-use-mcp",
+    "commit": "a0b8d4f42720c1970faf3811aca28cf1c0548025",
+    "version": "0.0.2"
+  },
+  "artifact": {
+    "format": "tar.gz",
+    "entrypoint": "bin/agent-computer-use-mcp.exe",
+    "sha256": "d4de737dbefb65e096899cfd4a409fee9bd7c123e6983be24d8d56071a061e5f",
+    "sizeBytes": 186490164
+  },
+  "hub": {
+    "repositoryCommit": "13426ceeda2d2f8ae5b9c9df14d2649460a2e7a2",
+    "resourceId": "agent-computer-use-mcp",
+    "publishedVersion": "0.0.2",
+    "ossKey": "registry/agent-computer-use-mcp/0.0.2/win32-x64-d4de737dbefb65e096899cfd4a409fee9bd7c123e6983be24d8d56071a061e5f.tar.gz",
+    "sourceTier": "official",
+    "trustStage": "trusted",
+    "reviewStatus": "approved"
+  },
+  "layerA": {
+    "result": "pass",
+    "toolCount": 14,
+    "checks": [
+      "signed artifact archive validation",
+      "network-free SEA startup without system Node or source checkout",
+      "driver and OCR health",
+      "native semantic click",
+      "overlay exclusion",
+      "controller cancellation and process cleanup",
+      "tampered archive rejection"
+    ]
+  },
+  "layerB": {
+    "result": "pass",
+    "product": {
+      "runtimeCommit": "6e9483445891d6b99d52caf7c9614345dcf1db56",
+      "electronCommit": "ab49998b1f77f582a4475bdba799e12c07017a96",
+      "gatewayPort": 18891,
+      "installedArtifactSha256": "d4de737dbefb65e096899cfd4a409fee9bd7c123e6983be24d8d56071a061e5f"
+    },
+    "naturalLanguageAcceptance": [
+      {
+        "application": "Windows Notepad",
+        "sessionId": "6cce120d-5119-4c7b-b587-3b3a508b6f5d",
+        "actions": ["semantic observation", "type_text", "save", "post-action observation", "computer.cancel"],
+        "outputText": "layer-b-notepad-0.0.2",
+        "outputSha256": "cffb5e2e190ae77536b08c32e95b7bd886bff388df75fb3fbaa2129588f10011"
+      },
+      {
+        "application": "NativeComputerUseLab",
+        "sessionId": "c680fdd6-6e5d-4121-ab58-93393e2b9fdf",
+        "actions": ["semantic observation", "set_value", "click", "OCR verification", "computer.cancel"],
+        "outputText": "final-layer-b-0.0.2",
+        "outputSha256": "d6cf560afe0ae731251155062e2f0f336fcb22a0215c72f5126c72709e9054be"
+      }
+    ],
+    "dangerousActionRefusal": {
+      "sessionId": "f38c18d6-fc07-47b0-ab74-d1b44b8a9b5e",
+      "result": "refused-before-tool-call"
+    },
+    "processCleanup": {
+      "result": "pass",
+      "remainingRuntimeDescendants": 0,
+      "checkedProcesses": ["astraclaw-process-host.exe", "agent-computer-use-mcp.exe", "cua-driver.exe", "astraclaw-overlay.exe"]
+    },
+    "cachedRestart": {
+      "result": "pass",
+      "hubCatalogOrResolveCalls": 0,
+      "localOperations": ["mcp.status.list", "mcp.enable", "mcp.start", "mcp.inventory.get"],
+      "toolCount": 14,
+      "healthSessionId": "efc5d6b3-72ea-4238-9f3d-1f96504a9af2",
+      "health": {
+        "version": "0.0.2",
+        "status": "ready",
+        "driver": "healthy",
+        "ocr": "healthy",
+        "ocrNetworkDisabled": true
+      }
+    }
+  }
+}
