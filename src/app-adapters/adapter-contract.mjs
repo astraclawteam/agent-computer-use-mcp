@@ -1,6 +1,13 @@
 import { basename } from "node:path";
 
-import { REAL_APP_RESULT_STATUSES } from "../real-app-catalog.mjs";
+const APP_RESULT_STATUSES = Object.freeze([
+  "pass",
+  "product-failure",
+  "insufficient-perception",
+  "policy-blocked",
+  "not-installed",
+  "infrastructure-error",
+]);
 
 export const APP_ADAPTER_METHODS = Object.freeze([
   "discover",
@@ -110,7 +117,7 @@ export function sanitizeExecutableIdentity(executable) {
 
 function verificationResult(verification) {
   const status = verification?.status ?? "pass";
-  if (!REAL_APP_RESULT_STATUSES.includes(status)) {
+  if (!APP_RESULT_STATUSES.includes(status)) {
     return failureResult("app.adapter_status_invalid");
   }
   if (!isFinalState(verification?.finalState)) {
@@ -129,7 +136,7 @@ function verificationResult(verification) {
 function terminalResult(value) {
   const status = value?.status;
   if (status === undefined) return null;
-  if (!REAL_APP_RESULT_STATUSES.includes(status) || status === "pass") {
+  if (!APP_RESULT_STATUSES.includes(status) || status === "pass") {
     return failureResult("app.adapter_status_invalid");
   }
   if (status === "policy-blocked") {
@@ -155,7 +162,7 @@ async function runCleanup(adapter, context) {
 }
 
 function errorResult(error) {
-  const status = REAL_APP_RESULT_STATUSES.includes(error?.status) && error.status !== "pass"
+  const status = APP_RESULT_STATUSES.includes(error?.status) && error.status !== "pass"
     ? error.status
     : "product-failure";
   return Object.freeze({ status, reason: errorCode(error, "app.adapter_failed") });

@@ -23,13 +23,14 @@ export function validateRetirementRecords(value) {
   for (const record of value) {
     const fields = record && typeof record === "object" && !Array.isArray(record) ? Object.keys(record) : [];
     const exactFields = fields.length === RETIREMENT_FIELDS.length && RETIREMENT_FIELDS.every((field) => fields.includes(field));
+    const staged = record?.effectiveDate === null && record?.cutover === false;
+    const effective = typeof record?.effectiveDate === "string" && realDate(record.effectiveDate) && record?.cutover === true;
     const validValues = exactFields
       && typeof record.package === "string" && record.package.trim().length > 0
       && (record.replacement === null || typeof record.replacement === "string")
       && typeof record.message === "string" && record.message.trim().length > 0
-      && typeof record.effectiveDate === "string" && realDate(record.effectiveDate)
-      && typeof record.cutover === "boolean";
-    if (!validValues) throw new Error("invalid retirement record; expected exact package, replacement, message, effectiveDate, cutover contract");
+      && (staged || effective);
+    if (!validValues) throw new Error("invalid retirement record; expected staged null/false or effective date/true five-field contract");
     if (names.has(record.package)) throw new Error(`duplicate retirement record: ${record.package}`);
     names.add(record.package);
   }
@@ -46,6 +47,7 @@ function publicationScriptNames(scripts = {}) {
   const names = new Set();
   for (const [name, commandValue] of Object.entries(scripts)) {
     const command = String(commandValue);
+    if (name === "prepublishOnly" && command === "node scripts/block-source-publish.mjs") continue;
     if (/publish/iu.test(name) || /^(?:release:npm:package|npm:release:package)$/iu.test(name) || /\b(?:npm|pnpm|yarn)\s+publish\b/iu.test(command) || /(?:release-npm-package|npm-release-package)\.mjs/iu.test(command)) names.add(name);
   }
   let changed = true;

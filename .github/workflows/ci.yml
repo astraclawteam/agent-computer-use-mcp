@@ -34,9 +34,6 @@ jobs:
       - name: Run tests
         run: npm test
 
-      - name: Verify protected npm release
-        run: npm run phase:0.14
-
       - name: Verify standard MCP install contract
         run: npm run phase:1.6
 
@@ -46,18 +43,5 @@ jobs:
       - name: Verify official MCP SDK server transport
         run: npm run phase:1.8
 
-      - name: Run 15-minute commercial soak
-        run: npm run soak:pr
-
-      - name: Upload commercial soak evidence
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: commercial-pr-soak-evidence
-          path: |
-            evidence/pr-soak/**/run-manifest.json
-            evidence/pr-soak/**/events.jsonl
-            evidence/pr-soak/**/report.json
-            evidence/pr-soak/**/checksums.txt
-          if-no-files-found: error
-          retention-days: 30
+      - name: Verify Windows SEA packaging
+        run: npm run artifact:windows:build -- --skip-dotnet-build

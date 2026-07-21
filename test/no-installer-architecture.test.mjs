@@ -10,7 +10,7 @@ test("current product contains no installer or private native updater architectu
 
   const server = await readFile("src/computer-use-mcp-server.mjs", "utf8");
   const installation = await readFile("src/computer-use-installation.mjs", "utf8");
-  const workflow = await readFile(".github/workflows/release.yml", "utf8");
+  const workflow = await readFile(".github/workflows/ci.yml", "utf8");
   const currentDocs = (await Promise.all([
     "README.md",
     "docs/productization/README.md",

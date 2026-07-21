@@ -1,5 +1,5 @@
 import { access } from "node:fs/promises";
-import { buildOfflineAssetManifest, getInstallLayout } from "./package-foundation.mjs";
+import { getInstallLayout } from "./package-foundation.mjs";
 import { checkCuaDriverHealth } from "./driver-health.mjs";
 import { checkOcrModelPackHealth } from "./ocr-model-pack.mjs";
 import { buildRepairEntrypointCatalog } from "./repair-entrypoint-catalog.mjs";
@@ -8,7 +8,6 @@ export async function runInstallCacheDoctor(options = {}) {
   const platform = options.platform ?? process.platform;
   const env = options.env ?? process.env;
   const layout = getInstallLayout({ platform, env });
-  const manifest = buildOfflineAssetManifest({ packageVersion: options.packageVersion });
   const probes = {
     pathExists,
     driverHealth: defaultDriverHealth,
@@ -83,7 +82,6 @@ export async function runInstallCacheDoctor(options = {}) {
     status,
     platform,
     layout,
-    manifest,
     assets,
     permissions,
     repairPlan,

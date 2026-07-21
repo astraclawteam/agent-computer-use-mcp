@@ -12,7 +12,7 @@ afterEach(async () => {
   await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
 });
 
-test("builder produces a complete immutable Windows platform package", async () => {
+test("builder produces a complete immutable Windows SEA payload without an npm identity", async () => {
   const root = await fixtureRoot();
   const outputRoot = join(root, "package");
   const result = await buildWindowsPlatformPackage({
@@ -22,18 +22,10 @@ test("builder produces a complete immutable Windows platform package", async () 
     materialize: fixtureMaterializer,
   });
 
-  const packageJson = JSON.parse(await readFile(join(outputRoot, "package.json"), "utf8"));
   const manifest = JSON.parse(await readFile(join(outputRoot, "platform-manifest.json"), "utf8"));
   const sbom = JSON.parse(await readFile(join(outputRoot, "SBOM.cdx.json"), "utf8"));
   assert.equal(result.status, "passed");
-  assert.equal(packageJson.name, "@xiaozhiclaw/agent-computer-use-win32-x64");
-  assert.equal(packageJson.version, "1.2.3");
-  assert.deepEqual(packageJson.repository, {
-    type: "git",
-    url: "git+https://github.com/astraclawteam/agent-computer-use-mcp.git",
-  });
-  assert.deepEqual(packageJson.os, ["win32"]);
-  assert.deepEqual(packageJson.cpu, ["x64"]);
+  await assert.rejects(stat(join(outputRoot, "package.json")), { code: "ENOENT" });
   assert.equal(manifest.version, "1.2.3");
   assert.deepEqual(manifest.target, { platform: "win32", arch: "x64", id: "windows-x64" });
   assert.equal(manifest.files.some(({ path }) => path === "cua-driver/cua-driver.exe"), true);

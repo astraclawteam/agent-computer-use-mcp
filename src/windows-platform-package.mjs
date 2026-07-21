@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { cp, mkdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 
-import { createPlatformPackageJson, WINDOWS_X64_TARGET } from "./platform-package-contract.mjs";
+import { WINDOWS_X64_TARGET } from "./windows-payload-contract.mjs";
 import { createPlatformInventory, verifyPlatformInventory } from "./platform-payload-inventory.mjs";
 import { assertBrowserKernelBoundaryInRoots } from "./browser-kernel-boundary.mjs";
 
@@ -25,7 +25,6 @@ export async function buildWindowsPlatformPackage(options = {}) {
     await rm(stageRoot, { recursive: true, force: true });
     await mkdir(stageRoot, { recursive: true });
     const materialized = await materialize(stageRoot, options) ?? {};
-    await writeJson(join(stageRoot, "package.json"), createPlatformPackageJson({ version }));
     await writeFile(
       join(stageRoot, "THIRD_PARTY_LICENSES.txt"),
       formatLicenses(materialized.licenses),

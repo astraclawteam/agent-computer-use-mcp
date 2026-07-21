@@ -3,7 +3,7 @@ import { createReadStream } from "node:fs";
 import { lstat, readdir } from "node:fs/promises";
 import { extname, relative, resolve, sep } from "node:path";
 
-import { WINDOWS_X64_TARGET } from "./platform-package-contract.mjs";
+import { WINDOWS_X64_TARGET } from "./windows-payload-contract.mjs";
 
 const MANIFEST_PATH = "platform-manifest.json";
 const COMMIT_PATTERN = /^[a-f0-9]{40}$/u;
