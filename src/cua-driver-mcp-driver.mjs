@@ -73,22 +73,75 @@ export class CuaDriverMcpDriver {
     this.cursorEnableAttempted = false;
   }
 
-  findWindow({ titlePart }) {
-    return this.runWork(async (ticket) => {
-      await this.ensureStartedResources(ticket);
-      const result = await this.client.callTool("list_windows", { on_screen_only: false });
-      this.assertWorkTicket(ticket);
-      const windows = result.windows ?? result.structuredContent?.windows ?? [];
-      const window = windows.find((item) => item.title?.includes(titlePart) || item.name?.includes(titlePart));
-      if (!window) {
-        throw new Error(`window.not_found: ${titlePart}`);
-      }
+  listWindows({ onScreenOnly = true } = {}) {
+    return this.runWork((ticket) => this.listWindowsResources(ticket, { onScreenOnly }));
+  }
 
+  async listWindowsResources(ticket, { onScreenOnly }) {
+    await this.ensureStartedResources(ticket);
+    const result = await this.client.callTool("list_windows", {
+      on_screen_only: onScreenOnly,
+    });
+    this.assertWorkTicket(ticket);
+    const windows = result.windows ?? result.structuredContent?.windows ?? [];
+    const normalized = windows
+      .map(normalizeWindow)
+      .filter((window) => (
+        window.windowId !== undefined
+        && window.title
+        && !isComputerUseOverlayWindow(window)
+      ));
+    normalized.sort(compareWindowZOrder);
+    return normalized.map((window, index) => ({
+      ...window,
+      isForeground: index === 0,
+    }));
+  }
+
+  findWindow({ titlePart, windowId, target } = {}) {
+    return this.runWork(async (ticket) => {
+      const selectsForeground = target === "foreground" || titlePart?.trim() === "*";
+      const windows = await this.listWindowsResources(ticket, {
+        onScreenOnly: selectsForeground,
+      });
+      let window;
+      if (selectsForeground) {
+        window = windows.find((item) => item.isForeground);
+      } else if (windowId !== undefined) {
+        window = windows.find((item) => String(item.windowId) === String(windowId));
+      } else if (typeof titlePart === "string" && titlePart.trim() !== "") {
+        const expected = titlePart.trim().toLowerCase();
+        window = windows.find((item) => (
+          item.title.toLowerCase().includes(expected)
+          || item.appName?.toLowerCase().includes(expected)
+        ));
+      } else {
+        throw windowSelectionError(
+          "window.selector_required",
+          "Select a window by target=\"foreground\", windowId, or titlePart.",
+        );
+      }
+      if (!window) {
+        const selector = selectsForeground
+          ? "foreground"
+          : windowId !== undefined
+            ? `windowId=${windowId}`
+            : `titlePart=${titlePart}`;
+        throw windowSelectionError(
+          "window.not_found",
+          `No visible window matched ${selector}.`,
+          {
+            retryable: true,
+            nextTool: "computer.list_state",
+            suggestedAction: "Discover the current foreground window with computer.list_state, then retry using target=\"foreground\" or the returned windowId.",
+          },
+        );
+      }
       return {
-        windowId: window.window_id ?? window.windowId ?? window.id,
-        title: window.title ?? window.name,
+        windowId: window.windowId,
+        title: window.title,
         pid: window.pid,
-        bounds: normalizeBounds(window.bounds),
+        bounds: window.bounds,
       };
     });
   }
@@ -425,6 +478,43 @@ function normalizeBounds(bounds) {
     width: bounds.width ?? bounds.w,
     height: bounds.height ?? bounds.h,
   };
+}
+
+function normalizeWindow(window, index) {
+  const zIndex = Number.isFinite(window.z_index)
+    ? window.z_index
+    : Number.isFinite(window.zIndex)
+      ? window.zIndex
+      : -index;
+  return {
+    windowId: window.window_id ?? window.windowId ?? window.id,
+    title: window.title ?? window.name,
+    appName: window.app_name ?? window.appName,
+    pid: window.pid,
+    zIndex,
+    isOnScreen: window.is_on_screen ?? window.isOnScreen ?? true,
+    isForeground: false,
+    bounds: normalizeBounds(window.bounds),
+  };
+}
+
+function compareWindowZOrder(left, right) {
+  return right.zIndex - left.zIndex;
+}
+
+function isComputerUseOverlayWindow(window) {
+  const title = String(window.title ?? "").trim().toLowerCase();
+  const appName = String(window.appName ?? "").trim().toLowerCase();
+  return title.startsWith("cua.agentcursoroverlay.")
+    || title === "gateway-managed computer use"
+    || appName === "gatewaycomputeruseoverlay.exe";
+}
+
+function windowSelectionError(code, message, detail) {
+  const error = new Error(message);
+  error.code = code;
+  error.detail = detail;
+  return error;
 }
 
 function lifecycleClosedError() {

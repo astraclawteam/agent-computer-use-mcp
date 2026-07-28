@@ -21,7 +21,7 @@ export async function captureWindowPngByTitle(titlePart, outputPath, options = {
   return result;
 }
 
-function buildCaptureScript(titlePart, outputPath) {
+export function buildCaptureScript(titlePart, outputPath) {
   return `
 $ErrorActionPreference = "Stop"
 $request = @'
@@ -67,6 +67,9 @@ public static class CaptureWindowPngByTitle {
     private static extern bool IsWindowVisible(IntPtr hWnd);
 
     [DllImport("user32.dll")]
+    private static extern IntPtr GetForegroundWindow();
+
+    [DllImport("user32.dll")]
     private static extern bool GetWindowRect(IntPtr hWnd, out RECT rect);
 
     [DllImport("user32.dll")]
@@ -75,19 +78,32 @@ public static class CaptureWindowPngByTitle {
     public static CaptureWindowResult Capture(string titlePart, string outputPath) {
         IntPtr found = IntPtr.Zero;
         string foundTitle = "";
-        EnumWindows(delegate(IntPtr hWnd, IntPtr lParam) {
-            if (!IsWindowVisible(hWnd)) return true;
-            var text = new StringBuilder(512);
-            GetWindowText(hWnd, text, text.Capacity);
-            var title = text.ToString();
-            if (title.IndexOf(titlePart, StringComparison.OrdinalIgnoreCase) < 0) return true;
-            found = hWnd;
-            foundTitle = title;
-            return false;
-        }, IntPtr.Zero);
+
+        if (String.Equals(titlePart == null ? "" : titlePart.Trim(), "*", StringComparison.Ordinal)) {
+            found = GetForegroundWindow();
+            if (found != IntPtr.Zero) {
+                var text = new StringBuilder(512);
+                GetWindowText(found, text, text.Capacity);
+                foundTitle = text.ToString();
+            }
+        } else {
+            EnumWindows(delegate(IntPtr hWnd, IntPtr lParam) {
+                if (!IsWindowVisible(hWnd)) return true;
+                var text = new StringBuilder(512);
+                GetWindowText(hWnd, text, text.Capacity);
+                var title = text.ToString();
+                if (title.IndexOf(titlePart, StringComparison.OrdinalIgnoreCase) < 0) return true;
+                found = hWnd;
+                foundTitle = title;
+                return false;
+            }, IntPtr.Zero);
+        }
 
         if (found == IntPtr.Zero) {
             throw new InvalidOperationException("window_not_found: " + titlePart);
+        }
+        if (!IsWindowVisible(found)) {
+            throw new InvalidOperationException("window_not_visible: " + titlePart);
         }
         RECT rect;
         if (!GetWindowRect(found, out rect)) {

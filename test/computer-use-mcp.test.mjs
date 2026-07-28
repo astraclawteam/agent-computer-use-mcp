@@ -124,7 +124,19 @@ test("agent-computer-use-mcp freezes the local MCP tool contract", () => {
 
   const requestAccess = COMPUTER_USE_MCP_TOOLS.find((tool) => tool.name === "computer.request_access");
   assert.equal(requestAccess.annotations.phase, "1.3");
-  assert.equal(requestAccess.inputSchema.required.includes("titlePart"), true);
+  assert.equal(requestAccess.inputSchema.required, undefined);
+  assert.deepEqual(requestAccess.inputSchema.oneOf, [
+    { required: ["titlePart"] },
+    { required: ["windowId"] },
+    { required: ["target"] },
+  ]);
+  assert.deepEqual(requestAccess.inputSchema.properties.target.enum, ["foreground"]);
+
+  const listState = COMPUTER_USE_MCP_TOOLS.find((tool) => tool.name === "computer.list_state");
+  assert.equal(listState.annotations.readOnlyHint, true);
+  assert.ok(listState.outputSchema.properties.foregroundWindow);
+  assert.ok(listState.outputSchema.properties.windows);
+  assert.ok(listState.outputSchema.properties.windowDiscovery);
 
   const act = COMPUTER_USE_MCP_TOOLS.find((tool) => tool.name === "computer.act");
   assert.equal(act.annotations.phase, "1.3");
@@ -215,6 +227,20 @@ test("agent-computer-use-mcp answers initialize, tools/list, and health over std
     assert.equal(missingController.isError, true);
     assert.equal(missingController.structuredContent.error.code, "controller.required");
     assert.equal(missingController.structuredContent.includeUserOverlay, false);
+
+    const stateAfterFailure = await client.callTool({
+      name: "computer.list_state",
+      arguments: {},
+    });
+    assert.equal(stateAfterFailure.isError, false);
+    assert.equal(stateAfterFailure.structuredContent.status, "idle");
+    assert.equal(stateAfterFailure.structuredContent.startsDesktopControl, false);
+    assert.equal(
+      stateAfterFailure.structuredContent.auditEvents.some(
+        (event) => event.type === "computer.cancelled",
+      ),
+      false,
+    );
   } finally {
     await client.close();
   }
@@ -330,6 +356,85 @@ test("provider router manages request/capture/action/cancel lifecycle", async ()
   assert.equal((await router.listState()).activeController, null);
   assert.deepEqual(overlayCalls.map((call) => call.method), ["start", "stop"]);
   assert.deepEqual(calls.map((call) => call.method), ["findWindow", "capture", "setValue", "typeText"]);
+});
+
+test("provider router exposes foreground discovery without acquiring or cancelling control", async () => {
+  const { ComputerUseProviderRouter } = await import("../src/computer-use-provider-router.mjs");
+  const calls = [];
+  const windows = [
+    {
+      windowId: 11,
+      title: "Frontmost Editor",
+      appName: "editor.exe",
+      pid: 101,
+      zIndex: 9,
+      isOnScreen: true,
+      isForeground: true,
+      bounds: { x: 10, y: 20, width: 900, height: 700 },
+    },
+    {
+      windowId: 12,
+      title: "Background Notes",
+      appName: "notes.exe",
+      pid: 102,
+      zIndex: 3,
+      isOnScreen: true,
+      isForeground: false,
+      bounds: { x: 30, y: 40, width: 600, height: 500 },
+    },
+  ];
+  const router = new ComputerUseProviderRouter({
+    driver: {
+      async listWindows(args) {
+        calls.push({ method: "listWindows", args });
+        return windows;
+      },
+      async findWindow(args) {
+        calls.push({ method: "findWindow", args });
+        return windows[0];
+      },
+    },
+  });
+
+  const state = await router.listState();
+  assert.equal(state.status, "idle");
+  assert.deepEqual(state.foregroundWindow, windows[0]);
+  assert.deepEqual(state.windows, windows);
+  assert.deepEqual(state.windowDiscovery, { status: "ready", source: "cua-driver" });
+  assert.equal(state.startsDesktopControl, false);
+  assert.equal(state.auditEvents.some((event) => event.type === "computer.cancelled"), false);
+
+  const access = await router.requestAccess({ target: "foreground", tier: "observe" });
+  assert.equal(access.status, "granted");
+  assert.deepEqual(calls, [
+    { method: "listWindows", args: { onScreenOnly: true } },
+    { method: "findWindow", args: { target: "foreground", windowId: undefined, titlePart: undefined } },
+  ]);
+});
+
+test("failed window resolution remains a tool failure and never cancels the controller lifecycle", async () => {
+  const { ComputerUseProviderRouter } = await import("../src/computer-use-provider-router.mjs");
+  const router = new ComputerUseProviderRouter({
+    driver: {
+      async listWindows() {
+        return [];
+      },
+      async findWindow() {
+        const error = new Error("window.not_found: Missing App");
+        error.code = "window.not_found";
+        throw error;
+      },
+    },
+  });
+
+  await assert.rejects(
+    () => router.requestAccess({ titlePart: "Missing App", tier: "observe" }),
+    { code: "window.not_found" },
+  );
+  const state = await router.listState();
+  assert.equal(state.status, "idle");
+  assert.equal(state.activeController, null);
+  assert.equal(state.auditEvents.some((event) => event.type === "computer.cancelled"), false);
 });
 
 test("provider router enforces action safety policy", async () => {

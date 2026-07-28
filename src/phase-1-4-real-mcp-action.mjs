@@ -32,7 +32,13 @@ try {
     agentId: "phase-1-4-smoke",
     reason: "Phase 1.4 real MCP action validation",
   });
+  if (access.status !== "granted") {
+    throw new Error(`request_access.failed: ${JSON.stringify(access)}`);
+  }
   const capture = await server.callTool("computer.capture", { mode: "semantic" });
+  if (!Array.isArray(capture.elements)) {
+    throw new Error(`capture.invalid_response: ${JSON.stringify(capture)}`);
+  }
   const name = capture.elements.find((element) => element.role === "edit" && element.name === "Name")
     ?? capture.elements.find((element) => element.name === "Name");
   const save = capture.elements.find((element) => element.role === "button" && element.name === "Save")

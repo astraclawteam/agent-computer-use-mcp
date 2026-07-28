@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { DEFAULT_OCR_PREWARM_BUCKETS, expandRegionToBucket } from "./crop-bucket.mjs";
 import { computeDirtyRegion } from "./image-diff.mjs";
-import { ComputerUseMcpError, fail } from "./computer-use-errors.mjs";
+import { ComputerUseMcpError, fail, serializeToolError } from "./computer-use-errors.mjs";
 import { OcrSidecarSession, normalizeOcrSidecarResponse } from "./ocr-sidecar.mjs";
 import { runInstallCacheDoctor } from "./install-cache-doctor.mjs";
 import {
@@ -74,7 +74,7 @@ export class ComputerUseProviderRouter {
     const result = {
       status: "ready",
       module: "agent-computer-use-mcp",
-      version: "0.0.2",
+      version: "0.0.3",
       phases: {
         "0.9": "contract-freeze",
         "0.10": "release-metadata-changelog",
@@ -496,10 +496,46 @@ export class ComputerUseProviderRouter {
     const grant = this.beginControlGrant();
     try {
       const tier = args.tier ?? "full";
-      const window = await this.awaitExternal(
-        ticket,
-        () => this.driver.findWindow({ titlePart: args.titlePart }),
-      );
+      const selectors = [
+        args.target === "foreground",
+        args.windowId !== undefined,
+        typeof args.titlePart === "string" && args.titlePart.trim() !== "",
+      ].filter(Boolean).length;
+      if (selectors !== 1) {
+        fail(
+          selectors === 0 ? "window.selector_required" : "window.selector_conflict",
+          "Select exactly one window using target=\"foreground\", windowId, or titlePart.",
+          {
+            retryable: true,
+            nextTool: "computer.list_state",
+          },
+        );
+      }
+      let window;
+      try {
+        window = await this.awaitExternal(
+          ticket,
+          () => this.driver.findWindow({
+            target: args.target,
+            windowId: args.windowId,
+            titlePart: args.titlePart,
+          }),
+        );
+      } catch (error) {
+        this.assertOperationTicket(ticket);
+        if (error?.code === "window.not_found" || String(error?.message ?? "").startsWith("window.not_found")) {
+          fail(
+            "window.not_found",
+            "No visible window matched the requested selector.",
+            {
+              retryable: true,
+              nextTool: "computer.list_state",
+              suggestedAction: "Discover foregroundWindow with computer.list_state, then retry with target=\"foreground\" or the returned windowId.",
+            },
+          );
+        }
+        throw error;
+      }
       this.assertControlGrant(grant);
       this.enforcePolicyDecision(this.policy.evaluateAccessRequest({ tier, window }));
       if (args.approvalRequired === true) {
@@ -516,6 +552,8 @@ export class ComputerUseProviderRouter {
           approvalTtlMs,
           request: {
             titlePart: args.titlePart,
+            windowId: args.windowId,
+            target: args.target,
             tier,
             agentId: args.agentId ?? "unknown",
             reason: args.reason ?? null,
@@ -837,13 +875,49 @@ export class ComputerUseProviderRouter {
       () => this.expireActiveController({ throwOnExpire: false }, ticket),
     );
     this.expireAccessApproval();
+    let windows = [];
+    let foregroundWindow = null;
+    let windowDiscovery;
+    if (!this.driver?.listWindows) {
+      windowDiscovery = {
+        status: "unavailable",
+        source: "cua-driver",
+        error: {
+          code: "provider.unavailable",
+          message: "Window discovery provider is not available.",
+        },
+      };
+    } else {
+      try {
+        windows = await this.awaitExternal(
+          ticket,
+          () => this.driver.listWindows({ onScreenOnly: true }),
+        );
+        foregroundWindow = windows.find((window) => window.isForeground) ?? windows[0] ?? null;
+        windowDiscovery = {
+          status: "ready",
+          source: "cua-driver",
+        };
+      } catch (error) {
+        this.assertOperationTicket(ticket);
+        windowDiscovery = {
+          status: "unavailable",
+          source: "cua-driver",
+          error: serializeToolError(error),
+        };
+      }
+    }
     return {
       status: this.activeController ? "active" : "idle",
       activeController: this.activeController,
       pendingAccessApproval: this.getPendingAccessApproval(),
       lastCapture: this.lastCapture,
       pendingRepairApproval: this.getPendingRepairApproval(),
+      foregroundWindow,
+      windows,
+      windowDiscovery,
       auditEvents: this.auditEvents.slice(-50),
+      startsDesktopControl: false,
       includeUserOverlay: false,
     };
   }

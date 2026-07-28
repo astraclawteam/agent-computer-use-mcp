@@ -258,13 +258,30 @@ export const COMPUTER_USE_MCP_TOOLS = [
   {
     name: "computer.request_access",
     title: "Request Computer Access",
-    description: "Acquire a Gateway-managed controller lease for a target window.",
+    description: "Acquire a Gateway-managed controller lease for a known window. Prefer target=\"foreground\" when the user refers to the current/frontmost window; use computer.list_state first when the target is unknown. Never guess a title. The legacy exact titlePart value \"*\" is accepted only as an alias for the foreground window.",
     annotations: { phase: "1.3", destructiveHint: false },
     inputSchema: {
       type: "object",
-      required: ["titlePart"],
+      oneOf: [
+        { required: ["titlePart"] },
+        { required: ["windowId"] },
+        { required: ["target"] },
+      ],
       properties: {
-        titlePart: { type: "string" },
+        titlePart: {
+          type: "string",
+          minLength: 1,
+          description: "Case-insensitive literal title or app-name substring. Prefer target=\"foreground\" for the current window; the legacy exact value \"*\" is accepted as a foreground alias.",
+        },
+        windowId: {
+          anyOf: [{ type: "string" }, { type: "number" }],
+          description: "Exact window id returned by computer.list_state.",
+        },
+        target: {
+          type: "string",
+          enum: ["foreground"],
+          description: "Select the current OS foreground window without guessing its title.",
+        },
         tier: { type: "string", enum: ["observe", "full", "admin"] },
         agentId: { type: "string" },
         reason: { type: "string" },
@@ -432,7 +449,7 @@ export const COMPUTER_USE_MCP_TOOLS = [
   {
     name: "computer.list_state",
     title: "List Computer Use State",
-    description: "Return active controller, last capture, and recent audit events.",
+    description: "Read Computer Use state and discover visible desktop windows. Use foregroundWindow to answer which window is currently frontmost, or use its windowId with computer.request_access. This tool never acquires control.",
     annotations: { phase: "1.3", readOnlyHint: true },
     inputSchema: {
       type: "object",
@@ -445,19 +462,37 @@ export const COMPUTER_USE_MCP_TOOLS = [
       pendingAccessApproval: { anyOf: [ANY_OBJECT, { type: "null" }] },
       lastCapture: { anyOf: [ANY_OBJECT, { type: "null" }] },
       pendingRepairApproval: { anyOf: [ANY_OBJECT, { type: "null" }] },
+      foregroundWindow: { anyOf: [ANY_OBJECT, { type: "null" }] },
+      windows: ANY_ARRAY,
+      windowDiscovery: ANY_OBJECT,
       auditEvents: ANY_ARRAY,
-    }, ["status", "activeController", "pendingAccessApproval", "lastCapture", "pendingRepairApproval", "auditEvents"]),
+      startsDesktopControl: { const: false },
+    }, [
+      "status",
+      "activeController",
+      "pendingAccessApproval",
+      "lastCapture",
+      "pendingRepairApproval",
+      "foregroundWindow",
+      "windows",
+      "windowDiscovery",
+      "auditEvents",
+      "startsDesktopControl",
+    ]),
   },
   {
     name: "computer.capture_window",
     title: "Capture Window",
-    description: "Capture a real OS window to a PNG artifact using a window-level capture path.",
+    description: "Capture a real OS window to a PNG artifact using a window-level capture path. Use the exact titlePart value \"*\" to capture the current foreground window.",
     annotations: { phase: "1.0", readOnlyHint: true },
     inputSchema: {
       type: "object",
       required: ["titlePart"],
       properties: {
-        titlePart: { type: "string" },
+        titlePart: {
+          type: "string",
+          description: "Case-insensitive literal title substring, or the exact value \"*\" for the current foreground window.",
+        },
         outputPath: { type: "string" },
         timeoutMs: { type: "number" },
       },

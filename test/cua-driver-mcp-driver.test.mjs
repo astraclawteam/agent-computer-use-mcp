@@ -146,6 +146,125 @@ test("CuaDriverMcpDriver maps request/capture/action to cua-driver MCP tools", a
   ]);
 });
 
+test("CuaDriverMcpDriver discovers the foreground window from canonical z-order", async () => {
+  const calls = [];
+  const driver = new CuaDriverMcpDriver({
+    session: "foreground-discovery",
+    client: {
+      async start() {
+        calls.push({ method: "start" });
+      },
+      async callTool(name, args) {
+        calls.push({ method: "callTool", name, args });
+        if (name === "list_windows") {
+          const windows = [
+            {
+              window_id: 90,
+              title: "Offscreen Utility",
+              app_name: "hidden.exe",
+              pid: 900,
+              z_index: 99,
+              is_on_screen: false,
+              bounds: { x: 0, y: 0, width: 1, height: 1 },
+            },
+            {
+              window_id: 91,
+              title: "Foreground App",
+              app_name: "foreground.exe",
+              pid: 901,
+              z_index: 8,
+              is_on_screen: true,
+              bounds: { x: 1, y: 2, width: 800, height: 600 },
+            },
+            {
+              window_id: 92,
+              title: "Background App",
+              app_name: "background.exe",
+              pid: 902,
+              z_index: 2,
+              is_on_screen: true,
+              bounds: { x: 20, y: 30, width: 640, height: 480 },
+            },
+            {
+              window_id: 93,
+              title: "Gateway-managed Computer Use",
+              app_name: "GatewayComputerUseOverlay.exe",
+              pid: 903,
+              z_index: 50,
+              is_on_screen: true,
+              bounds: { x: 0, y: 0, width: 1920, height: 1080 },
+            },
+          ];
+          return {
+            windows: args.on_screen_only
+              ? windows.filter((window) => window.is_on_screen !== false)
+              : windows,
+          };
+        }
+        return { status: "ok" };
+      },
+    },
+  });
+
+  const windows = await driver.listWindows({ onScreenOnly: true });
+  assert.deepEqual(windows, [
+    {
+      windowId: 91,
+      title: "Foreground App",
+      appName: "foreground.exe",
+      pid: 901,
+      zIndex: 8,
+      isOnScreen: true,
+      isForeground: true,
+      bounds: { x: 1, y: 2, width: 800, height: 600 },
+    },
+    {
+      windowId: 92,
+      title: "Background App",
+      appName: "background.exe",
+      pid: 902,
+      zIndex: 2,
+      isOnScreen: true,
+      isForeground: false,
+      bounds: { x: 20, y: 30, width: 640, height: 480 },
+    },
+  ]);
+  assert.deepEqual(await driver.findWindow({ target: "foreground" }), {
+    windowId: 91,
+    title: "Foreground App",
+    pid: 901,
+    bounds: { x: 1, y: 2, width: 800, height: 600 },
+  });
+  assert.deepEqual(await driver.findWindow({ titlePart: "*" }), {
+    windowId: 91,
+    title: "Foreground App",
+    pid: 901,
+    bounds: { x: 1, y: 2, width: 800, height: 600 },
+  });
+  assert.deepEqual(await driver.findWindow({ windowId: 92 }), {
+    windowId: 92,
+    title: "Background App",
+    pid: 902,
+    bounds: { x: 20, y: 30, width: 640, height: 480 },
+  });
+  assert.deepEqual(await driver.findWindow({ titlePart: "background app" }), {
+    windowId: 92,
+    title: "Background App",
+    pid: 902,
+    bounds: { x: 20, y: 30, width: 640, height: 480 },
+  });
+  assert.deepEqual(
+    calls.filter((call) => call.name === "list_windows").map((call) => call.args),
+    [
+      { on_screen_only: true },
+      { on_screen_only: true },
+      { on_screen_only: true },
+      { on_screen_only: false },
+      { on_screen_only: false },
+    ],
+  );
+});
+
 test("CuaDriverMcpDriver leaves the cursor disabled when styling fails and still closes its session", async () => {
   const calls = [];
   const styleError = new Error("cursor style failed");

@@ -2,6 +2,12 @@
 
 All notable changes to `agent-computer-use-mcp` are tracked here.
 
+## 0.0.3
+
+- Discover the real foreground window from cua-driver z-order without requiring a guessed title.
+- Accept `target: "foreground"`, exact window ids, case-insensitive titles, and the legacy `titlePart: "*"` foreground alias.
+- Return structured, retryable window-resolution errors and normalized PowerShell CLIXML while keeping the MCP session usable after a failed tool call.
+
 ## 0.0.2
 
 - Expose the existing cua-driver `type_text` capability through `computer.act` so modern Windows Notepad document surfaces can be edited without weakening observation or policy checks.
