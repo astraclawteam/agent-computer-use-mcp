@@ -5,16 +5,27 @@ import { tmpdir } from "node:os";
 import { basename, join, resolve } from "node:path";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
+import {
+  createPhase14ServerEnvironment,
+  resolvePhase14Driver,
+} from "./phase-1-4-driver.mjs";
 
 const labProject = resolve("native-lab/NativeComputerUseLab.csproj");
 const labExe = resolve("native-lab/bin/Debug/net10.0-windows/NativeComputerUseLab.exe");
 const expectedText = "xiaozhi-mcp-action";
 const dir = await mkdtemp(join(tmpdir(), "agent-computer-use-phase-1-4-"));
 const outputFile = join(dir, "saved.txt");
-const server = createMcpClient();
+const packageJson = JSON.parse(await readFile(resolve("package.json"), "utf8"));
+let server = null;
+let driverResolution = null;
 let lab = null;
 
 try {
+  driverResolution = await resolvePhase14Driver({
+    packageRoot: process.cwd(),
+    packageVersion: packageJson.version,
+  });
+  server = createMcpClient(driverResolution.path);
   if (!existsSync(labExe)) {
     await run("dotnet", ["build", labProject], { windowsHide: true });
   }
@@ -81,6 +92,10 @@ try {
     phase: "1.4",
     benchmark: "real-mcp-action-lifecycle",
     server: "agent-computer-use-mcp",
+    driver: {
+      source: driverResolution.source,
+      version: driverResolution.version,
+    },
     filePath: outputFile,
     diskText,
     access: {
@@ -125,18 +140,18 @@ try {
     phase: "1.4",
     benchmark: "real-mcp-action-lifecycle",
     error: error instanceof Error ? error.message : String(error),
-    serverStderr: server.stderrText().slice(-4000),
+    serverStderr: server?.stderrText().slice(-4000) ?? "",
     includeUserOverlay: false,
   }, null, 2));
   process.exitCode = 1;
 } finally {
-  await server.close();
+  await server?.close();
   if (lab && !lab.killed) {
     lab.kill();
   }
 }
 
-function createMcpClient() {
+function createMcpClient(driverPath) {
   const client = new Client({
     name: "phase-1-4-smoke",
     version: "0.0.1",
@@ -147,14 +162,18 @@ function createMcpClient() {
     command: process.execPath,
     args: ["src/computer-use-mcp-server.mjs"],
     cwd: process.cwd(),
+    env: createPhase14ServerEnvironment(process.env, driverPath),
+    stderr: "pipe",
   });
   let stderr = "";
-  transport.stderr?.on?.("data", (chunk) => {
-    stderr += chunk.toString("utf8");
-  });
 
   return {
-    connect: () => client.connect(transport),
+    connect: async () => {
+      await client.connect(transport);
+      transport.stderr?.on?.("data", (chunk) => {
+        stderr += chunk.toString("utf8");
+      });
+    },
     callTool: async (name, args) => {
       const result = await client.callTool({ name, arguments: args });
       return result.structuredContent ?? result;
