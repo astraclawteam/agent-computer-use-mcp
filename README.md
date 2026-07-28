@@ -60,7 +60,6 @@ Release-focused commands:
 - `npm run phase:0.14`: verify protected npm package integrity and standard MCP compatibility.
 - `npm run phase:0.15`: assemble both npm tarballs and the complete ZIP, compare platform inventories, and run the offline MCP smoke.
 - `npm run phase:7.8`: verify exact platform resolution and read-only repair guidance.
-- `npm run phase:7.9`: verify npm/ZIP platform identity and network-free startup.
 - `npm run release:windows:size-report`: enforce the 310 MiB complete ZIP limit.
 - `npm run soak:pr`: run the exact 900,000 ms pull-request soak and seal commercial runtime evidence.
 - `npm run evidence:verify -- <evidence-directory>`: recompute evidence identities, inventory, and SHA-256 checksums.

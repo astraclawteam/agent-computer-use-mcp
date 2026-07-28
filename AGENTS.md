@@ -72,7 +72,6 @@ For MCP protocol or installation changes, also run:
 npm run phase:1.6
 npm run phase:1.7
 npm run phase:1.8
-npm run phase:7.9
 ```
 
 For desktop action or `cua-driver mcp` changes, run when the platform has `cua-driver` configured:
