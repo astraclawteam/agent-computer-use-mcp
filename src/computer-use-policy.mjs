@@ -1,5 +1,5 @@
-export const DEFAULT_ALLOWED_ACTION_KINDS = ["set_value", "type_text", "click"];
-export const DEFAULT_DELIVERY_MODES = ["background"];
+export const DEFAULT_ALLOWED_ACTION_KINDS = ["set_value", "type_text", "click", "press_key"];
+export const DEFAULT_DELIVERY_MODES = ["background", "foreground"];
 export const DEFAULT_PERMISSION_TIERS = ["observe", "full", "admin"];
 export const DEFAULT_DENIED_WINDOW_CATEGORIES = [
   "credential-manager",
@@ -95,11 +95,18 @@ export function createComputerUsePolicy(options = {}) {
       }
 
       const hasElementRef = action.elementToken !== undefined || action.elementIndex !== undefined;
-      if (!hasElementRef) {
+      const hasPixelRef = Number.isFinite(action.x) && Number.isFinite(action.y);
+      if (!hasElementRef && !hasPixelRef) {
         return deny("action.element_required");
+      }
+      if (hasPixelRef && (typeof action.observationId !== "string" || action.observationId.trim() === "")) {
+        return deny("action.observation_required");
       }
       if ((action.kind === "set_value" || action.kind === "type_text") && typeof action.value !== "string") {
         return deny("action.value_required");
+      }
+      if (action.kind === "press_key" && (typeof action.key !== "string" || action.key.trim() === "")) {
+        return deny("action.key_required");
       }
 
       const deliveryMode = action.deliveryMode ?? "background";

@@ -190,14 +190,13 @@ export class CuaDriverMcpDriver {
     });
   }
 
-  typeText({ window, elementToken, elementIndex, value, deliveryMode = "background" }) {
+  typeText({ window, elementToken, elementIndex, x, y, value, deliveryMode = "background" }) {
     return this.runWork(async (ticket) => {
       await this.ensureStartedResources(ticket);
       const result = await this.client.callTool("type_text", {
         pid: window.pid,
         window_id: window.windowId,
-        element_index: elementIndex,
-        element_token: elementToken,
+        ...actionAddress({ elementToken, elementIndex, x, y }),
         text: value,
         delivery_mode: deliveryMode,
         session: this.session,
@@ -207,14 +206,30 @@ export class CuaDriverMcpDriver {
     });
   }
 
-  click({ window, elementToken, elementIndex, deliveryMode = "background" }) {
+  click({ window, elementToken, elementIndex, x, y, deliveryMode = "background" }) {
     return this.runWork(async (ticket) => {
       await this.ensureStartedResources(ticket);
       const result = await this.client.callTool("click", {
         pid: window.pid,
         window_id: window.windowId,
-        element_index: elementIndex,
-        element_token: elementToken,
+        ...actionAddress({ elementToken, elementIndex, x, y }),
+        delivery_mode: deliveryMode,
+        session: this.session,
+      });
+      this.assertWorkTicket(ticket);
+      return result;
+    });
+  }
+
+  pressKey({ window, elementToken, elementIndex, x, y, key, modifiers, deliveryMode = "background" }) {
+    return this.runWork(async (ticket) => {
+      await this.ensureStartedResources(ticket);
+      const result = await this.client.callTool("press_key", {
+        pid: window.pid,
+        window_id: window.windowId,
+        ...actionAddress({ elementToken, elementIndex, x, y }),
+        key,
+        ...(Array.isArray(modifiers) ? { modifiers } : {}),
         delivery_mode: deliveryMode,
         session: this.session,
       });
@@ -313,6 +328,14 @@ export class CuaDriverMcpDriver {
       throw lifecycleClosedError();
     }
   }
+}
+
+function actionAddress({ elementToken, elementIndex, x, y }) {
+  if (Number.isFinite(x) && Number.isFinite(y)) return { x, y };
+  const address = {};
+  if (elementToken !== undefined) address.element_token = elementToken;
+  if (elementIndex !== undefined) address.element_index = elementIndex;
+  return address;
 }
 
 export class CuaDriverMcpClient {

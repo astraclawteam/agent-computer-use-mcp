@@ -143,7 +143,14 @@ test("agent-computer-use-mcp freezes the local MCP tool contract", () => {
   assert.deepEqual(act.inputSchema.required, ["action"]);
   assert.deepEqual(act.outputSchema.allOf[0].else.required, ["status", "provider", "action", "result", "pixelLimitedAction"]);
   assert.deepEqual(act.outputSchema.allOf[0].then.required, ["status", "error"]);
-  assert.deepEqual(act.inputSchema.properties.action.properties.kind.enum, ["set_value", "type_text", "click"]);
+  assert.deepEqual(act.inputSchema.properties.action.properties.kind.enum, ["set_value", "type_text", "click", "press_key"]);
+  assert.equal(act.inputSchema.properties.action.properties.observationId.type, "string");
+  assert.equal(act.inputSchema.properties.action.properties.x.type, "number");
+  assert.equal(act.inputSchema.properties.action.properties.y.type, "number");
+  assert.equal(act.inputSchema.properties.action.properties.key.type, "string");
+  assert.deepEqual(observe.outputSchema.properties.expiresAt, {
+    anyOf: [{ type: "number" }, { type: "null" }],
+  });
 
   for (const field of ["elements", "controllerId", "expiresAt", "dirtyRegion", "observation"]) {
     assert.ok(observe.outputSchema.properties[field], `computer.observe declares ${field}`);
@@ -194,7 +201,7 @@ test("agent-computer-use-mcp answers initialize, tools/list, and health over std
     assert.equal(health.structuredContent.phases["1.2"], "packaging-health-contract");
     assert.equal(health.structuredContent.phases["1.5"], "safety-diagnostics");
     assert.equal(health.structuredContent.phases["1.6"], "install-config-contract");
-    assert.deepEqual(health.structuredContent.actionPolicy.deliveryModes, ["background"]);
+    assert.deepEqual(health.structuredContent.actionPolicy.deliveryModes, ["background", "foreground"]);
 
     const doctor = await client.callTool({
       name: "computer.doctor",
@@ -461,7 +468,7 @@ test("provider router enforces action safety policy", async () => {
   await router.cancel({ reason: "switch-tier" });
   await router.requestAccess({ titlePart: "Computer Use Lab", tier: "full" });
   await assert.rejects(
-    () => router.act({ action: { kind: "click", deliveryMode: "foreground", elementIndex: 1 } }),
+    () => router.act({ action: { kind: "click", deliveryMode: "teleport", elementIndex: 1 } }),
     /Unsupported delivery mode/,
   );
   await assert.rejects(

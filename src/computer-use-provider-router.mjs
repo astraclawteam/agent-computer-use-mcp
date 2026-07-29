@@ -712,14 +712,11 @@ export class ComputerUseProviderRouter {
       fail("capture.mode_unsupported", `Unsupported capture mode: ${mode}`);
     }
 
-    this.lastCapture = {
+    this.lastCapture = this.createActionObservation({
       ...observation,
+      observationId: observation.observationId ?? `capture-${Date.now()}`,
       provider: observation.provider ?? "gateway-managed",
-      window: observation.window ?? { id: controllerWindowId(this.activeController.window), title: this.activeController.window.title },
-      controllerId: this.activeController.controllerId,
-      expiresAt: Math.min(this.activeController.expiresAt, this.clock.now() + 5000),
-      includeUserOverlay: false,
-    };
+    });
     this.recordAudit("computer.capture.created", {
       controllerId: this.activeController.controllerId,
       mode,
@@ -735,7 +732,7 @@ export class ComputerUseProviderRouter {
   async actOperation(args = {}, ticket) {
     await this.awaitExternal(ticket, () => this.requireActiveController(ticket));
     const action = args.action;
-    this.validateAction(action);
+    const { admission, driverTarget } = this.validateAction(action);
     this.recordAudit("computer.action.started", {
       controllerId: this.activeController.controllerId,
       kind: action.kind,
@@ -749,16 +746,14 @@ export class ComputerUseProviderRouter {
         if (!this.driver?.setValue) fail("provider.unavailable", "set_value provider is not available");
         result = await this.awaitExternal(ticket, () => this.driver.setValue({
           window: this.activeController.window,
-          elementToken: action.elementToken,
-          elementIndex: action.elementIndex,
+          ...driverTarget,
           value: action.value,
         }));
       } else if (action.kind === "type_text") {
         if (!this.driver?.typeText) fail("provider.unavailable", "type_text provider is not available");
         result = await this.awaitExternal(ticket, () => this.driver.typeText({
           window: this.activeController.window,
-          elementToken: action.elementToken,
-          elementIndex: action.elementIndex,
+          ...driverTarget,
           value: action.value,
           deliveryMode: action.deliveryMode ?? "background",
         }));
@@ -766,8 +761,16 @@ export class ComputerUseProviderRouter {
         if (!this.driver?.click) fail("provider.unavailable", "click provider is not available");
         result = await this.awaitExternal(ticket, () => this.driver.click({
           window: this.activeController.window,
-          elementToken: action.elementToken,
-          elementIndex: action.elementIndex,
+          ...driverTarget,
+          deliveryMode: action.deliveryMode ?? "background",
+        }));
+      } else if (action.kind === "press_key") {
+        if (!this.driver?.pressKey) fail("provider.unavailable", "press_key provider is not available");
+        result = await this.awaitExternal(ticket, () => this.driver.pressKey({
+          window: this.activeController.window,
+          ...driverTarget,
+          key: action.key,
+          modifiers: action.modifiers,
           deliveryMode: action.deliveryMode ?? "background",
         }));
       }
@@ -786,7 +789,7 @@ export class ComputerUseProviderRouter {
       provider: "gateway-managed",
       action: action.kind,
       result,
-      pixelLimitedAction: false,
+      pixelLimitedAction: admission.pixelLimitedAction,
       includeUserOverlay: false,
     };
     if (action.captureAfter) {
@@ -934,14 +937,20 @@ export class ComputerUseProviderRouter {
     const capture = await this.awaitExternal(ticket, () => captureWindowPngByTitle(args.titlePart, outputPath, {
       timeoutMs: args.timeoutMs,
     }));
-    return {
+    const result = {
       status: "ok",
       provider: "gateway-managed",
       source: "window-capture",
+      observationId: `capture-window-${Date.now()}`,
       capture,
       artifact: { path: capture.path, mimeType: "image/png" },
+      elements: [],
       includeUserOverlay: false,
     };
+    if (!this.activeController) return result;
+    const observation = this.createActionObservation(result);
+    this.lastCapture = observation;
+    return observation;
   }
 
   ocrRegion(args) {
@@ -978,13 +987,19 @@ export class ComputerUseProviderRouter {
       const key = createPerceptionRegionCacheKey({ ...keyOptions, modelIdentity: this.ocrIdentity });
       const cached = this.perceptionCache.get(key);
       if (cached) {
+        const observation = this.createActionObservation({
+          ...cached,
+          cacheHit: true,
+          timings: { ...(cached.timings ?? {}), totalMs: 0 },
+        });
+        this.lastCapture = observation;
         return {
           status: "ok",
           provider: "gateway-managed",
           mode: "ocr-region",
           imagePath,
           capture,
-          observation: { ...cached, cacheHit: true, timings: { ...(cached.timings ?? {}), totalMs: 0 } },
+          observation,
           includeUserOverlay: false,
         };
       }
@@ -1003,8 +1018,10 @@ export class ComputerUseProviderRouter {
       languageClass: args.languageClass ?? "mixed",
     });
     this.ocrIdentity = pickOcrIdentity(response);
+    const actionObservation = this.createActionObservation(observation);
+    this.lastCapture = actionObservation;
     const cacheKey = createPerceptionRegionCacheKey({ ...keyOptions, modelIdentity: this.ocrIdentity });
-    this.perceptionCache.set(cacheKey, observation, {
+    this.perceptionCache.set(cacheKey, actionObservation, {
       windowId,
       sensitive: args.sensitiveRegion === true || args.passwordRegion === true || args.paymentRegion === true || args.privateRegion === true,
     });
@@ -1015,7 +1032,7 @@ export class ComputerUseProviderRouter {
       mode: "ocr-region",
       imagePath,
       capture,
-      observation,
+      observation: actionObservation,
       includeUserOverlay: false,
     };
   }
@@ -1358,6 +1375,30 @@ export class ComputerUseProviderRouter {
       now: this.clock.now(),
     });
     if (!admission.allowed) fail(admission.code, admission.code, admission);
+    return {
+      admission,
+      driverTarget: resolveDriverActionTarget(action, element, admission.pixelLimitedAction),
+    };
+  }
+
+  createActionObservation(observation) {
+    const now = this.clock.now();
+    const leaseExpiry = Number.isFinite(this.activeController?.expiresAtMs)
+      ? this.activeController.expiresAtMs
+      : Date.parse(this.activeController?.expiresAt ?? "");
+    return {
+      ...observation,
+      observationId: observation.observationId ?? `observation-${now}`,
+      window: {
+        ...(observation.window ?? {}),
+        id: controllerWindowId(this.activeController?.window),
+        title: this.activeController?.window?.title ?? observation.window?.title,
+        bounds: this.activeController?.window?.bounds ?? observation.window?.bounds,
+      },
+      controllerId: this.activeController?.controllerId,
+      expiresAt: Math.min(Number.isFinite(leaseExpiry) ? leaseExpiry : now + 5000, now + 5000),
+      includeUserOverlay: false,
+    };
   }
 
   enforcePolicyDecision(decision) {
@@ -1709,6 +1750,24 @@ function resolveObservationElement(observation, action) {
   return null;
 }
 
+function resolveDriverActionTarget(action, element, pixelLimitedAction) {
+  if (!pixelLimitedAction) {
+    return {
+      elementToken: action.elementToken,
+      elementIndex: action.elementIndex,
+    };
+  }
+  if (Number.isFinite(action.x) && Number.isFinite(action.y)) {
+    return { x: action.x, y: action.y };
+  }
+  const region = element?.sourceRegion ?? element?.bounds;
+  if (!region) return {};
+  return {
+    x: region.x + (region.width / 2),
+    y: region.y + (region.height / 2),
+  };
+}
+
 function controllerWindowId(window = {}) {
   return String(window.id ?? window.windowId ?? window.window_id ?? window.title ?? "unknown-window");
 }
@@ -1800,10 +1859,16 @@ function policyMessage(decision) {
     return "Unsupported action kind.";
   }
   if (decision.code === "action.element_required") {
-    return "Element action requires elementToken or elementIndex.";
+    return "Action requires elementToken/elementIndex or observation-grounded x/y coordinates.";
+  }
+  if (decision.code === "action.observation_required") {
+    return "Coordinate actions require the exact latest observationId.";
   }
   if (decision.code === "action.value_required") {
     return "set_value and type_text require a string value.";
+  }
+  if (decision.code === "action.key_required") {
+    return "press_key requires a key.";
   }
   if (decision.code === "delivery_mode.unsupported") {
     return "Unsupported delivery mode.";

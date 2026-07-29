@@ -383,7 +383,7 @@ const LEGACY_COMPUTER_USE_MCP_TOOLS = [
   {
     name: "computer.act",
     title: "Act On Computer",
-    description: "Run an approved action against the active Gateway-managed target.",
+    description: "Run an approved action against the active Gateway-managed target. Prefer a semantic or OCR elementToken from the latest observation. For custom-drawn surfaces, x/y must be window-local coordinates grounded to the exact latest observationId. Try background delivery first and use foreground only after the driver reports background_unavailable.",
     annotations: { phase: "1.3", destructiveHint: true },
     inputSchema: {
       type: "object",
@@ -393,10 +393,30 @@ const LEGACY_COMPUTER_USE_MCP_TOOLS = [
           type: "object",
           required: ["kind"],
           properties: {
-            kind: { type: "string", enum: ["set_value", "type_text", "click"] },
+            kind: { type: "string", enum: ["set_value", "type_text", "click", "press_key"] },
+            observationId: {
+              type: "string",
+              description: "Required with x/y so the action is bound to the exact latest screenshot or OCR observation.",
+            },
             elementToken: { type: "string" },
             elementIndex: { type: "number" },
+            x: {
+              type: "number",
+              description: "Window-local screenshot X coordinate. Use only with the latest observationId.",
+            },
+            y: {
+              type: "number",
+              description: "Window-local screenshot Y coordinate. Use only with the latest observationId.",
+            },
             value: { type: "string" },
+            key: {
+              type: "string",
+              description: "Key name for press_key, for example return, tab, escape, or delete.",
+            },
+            modifiers: {
+              type: "array",
+              items: { type: "string" },
+            },
             deliveryMode: { type: "string", enum: ["background", "foreground"] },
             captureAfter: { type: "boolean" },
           },
@@ -635,7 +655,7 @@ const acquireTool = {
 const observeTool = {
   name: "computer.observe",
   title: "Observe Computer",
-  description: "Read desktop state or capture semantic, screenshot, OCR, and changed-region observations through one bounded interface.",
+  description: "Read desktop state or capture semantic, screenshot, OCR, and changed-region observations through one bounded interface. Start with semantic. When a custom-drawn app exposes no semantic elements, use ocr-region; its high-confidence elementToken values can be passed directly to computer.act. Screenshot and capture-window return an observationId for bounded x/y actions. Artifact paths are connector-private and must not be passed to unrelated file or media tools.",
   _meta: semanticCapabilityMeta({
     summary: "Inspect visible state in local graphical applications using window discovery, semantic elements, screenshots, OCR, or visual differences.",
     scenarios: [
@@ -693,7 +713,7 @@ const observeTool = {
     baselinePath: { type: "string" },
     changedPath: { type: "string" },
     controllerId: { type: "string" },
-    expiresAt: { anyOf: [{ type: "string" }, { type: "null" }] },
+    expiresAt: { anyOf: [{ type: "number" }, { type: "null" }] },
     startsDesktopControl: { type: "boolean" },
   }),
 };

@@ -37,18 +37,18 @@ try {
   await new Promise((resolvePromise) => setTimeout(resolvePromise, 500));
 
   await server.connect();
-  const access = await server.callTool("computer.request_access", {
+  const access = await server.callTool("computer.acquire", {
     titlePart: basename(outputFile),
     tier: "full",
     agentId: "phase-1-4-smoke",
     reason: "Phase 1.4 real MCP action validation",
   });
   if (access.status !== "granted") {
-    throw new Error(`request_access.failed: ${JSON.stringify(access)}`);
+    throw new Error(`acquire.failed: ${JSON.stringify(access)}`);
   }
-  const capture = await server.callTool("computer.capture", { mode: "semantic" });
+  const capture = await server.callTool("computer.observe", { mode: "semantic" });
   if (!Array.isArray(capture.elements)) {
-    throw new Error(`capture.invalid_response: ${JSON.stringify(capture)}`);
+    throw new Error(`observe.invalid_response: ${JSON.stringify(capture)}`);
   }
   const name = capture.elements.find((element) => element.role === "edit" && element.name === "Name")
     ?? capture.elements.find((element) => element.name === "Name");
@@ -75,17 +75,17 @@ try {
     },
   });
   await new Promise((resolvePromise) => setTimeout(resolvePromise, 300));
-  const stateBeforeCancel = await server.callTool("computer.list_state", {});
+  const stateBeforeRelease = await server.callTool("computer.observe", { mode: "state" });
   const diskText = await readFile(outputFile, "utf8");
-  const cancel = await server.callTool("computer.cancel", { reason: "phase-1-4-complete" });
-  const stateAfterCancel = await server.callTool("computer.list_state", {});
+  const release = await server.callTool("computer.release", { reason: "phase-1-4-complete" });
+  const stateAfterRelease = await server.callTool("computer.observe", { mode: "state" });
   const passed = diskText === expectedText
     && access.status === "granted"
     && capture.includeUserOverlay === false
     && setValue.status === "ok"
     && click.status === "ok"
-    && stateBeforeCancel.status === "active"
-    && stateAfterCancel.status === "idle";
+    && stateBeforeRelease.status === "active"
+    && stateAfterRelease.status === "idle";
 
   console.log(JSON.stringify({
     status: passed ? "passed" : "failed",
@@ -117,19 +117,19 @@ try {
       includeUserOverlay: click.includeUserOverlay,
       captureAfter: Boolean(click.capture),
     },
-    stateBeforeCancel: {
-      status: stateBeforeCancel.status,
-      auditEvents: stateBeforeCancel.auditEvents.map((event) => event.type),
-      includeUserOverlay: stateBeforeCancel.includeUserOverlay,
+    stateBeforeRelease: {
+      status: stateBeforeRelease.status,
+      auditEvents: stateBeforeRelease.auditEvents.map((event) => event.type),
+      includeUserOverlay: stateBeforeRelease.includeUserOverlay,
     },
-    cancel: {
-      status: cancel.status,
-      includeUserOverlay: cancel.includeUserOverlay,
+    release: {
+      status: release.status,
+      includeUserOverlay: release.includeUserOverlay,
     },
-    stateAfterCancel: {
-      status: stateAfterCancel.status,
-      activeController: stateAfterCancel.activeController,
-      includeUserOverlay: stateAfterCancel.includeUserOverlay,
+    stateAfterRelease: {
+      status: stateAfterRelease.status,
+      activeController: stateAfterRelease.activeController,
+      includeUserOverlay: stateAfterRelease.includeUserOverlay,
     },
     includeUserOverlay: false,
   }, null, 2));
@@ -179,7 +179,7 @@ function createMcpClient(driverPath) {
       return result.structuredContent ?? result;
     },
     close: async () => {
-      await client.callTool({ name: "computer.revoke", arguments: { reason: "client-close" } }).catch(() => {});
+      await client.callTool({ name: "computer.release", arguments: { reason: "client-close" } }).catch(() => {});
       await client.close().catch(() => {});
     },
     stderrText: () => stderr,

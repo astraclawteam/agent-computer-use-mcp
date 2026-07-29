@@ -72,6 +72,9 @@ test("CuaDriverMcpDriver maps request/capture/action to cua-driver MCP tools", a
   await driver.setValue({ window, elementIndex: 0, elementToken: "name", value: "agent-computer-use" });
   await driver.typeText({ window, elementIndex: 2, elementToken: "document", value: "Notepad text" });
   await driver.click({ window, elementIndex: 1, elementToken: "save", deliveryMode: "background" });
+  await driver.typeText({ window, x: 160, y: 180, value: "Pixel text", deliveryMode: "foreground" });
+  await driver.click({ window, x: 280, y: 210, deliveryMode: "background" });
+  await driver.pressKey({ window, x: 160, y: 180, key: "return", deliveryMode: "foreground" });
   await driver.stopCursor();
   await driver.stopCursor();
   await driver.close();
@@ -137,6 +140,44 @@ test("CuaDriverMcpDriver maps request/capture/action to cua-driver MCP tools", a
         element_index: 1,
         element_token: "save",
         delivery_mode: "background",
+        session: "test-session",
+      },
+    },
+    {
+      method: "callTool",
+      name: "type_text",
+      args: {
+        pid: 1234,
+        window_id: 42,
+        x: 160,
+        y: 180,
+        text: "Pixel text",
+        delivery_mode: "foreground",
+        session: "test-session",
+      },
+    },
+    {
+      method: "callTool",
+      name: "click",
+      args: {
+        pid: 1234,
+        window_id: 42,
+        x: 280,
+        y: 210,
+        delivery_mode: "background",
+        session: "test-session",
+      },
+    },
+    {
+      method: "callTool",
+      name: "press_key",
+      args: {
+        pid: 1234,
+        window_id: 42,
+        x: 160,
+        y: 180,
+        key: "return",
+        delivery_mode: "foreground",
         session: "test-session",
       },
     },
