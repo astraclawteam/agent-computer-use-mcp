@@ -96,7 +96,7 @@ function outputSchema(properties = {}, required = []) {
   return schema;
 }
 
-export const COMPUTER_USE_MCP_TOOLS = [
+const LEGACY_COMPUTER_USE_MCP_TOOLS = [
   {
     name: "computer.health",
     title: "Computer Use Health",
@@ -578,3 +578,101 @@ export const COMPUTER_USE_MCP_TOOLS = [
     }, ["status", "provider", "mode", "dirtyRegion", "observation"]),
   },
 ];
+
+const byLegacyName = (name) => {
+  const tool = LEGACY_COMPUTER_USE_MCP_TOOLS.find((candidate) => candidate.name === name);
+  if (!tool) throw new Error(`Missing Computer Use schema: ${name}`);
+  return tool;
+};
+
+const HOST_MANAGEMENT_META = Object.freeze({
+  "xiaozhiclaw/visibility": "host",
+  "xiaozhiclaw/management": true,
+});
+
+export const COMPUTER_USE_HOST_TOOLS = Object.freeze(
+  ["computer.health", "computer.doctor", "computer.installation", "computer.repair"].map((name) =>
+    Object.freeze({ ...byLegacyName(name), _meta: HOST_MANAGEMENT_META })),
+);
+
+const acquireTool = {
+  ...byLegacyName("computer.request_access"),
+  name: "computer.acquire",
+  title: "Acquire Computer Access",
+  description: "Acquire a Gateway-managed controller lease for one explicit or foreground window.",
+};
+
+const observeTool = {
+  name: "computer.observe",
+  title: "Observe Computer",
+  description: "Read desktop state or capture semantic, screenshot, OCR, and changed-region observations through one bounded interface.",
+  annotations: { phase: "5.8", readOnlyHint: true },
+  inputSchema: {
+    type: "object",
+    required: ["mode"],
+    properties: {
+      mode: { type: "string", enum: ["state", "semantic", "screenshot", "capture-window", "ocr-region", "diff"] },
+      titlePart: { type: "string" },
+      outputPath: { type: "string" },
+      imagePath: { type: "string" },
+      baselinePath: { type: "string" },
+      changedPath: { type: "string" },
+      crop: BOX_SCHEMA,
+      languages: { type: "array", items: { type: "string" } },
+      threshold: { type: "number" },
+      padding: { type: "number" },
+      timeoutMs: { type: "number" },
+      noCache: { type: "boolean" },
+    },
+    additionalProperties: false,
+  },
+  outputSchema: outputSchema({
+    status: { type: "string" },
+    mode: { type: "string" },
+    activeController: { anyOf: [ANY_OBJECT, { type: "null" }] },
+    pendingAccessApproval: { anyOf: [ANY_OBJECT, { type: "null" }] },
+    pendingRepairApproval: { anyOf: [ANY_OBJECT, { type: "null" }] },
+    lastCapture: { anyOf: [ANY_OBJECT, { type: "null" }] },
+    foregroundWindow: { anyOf: [ANY_OBJECT, { type: "null" }] },
+    windows: ANY_ARRAY,
+    windowDiscovery: ANY_OBJECT,
+    auditEvents: ANY_ARRAY,
+    observationId: { type: "string" },
+    provider: { type: "string" },
+    source: { type: "string" },
+    elements: PERCEPTION_ELEMENT_ARRAY,
+    artifact: ANY_OBJECT,
+    capture: ANY_OBJECT,
+    window: ANY_OBJECT,
+    text: { type: "string" },
+    observation: { anyOf: [ANY_OBJECT, { type: "null" }] },
+    dirtyRegion: { anyOf: [ANY_OBJECT, { type: "null" }] },
+    ocrRegion: ANY_OBJECT,
+    imagePath: { type: "string" },
+    baselinePath: { type: "string" },
+    changedPath: { type: "string" },
+    controllerId: { type: "string" },
+    expiresAt: { anyOf: [{ type: "string" }, { type: "null" }] },
+    startsDesktopControl: { type: "boolean" },
+  }),
+};
+
+const releaseTool = {
+  ...byLegacyName("computer.cancel"),
+  name: "computer.release",
+  title: "Release Computer Access",
+  description: "Release the active Gateway-managed controller lease and any pending access request.",
+};
+
+export const COMPUTER_USE_AGENT_TOOLS = Object.freeze([
+  Object.freeze(acquireTool),
+  Object.freeze(observeTool),
+  Object.freeze(byLegacyName("computer.act")),
+  Object.freeze(releaseTool),
+]);
+
+/** Raw MCP inventory: four Agent tools plus four Host-only management tools. */
+export const COMPUTER_USE_MCP_TOOLS = Object.freeze([
+  ...COMPUTER_USE_AGENT_TOOLS,
+  ...COMPUTER_USE_HOST_TOOLS,
+]);

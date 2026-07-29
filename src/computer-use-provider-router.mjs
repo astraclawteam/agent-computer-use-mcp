@@ -74,7 +74,7 @@ export class ComputerUseProviderRouter {
     const result = {
       status: "ready",
       module: "agent-computer-use-mcp",
-      version: "0.0.3",
+      version: "0.0.4",
       phases: {
         "0.9": "contract-freeze",
         "0.10": "release-metadata-changelog",
@@ -507,7 +507,7 @@ export class ComputerUseProviderRouter {
           "Select exactly one window using target=\"foreground\", windowId, or titlePart.",
           {
             retryable: true,
-            nextTool: "computer.list_state",
+            nextTool: "computer.observe",
           },
         );
       }
@@ -529,8 +529,8 @@ export class ComputerUseProviderRouter {
             "No visible window matched the requested selector.",
             {
               retryable: true,
-              nextTool: "computer.list_state",
-              suggestedAction: "Discover foregroundWindow with computer.list_state, then retry with target=\"foreground\" or the returned windowId.",
+              nextTool: "computer.observe",
+              suggestedAction: "Discover foregroundWindow with computer.observe mode=\"state\", then retry with target=\"foreground\" or the returned windowId.",
             },
           );
         }

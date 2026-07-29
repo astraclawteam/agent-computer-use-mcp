@@ -132,8 +132,8 @@ export class CuaDriverMcpDriver {
           `No visible window matched ${selector}.`,
           {
             retryable: true,
-            nextTool: "computer.list_state",
-            suggestedAction: "Discover the current foreground window with computer.list_state, then retry using target=\"foreground\" or the returned windowId.",
+            nextTool: "computer.observe",
+            suggestedAction: "Discover the current foreground window with computer.observe mode=\"state\", then retry using target=\"foreground\" or the returned windowId.",
           },
         );
       }

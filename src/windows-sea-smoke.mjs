@@ -9,20 +9,14 @@ import { verifyWindowsSeaArtifactTree } from "./windows-sea-artifact.mjs";
 
 const execFileAsync = promisify(execFile);
 const EXPECTED_TOOLS = [
+  "computer.acquire",
+  "computer.observe",
+  "computer.act",
+  "computer.release",
   "computer.health",
   "computer.doctor",
-  "computer.repair",
   "computer.installation",
-  "computer.request_access",
-  "computer.approve",
-  "computer.capture",
-  "computer.act",
-  "computer.cancel",
-  "computer.revoke",
-  "computer.list_state",
-  "computer.capture_window",
-  "computer.ocr_region",
-  "computer.observe_diff",
+  "computer.repair",
 ];
 
 export async function runWindowsSeaSmoke(options = {}) {
@@ -64,13 +58,13 @@ export async function runWindowsSeaSmoke(options = {}) {
       }));
     }
 
-    const access = await connection.call("computer.request_access", {
+    const access = await connection.call("computer.acquire", {
       titlePart: basename(outputFile),
       tier: "full",
       agentId: "windows-sea-layer-a",
       reason: "Windows SEA Layer A safe Native Lab verification",
     });
-    const capture = await connection.call("computer.capture", { mode: "semantic" });
+    const capture = await connection.call("computer.observe", { mode: "semantic" });
     const name = findElement(capture, "Name");
     const save = findElement(capture, "Save");
     await connection.call("computer.act", {
@@ -87,8 +81,8 @@ export async function runWindowsSeaSmoke(options = {}) {
     });
     await wait(300);
     const savedText = await readFile(outputFile, "utf8");
-    const cancel = await connection.call("computer.cancel", { reason: "layer-a-complete" });
-    const state = await connection.call("computer.list_state", {});
+    const cancel = await connection.call("computer.release", { reason: "layer-a-complete" });
+    const state = await connection.call("computer.observe", { mode: "state" });
     if (
       access.status !== "granted"
       || capture.includeUserOverlay !== false

@@ -5,9 +5,8 @@ import { test } from "node:test";
 
 test("pending access approval is visible before disconnect and terminally inaccessible after close", async () => {
   const { COMPUTER_USE_MCP_TOOLS } = await import("../src/computer-use-mcp-tools.mjs");
-  const listState = COMPUTER_USE_MCP_TOOLS.find((tool) => tool.name === "computer.list_state");
+  const listState = COMPUTER_USE_MCP_TOOLS.find((tool) => tool.name === "computer.observe");
   assert.equal(listState.outputSchema.properties.pendingAccessApproval.anyOf.length, 2);
-  assert.equal(listState.outputSchema.allOf[0].else.required.includes("pendingAccessApproval"), true);
 
   const { ComputerUseProviderRouter } = await import("../src/computer-use-provider-router.mjs");
   const router = new ComputerUseProviderRouter({

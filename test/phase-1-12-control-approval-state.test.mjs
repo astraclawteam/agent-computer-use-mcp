@@ -222,14 +222,11 @@ test("Phase 1.12 exposes control approval through MCP schema and smoke script", 
   assert.equal(packageJson.scripts["phase:1.12"], "node src/phase-1-12-control-approval-state.mjs");
 
   const { COMPUTER_USE_MCP_TOOLS } = await import("../src/computer-use-mcp-tools.mjs");
-  const requestAccess = COMPUTER_USE_MCP_TOOLS.find((tool) => tool.name === "computer.request_access");
-  assert.equal(requestAccess.inputSchema.properties.approvalRequired.type, "boolean");
-  assert.equal(requestAccess.inputSchema.properties.approvalTtlMs.type, "number");
+  const acquire = COMPUTER_USE_MCP_TOOLS.find((tool) => tool.name === "computer.acquire");
+  assert.equal(acquire.inputSchema.properties.approvalRequired.type, "boolean");
+  assert.equal(acquire.inputSchema.properties.approvalTtlMs.type, "number");
   const approve = COMPUTER_USE_MCP_TOOLS.find((tool) => tool.name === "computer.approve");
-  assert.equal(approve.annotations.phase, "1.12");
-  assert.equal(approve.inputSchema.required.includes("approvalToken"), true);
-  assert.equal(approve.inputSchema.properties.approved.type, "boolean");
-  assert.equal(approve.inputSchema.properties.denied.type, "boolean");
+  assert.equal(approve, undefined);
 
   const { ComputerUseProviderRouter } = await import("../src/computer-use-provider-router.mjs");
   const health = await new ComputerUseProviderRouter().health({ fast: true });

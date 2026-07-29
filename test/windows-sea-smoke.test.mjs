@@ -8,5 +8,9 @@ test("Windows SEA smoke uses the released executable directly and fails closed o
   assert.match(source, /verifyWindowsSeaArtifactTree\(artifactRoot, inventory\)/u);
   assert.match(source, /tamperRejected/u);
   assert.match(source, /sourceCwdRequired: false/u);
+  assert.match(source, /connection\.call\("computer\.acquire"/u);
+  assert.match(source, /connection\.call\("computer\.observe", \{ mode: "semantic" \}\)/u);
+  assert.match(source, /connection\.call\("computer\.release"/u);
+  assert.doesNotMatch(source, /connection\.call\("computer\.(?:request_access|capture|cancel|list_state)"/u);
   assert.doesNotMatch(source, /command:\s*process\.execPath/u);
 });

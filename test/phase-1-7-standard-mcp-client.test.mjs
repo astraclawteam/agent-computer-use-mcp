@@ -47,5 +47,5 @@ test("Phase 1.7 uses the official MCP SDK client to connect over stdio", async (
 test("Phase 1.7 has an executable official MCP SDK client smoke script", () => {
   const packageJson = JSON.parse(readFileSync("package.json", "utf8"));
   assert.equal(packageJson.scripts["phase:1.7"], "node src/phase-1-7-standard-mcp-client.mjs");
-  assert.equal(packageJson.dependencies["@modelcontextprotocol/sdk"], "^1.29.0");
+  assert.equal(packageJson.dependencies["@modelcontextprotocol/sdk"], "^1.30.0");
 });

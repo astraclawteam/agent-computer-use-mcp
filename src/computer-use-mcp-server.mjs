@@ -33,7 +33,7 @@ export async function runComputerUseMcpServer(options = {}) {
   const server = new Server(
     {
       name: "agent-computer-use-mcp",
-      version: "0.0.3",
+      version: "0.0.4",
     },
     {
       capabilities: {
@@ -103,26 +103,14 @@ async function callTool(router, name, args) {
         client: args.client ?? "codex",
         packageRoot: process.cwd(),
       });
-    } else if (name === "computer.request_access") {
+    } else if (name === "computer.acquire") {
       structuredContent = await router.requestAccess(args);
-    } else if (name === "computer.approve") {
-      structuredContent = await router.approveAccess(args);
-    } else if (name === "computer.capture") {
-      structuredContent = await router.capture(args);
+    } else if (name === "computer.observe") {
+      structuredContent = await observeComputer(router, args);
     } else if (name === "computer.act") {
       structuredContent = await router.act(args);
-    } else if (name === "computer.cancel") {
+    } else if (name === "computer.release") {
       structuredContent = await router.cancel(args);
-    } else if (name === "computer.revoke") {
-      structuredContent = await router.revoke(args);
-    } else if (name === "computer.list_state") {
-      structuredContent = await router.listState(args);
-    } else if (name === "computer.capture_window") {
-      structuredContent = await router.captureWindow(args);
-    } else if (name === "computer.ocr_region") {
-      structuredContent = await router.ocrRegion(args);
-    } else if (name === "computer.observe_diff") {
-      structuredContent = await router.observeDiff(args);
     } else {
       throw new Error(`tool_not_found: ${name}`);
     }
@@ -154,6 +142,16 @@ async function callTool(router, name, args) {
     structuredContent,
     isError: false,
   };
+}
+
+async function observeComputer(router, args) {
+  const { mode, ...options } = args;
+  if (mode === "state") return router.listState();
+  if (mode === "semantic" || mode === "screenshot") return router.capture({ ...options, mode });
+  if (mode === "capture-window") return router.captureWindow(options);
+  if (mode === "ocr-region") return router.ocrRegion(options);
+  if (mode === "diff") return router.observeDiff(options);
+  throw new Error(`observe_mode_not_found: ${mode}`);
 }
 
 function withResultContract(value) {

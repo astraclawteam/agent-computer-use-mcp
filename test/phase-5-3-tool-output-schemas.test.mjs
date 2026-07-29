@@ -18,7 +18,7 @@ test("all public MCP tools declare strict output schemas", () => {
 });
 
 test("capture element schema freezes perception provenance fields", () => {
-  const capture = COMPUTER_USE_MCP_TOOLS.find((tool) => tool.name === "computer.capture");
+  const capture = COMPUTER_USE_MCP_TOOLS.find((tool) => tool.name === "computer.observe");
   const element = capture.outputSchema.properties.elements.items;
   assert.equal(element.type, "object");
   assert.equal(element.additionalProperties, false);

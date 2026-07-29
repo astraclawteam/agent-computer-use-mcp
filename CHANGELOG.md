@@ -2,6 +2,12 @@
 
 All notable changes to `agent-computer-use-mcp` are tracked here.
 
+## 0.0.4
+
+- Consolidate the Agent-facing desktop surface into `computer.acquire`, `computer.observe`, `computer.act`, and `computer.release`.
+- Keep health, doctor, installation, and repair available to the Host as explicitly marked management tools instead of projecting them to the Agent.
+- Preserve strict output schemas, approval, cancellation, cleanup, and safe repair planning across the consolidated contract.
+
 ## 0.0.3
 
 - Discover the real foreground window from cua-driver z-order without requiring a guessed title.

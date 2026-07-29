@@ -89,8 +89,8 @@ test("controller lease timeout is exposed in MCP schema and Phase 1.10 smoke", a
   assert.equal(packageJson.scripts["phase:1.10"], "node src/phase-1-10-controller-timeout.mjs");
 
   const { COMPUTER_USE_MCP_TOOLS } = await import("../src/computer-use-mcp-tools.mjs");
-  const requestAccess = COMPUTER_USE_MCP_TOOLS.find((tool) => tool.name === "computer.request_access");
-  assert.equal(requestAccess.inputSchema.properties.leaseTtlMs.type, "number");
+  const acquire = COMPUTER_USE_MCP_TOOLS.find((tool) => tool.name === "computer.acquire");
+  assert.equal(acquire.inputSchema.properties.leaseTtlMs.type, "number");
 
   const { ComputerUseProviderRouter } = await import("../src/computer-use-provider-router.mjs");
   const health = await new ComputerUseProviderRouter().health({ fast: true });

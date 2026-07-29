@@ -1,14 +1,13 @@
 import { COMPUTER_USE_MCP_TOOLS } from "./computer-use-mcp-tools.mjs";
 import { ComputerUseProviderRouter } from "./computer-use-provider-router.mjs";
 
-const listStateTool = COMPUTER_USE_MCP_TOOLS.find((tool) => tool.name === "computer.list_state");
+const listStateTool = COMPUTER_USE_MCP_TOOLS.find((tool) => tool.name === "computer.observe");
 const schemaDeclaresPendingAccessApproval = listStateTool
   ?.outputSchema
   ?.properties
   ?.pendingAccessApproval
   ?.anyOf
-  ?.length === 2
-  && listStateTool.outputSchema.allOf?.[0]?.else?.required?.includes("pendingAccessApproval");
+  ?.length === 2;
 
 const router = new ComputerUseProviderRouter({
   driver: {

@@ -7,14 +7,12 @@ const ROUNDS_PER_CLIENT = 3;
 const READ_ONLY_CALLS = [
   ["computer.health", { fast: true }],
   ["computer.installation", { client: "codex" }],
-  ["computer.list_state", {}],
+  ["computer.observe", { mode: "state" }],
 ];
 const STATE_CHANGING_TOOLS = new Set([
-  "computer.request_access",
-  "computer.approve",
+  "computer.acquire",
   "computer.act",
-  "computer.cancel",
-  "computer.revoke",
+  "computer.release",
   "computer.repair",
 ]);
 

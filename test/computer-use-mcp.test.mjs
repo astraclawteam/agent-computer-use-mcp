@@ -85,21 +85,19 @@ test("agent-computer-use-mcp freezes the local MCP tool contract", () => {
 
   const toolNames = COMPUTER_USE_MCP_TOOLS.map((tool) => tool.name);
   assert.deepEqual(toolNames, [
+    "computer.acquire",
+    "computer.observe",
+    "computer.act",
+    "computer.release",
     "computer.health",
     "computer.doctor",
-    "computer.repair",
     "computer.installation",
-    "computer.request_access",
-    "computer.approve",
-    "computer.capture",
-    "computer.act",
-    "computer.cancel",
-    "computer.revoke",
-    "computer.list_state",
-    "computer.capture_window",
-    "computer.ocr_region",
-    "computer.observe_diff",
+    "computer.repair",
   ]);
+  assert.deepEqual(
+    COMPUTER_USE_MCP_TOOLS.filter((tool) => tool._meta?.["xiaozhiclaw/visibility"] === "host").map((tool) => tool.name),
+    ["computer.health", "computer.doctor", "computer.installation", "computer.repair"],
+  );
 
   const health = COMPUTER_USE_MCP_TOOLS.find((tool) => tool.name === "computer.health");
   assert.equal(health.annotations.phase, "0.9");
@@ -118,25 +116,27 @@ test("agent-computer-use-mcp freezes the local MCP tool contract", () => {
   assert.equal(repair.inputSchema.properties.dryRun.type, "boolean");
   assert.equal(repair.inputSchema.properties.approved.type, "boolean");
 
-  const capture = COMPUTER_USE_MCP_TOOLS.find((tool) => tool.name === "computer.capture_window");
-  assert.equal(capture.annotations.phase, "1.0");
-  assert.equal(capture.inputSchema.required.includes("titlePart"), true);
-
-  const requestAccess = COMPUTER_USE_MCP_TOOLS.find((tool) => tool.name === "computer.request_access");
-  assert.equal(requestAccess.annotations.phase, "1.3");
-  assert.equal(requestAccess.inputSchema.required, undefined);
-  assert.deepEqual(requestAccess.inputSchema.oneOf, [
+  const acquire = COMPUTER_USE_MCP_TOOLS.find((tool) => tool.name === "computer.acquire");
+  assert.equal(acquire.annotations.phase, "1.3");
+  assert.equal(acquire.inputSchema.required, undefined);
+  assert.deepEqual(acquire.inputSchema.oneOf, [
     { required: ["titlePart"] },
     { required: ["windowId"] },
     { required: ["target"] },
   ]);
-  assert.deepEqual(requestAccess.inputSchema.properties.target.enum, ["foreground"]);
+  assert.deepEqual(acquire.inputSchema.properties.target.enum, ["foreground"]);
 
-  const listState = COMPUTER_USE_MCP_TOOLS.find((tool) => tool.name === "computer.list_state");
-  assert.equal(listState.annotations.readOnlyHint, true);
-  assert.ok(listState.outputSchema.properties.foregroundWindow);
-  assert.ok(listState.outputSchema.properties.windows);
-  assert.ok(listState.outputSchema.properties.windowDiscovery);
+  const observe = COMPUTER_USE_MCP_TOOLS.find((tool) => tool.name === "computer.observe");
+  assert.equal(observe.annotations.readOnlyHint, true);
+  assert.deepEqual(observe.inputSchema.properties.mode.enum, ["state", "semantic", "screenshot", "capture-window", "ocr-region", "diff"]);
+  assert.ok(observe.outputSchema.properties.foregroundWindow);
+  assert.ok(observe.outputSchema.properties.windows);
+  assert.ok(observe.outputSchema.properties.windowDiscovery);
+  assert.deepEqual(observe.outputSchema.properties.window, {
+    type: "object",
+    additionalProperties: true,
+  });
+  assert.deepEqual(observe.outputSchema.properties.text, { type: "string" });
 
   const act = COMPUTER_USE_MCP_TOOLS.find((tool) => tool.name === "computer.act");
   assert.equal(act.annotations.phase, "1.3");
@@ -145,18 +145,9 @@ test("agent-computer-use-mcp freezes the local MCP tool contract", () => {
   assert.deepEqual(act.outputSchema.allOf[0].then.required, ["status", "error"]);
   assert.deepEqual(act.inputSchema.properties.action.properties.kind.enum, ["set_value", "type_text", "click"]);
 
-  const semanticCapture = COMPUTER_USE_MCP_TOOLS.find((tool) => tool.name === "computer.capture");
-  for (const field of ["window", "text", "controllerId", "expiresAt"]) {
-    assert.ok(semanticCapture.outputSchema.properties[field], `computer.capture declares ${field}`);
+  for (const field of ["elements", "controllerId", "expiresAt", "dirtyRegion", "observation"]) {
+    assert.ok(observe.outputSchema.properties[field], `computer.observe declares ${field}`);
   }
-
-  const ocr = COMPUTER_USE_MCP_TOOLS.find((tool) => tool.name === "computer.ocr_region");
-  assert.equal(ocr.annotations.phase, "1.1");
-  assert.equal(ocr.inputSchema.properties.crop.type, "object");
-
-  const diff = COMPUTER_USE_MCP_TOOLS.find((tool) => tool.name === "computer.observe_diff");
-  assert.equal(diff.annotations.phase, "1.1");
-  assert.deepEqual(diff.inputSchema.required, ["baselinePath", "changedPath"]);
 });
 
 test("agent-computer-use-mcp answers initialize, tools/list, and health over stdio", async () => {
@@ -166,20 +157,14 @@ test("agent-computer-use-mcp answers initialize, tools/list, and health over std
     await client.connect();
     const listed = await client.listTools();
     assert.deepEqual(listed.tools.map((tool) => tool.name), [
+      "computer.acquire",
+      "computer.observe",
+      "computer.act",
+      "computer.release",
       "computer.health",
       "computer.doctor",
-      "computer.repair",
       "computer.installation",
-      "computer.request_access",
-      "computer.approve",
-      "computer.capture",
-      "computer.act",
-      "computer.cancel",
-      "computer.revoke",
-      "computer.list_state",
-      "computer.capture_window",
-      "computer.ocr_region",
-      "computer.observe_diff",
+      "computer.repair",
     ]);
 
     const health = await client.callTool({
@@ -221,7 +206,7 @@ test("agent-computer-use-mcp answers initialize, tools/list, and health over std
     assert.equal(Array.isArray(repair.structuredContent.repairPlan.actions), true);
 
     const missingController = await client.callTool({
-      name: "computer.capture",
+      name: "computer.observe",
       arguments: { mode: "semantic" },
     });
     assert.equal(missingController.isError, true);
@@ -229,8 +214,8 @@ test("agent-computer-use-mcp answers initialize, tools/list, and health over std
     assert.equal(missingController.structuredContent.includeUserOverlay, false);
 
     const stateAfterFailure = await client.callTool({
-      name: "computer.list_state",
-      arguments: {},
+      name: "computer.observe",
+      arguments: { mode: "state" },
     });
     assert.equal(stateAfterFailure.isError, false);
     assert.equal(stateAfterFailure.structuredContent.status, "idle");
