@@ -152,6 +152,29 @@ test("provider router maps an admitted OCR token to a bounded driver pixel click
   }]);
 });
 
+test("provider router keeps action observations fresh for one real Agent reasoning turn", async (t) => {
+  const now = 10_000;
+  const router = new ComputerUseProviderRouter({
+    clock: {
+      now: () => now,
+      iso: (timeMs = now) => new Date(timeMs).toISOString(),
+    },
+  });
+  t.after(() => router.close());
+  router.activeController = {
+    controllerId: "controller-1",
+    window: { id: "window-1", title: "Fixture", bounds: { width: 960, height: 720 } },
+    expiresAtMs: now + 60_000,
+  };
+
+  const observation = router.createActionObservation({ source: "ocr", elements: [] });
+  assert.equal(observation.expiresAt, now + 30_000);
+
+  router.activeController.expiresAtMs = now + 12_000;
+  const leaseBound = router.createActionObservation({ source: "ocr", elements: [] });
+  assert.equal(leaseBound.expiresAt, now + 12_000);
+});
+
 test("provider router dispatches screenshot-grounded text and key actions without semantic elements", async (t) => {
   const calls = [];
   const router = new ComputerUseProviderRouter({

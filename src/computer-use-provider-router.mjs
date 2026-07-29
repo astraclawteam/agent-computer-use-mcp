@@ -20,6 +20,8 @@ import { createComputerUsePolicy } from "./computer-use-policy.mjs";
 import { createRepairProgressPlan } from "./repair-progress-plan.mjs";
 import { cleanupRuntimeState } from "./runtime-cleanup.mjs";
 
+const ACTION_OBSERVATION_TTL_MS = 30_000;
+
 export class ComputerUseProviderRouter {
   constructor(options = {}) {
     this.ocr = options.ocrSession ?? new OcrSidecarSession();
@@ -74,7 +76,7 @@ export class ComputerUseProviderRouter {
     const result = {
       status: "ready",
       module: "agent-computer-use-mcp",
-      version: "0.0.4",
+      version: "0.0.5",
       phases: {
         "0.9": "contract-freeze",
         "0.10": "release-metadata-changelog",
@@ -1396,7 +1398,10 @@ export class ComputerUseProviderRouter {
         bounds: this.activeController?.window?.bounds ?? observation.window?.bounds,
       },
       controllerId: this.activeController?.controllerId,
-      expiresAt: Math.min(Number.isFinite(leaseExpiry) ? leaseExpiry : now + 5000, now + 5000),
+      expiresAt: Math.min(
+        Number.isFinite(leaseExpiry) ? leaseExpiry : now + ACTION_OBSERVATION_TTL_MS,
+        now + ACTION_OBSERVATION_TTL_MS,
+      ),
       includeUserOverlay: false,
     };
   }

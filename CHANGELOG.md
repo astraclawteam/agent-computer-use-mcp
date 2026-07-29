@@ -6,7 +6,7 @@ All notable changes to `agent-computer-use-mcp` are tracked here.
 
 - Preserve fresh OCR and screenshot observations so their bounded coordinates and high-confidence text tokens can be used by `computer.act`.
 - Add observation-grounded `click`, `type_text`, and `press_key` actions with background delivery and supported foreground escalation.
-- Keep coordinate actions bound to the active controller, exact observation id, capture bounds, and five-second action window.
+- Keep coordinate actions bound to the active controller, exact observation id, capture bounds, and a 30-second action window that covers a real Agent reasoning turn.
 - Update the real desktop MCP lifecycle gate to the consolidated acquire, observe, act, and release surface.
 
 ## 0.0.4
