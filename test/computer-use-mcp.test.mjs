@@ -148,6 +148,14 @@ test("agent-computer-use-mcp freezes the local MCP tool contract", () => {
   for (const field of ["elements", "controllerId", "expiresAt", "dirtyRegion", "observation"]) {
     assert.ok(observe.outputSchema.properties[field], `computer.observe declares ${field}`);
   }
+
+  for (const tool of COMPUTER_USE_MCP_TOOLS.slice(0, 4)) {
+    const capability = tool._meta?.["xiaozhiclaw/semanticCapability"];
+    assert.equal(capability?.schemaVersion, 1, `${tool.name} declares a versioned semantic capability`);
+    assert.equal(typeof capability?.summary, "string", `${tool.name} declares a semantic summary`);
+    assert.ok(capability.summary.length > 0, `${tool.name} semantic summary is non-empty`);
+    assert.ok(Array.isArray(capability.modalities), `${tool.name} declares supported modalities`);
+  }
 });
 
 test("agent-computer-use-mcp answers initialize, tools/list, and health over stdio", async () => {
@@ -166,6 +174,13 @@ test("agent-computer-use-mcp answers initialize, tools/list, and health over std
       "computer.installation",
       "computer.repair",
     ]);
+    for (const tool of listed.tools.slice(0, 4)) {
+      assert.equal(
+        tool._meta?.["xiaozhiclaw/semanticCapability"]?.schemaVersion,
+        1,
+        `${tool.name} publishes semantic capability metadata over standard MCP`,
+      );
+    }
 
     const health = await client.callTool({
       name: "computer.health",

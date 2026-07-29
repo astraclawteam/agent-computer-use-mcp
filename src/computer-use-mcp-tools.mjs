@@ -595,17 +595,58 @@ export const COMPUTER_USE_HOST_TOOLS = Object.freeze(
     Object.freeze({ ...byLegacyName(name), _meta: HOST_MANAGEMENT_META })),
 );
 
+const semanticCapabilityMeta = ({
+  summary,
+  scenarios = [],
+  prerequisites = [],
+  effects = [],
+  modalities = [],
+  constraints = [],
+}) => Object.freeze({
+  "xiaozhiclaw/semanticCapability": Object.freeze({
+    schemaVersion: 1,
+    summary,
+    scenarios: Object.freeze(scenarios),
+    prerequisites: Object.freeze(prerequisites),
+    effects: Object.freeze(effects),
+    modalities: Object.freeze(modalities),
+    constraints: Object.freeze(constraints),
+  }),
+});
+
 const acquireTool = {
   ...byLegacyName("computer.request_access"),
   name: "computer.acquire",
   title: "Acquire Computer Access",
   description: "Acquire a Gateway-managed controller lease for one explicit or foreground window.",
+  _meta: semanticCapabilityMeta({
+    summary: "Establish bounded control of a local graphical application window so it can be observed or operated for the user's requested outcome.",
+    scenarios: [
+      "A task requires seeing or interacting with a native desktop application's visible interface.",
+      "The target is the current foreground window or a specifically identified application window.",
+    ],
+    prerequisites: ["The user and Host policy permit local desktop control."],
+    effects: ["Creates a time-bounded controller lease and user-visible control overlay."],
+    modalities: ["local desktop GUI", "native application window"],
+    constraints: ["Identify the target from observed state; never guess a window title."],
+  }),
 };
 
 const observeTool = {
   name: "computer.observe",
   title: "Observe Computer",
   description: "Read desktop state or capture semantic, screenshot, OCR, and changed-region observations through one bounded interface.",
+  _meta: semanticCapabilityMeta({
+    summary: "Inspect visible state in local graphical applications using window discovery, semantic elements, screenshots, OCR, or visual differences.",
+    scenarios: [
+      "Understand what is currently displayed before deciding where or how to interact.",
+      "Verify the visible result after an interface action.",
+    ],
+    prerequisites: ["State discovery is available; detailed window capture requires an active controller lease."],
+    effects: ["Reads visible desktop and accessibility state without intentionally changing the target application."],
+    modalities: ["local desktop GUI", "visual observation", "OCR", "accessibility state"],
+    constraints: ["Treat each observation as time-bounded and observe again after the interface changes."],
+  }),
   annotations: { phase: "5.8", readOnlyHint: true },
   inputSchema: {
     type: "object",
@@ -662,12 +703,38 @@ const releaseTool = {
   name: "computer.release",
   title: "Release Computer Access",
   description: "Release the active Gateway-managed controller lease and any pending access request.",
+  _meta: semanticCapabilityMeta({
+    summary: "End local desktop control and clear any pending access request after the requested interaction is finished or cannot continue safely.",
+    scenarios: ["Clean up after observing or operating a native desktop application."],
+    prerequisites: ["A controller lease or pending access request may exist."],
+    effects: ["Revokes desktop control and removes the user-visible control overlay."],
+    modalities: ["local desktop GUI", "controller lifecycle"],
+    constraints: ["Release control when the task finishes or is abandoned."],
+  }),
+};
+
+const actTool = {
+  ...byLegacyName("computer.act"),
+  _meta: semanticCapabilityMeta({
+    summary: "Operate the visible interface of a local graphical application by clicking, entering text, or setting a supported control value.",
+    scenarios: [
+      "Complete a user-requested workflow in a native desktop application.",
+      "Enter content into a visible field and activate the application's own controls.",
+    ],
+    prerequisites: [
+      "An approved controller lease is active.",
+      "The target and intended control were identified from a recent observation.",
+    ],
+    effects: ["Changes application state and may cause the application to submit or send content when its visible controls are activated."],
+    modalities: ["local desktop GUI", "pointer interaction", "keyboard text entry"],
+    constraints: ["Ground coordinates or element targets in observation evidence and verify consequential results afterward."],
+  }),
 };
 
 export const COMPUTER_USE_AGENT_TOOLS = Object.freeze([
   Object.freeze(acquireTool),
   Object.freeze(observeTool),
-  Object.freeze(byLegacyName("computer.act")),
+  Object.freeze(actTool),
   Object.freeze(releaseTool),
 ]);
 
