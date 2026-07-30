@@ -120,5 +120,6 @@
   },
   "overrides": {
     "adm-zip": "0.6.0"
-  }
+  },
+  "packageManager": "npm@11.6.2"
 }
