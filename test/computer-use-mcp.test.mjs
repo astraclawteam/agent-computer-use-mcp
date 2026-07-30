@@ -122,7 +122,7 @@ test("successful unified OCR observations satisfy the public result envelope", a
   }, "computer.observe", { mode: "ocr-region" });
 
   assert.equal(result.isError, false);
-  assert.equal(result.structuredContent.resultSchemaVersion, "5.3");
+  assert.equal(result.structuredContent.resultSchemaVersion, "5.4");
   assert.equal(result.structuredContent.includeUserOverlay, false);
   const observe = COMPUTER_USE_MCP_TOOLS.find((tool) => tool.name === "computer.observe");
   const validate = new Ajv({ strict: false }).compile(observe.outputSchema);
@@ -432,6 +432,7 @@ test("agent-computer-use-mcp freezes the local MCP tool contract", () => {
   assert.equal(health.annotations.phase, "0.9");
   assert.equal(health.inputSchema.type, "object");
   assert.equal(health.inputSchema.properties.prewarm.type, "boolean");
+  assert.ok(health.outputSchema.properties.capabilityHandshake);
 
   const doctor = COMPUTER_USE_MCP_TOOLS.find((tool) => tool.name === "computer.doctor");
   assert.equal(doctor.annotations.phase, "2.0");
@@ -482,7 +483,7 @@ test("agent-computer-use-mcp freezes the local MCP tool contract", () => {
   const act = COMPUTER_USE_MCP_TOOLS.find((tool) => tool.name === "computer.act");
   assert.equal(act.annotations.phase, "1.3");
   assert.deepEqual(act.inputSchema.required, ["action"]);
-  assert.deepEqual(act.outputSchema.allOf[0].else.required, ["status", "provider", "action", "result", "pixelLimitedAction"]);
+  assert.deepEqual(act.outputSchema.allOf[0].else.required, ["status", "provider", "action", "result", "pixelLimitedAction", "execution"]);
   assert.deepEqual(act.outputSchema.allOf[0].then.required, ["status", "error"]);
   assert.deepEqual(act.inputSchema.properties.action.properties.kind.enum, ["activate_window", "set_value", "type_text", "click", "press_key"]);
   assert.equal(act.inputSchema.properties.action.properties.focusReceiptId.type, "string");
@@ -654,6 +655,10 @@ test("provider router prewarms OCR buckets during non-fast health", async () => 
   const health = await router.health({ fast: false, prewarm: true });
 
   assert.equal(health.prewarm.status, "completed");
+  assert.equal(health.capabilityHandshake.schemaVersion, 1);
+  assert.equal(health.capabilityHandshake.module.resultSchemaVersion, "5.4");
+  assert.equal(health.capabilityHandshake.supports.observation.focusedElementMetadata, true);
+  assert.equal(health.capabilityHandshake.supports.action.executionPathMetadata, true);
   assert.deepEqual(health.prewarm.buckets.map((bucket) => bucket.size), ["128x96", "288x96", "704x320"]);
   assert.equal(calls.filter((call) => call.method === "recognize").length, 3);
   assert.equal(calls.find((call) => call.method === "recognize").request.fixture, "canvas-lab");
@@ -722,6 +727,14 @@ test("provider router manages request/capture/action/cancel lifecycle", async ()
   const action = await router.act({ action: { kind: "set_value", elementToken: "name", value: "xiaozhi" } });
   assert.equal(action.status, "ok");
   assert.equal(action.pixelLimitedAction, false);
+  assert.deepEqual(action.execution, {
+    schemaVersion: 1,
+    targetPath: "semantic-element",
+    providerPath: "cua-driver-mcp",
+    deliveryMode: "background",
+    selectionReason: null,
+    fallback: { used: false, reason: null },
+  });
   const typed = await router.act({
     action: {
       kind: "type_text",
@@ -759,6 +772,10 @@ test("provider router activates the acquired window without perception coordinat
           effect: "applied",
           verified: true,
           foregroundWindow: { windowId: 42, title: "Background App", pid: 1234, isForeground: true },
+          driverActivation: {
+            status: "ok",
+            landed_on_target: false,
+          },
         };
       },
     },
@@ -777,6 +794,14 @@ test("provider router activates the acquired window without perception coordinat
   assert.equal(activated.outcome, "applied");
   assert.equal(activated.effectiveDeliveryMode, "foreground");
   assert.equal(activated.pixelLimitedAction, false);
+  assert.deepEqual(activated.execution, {
+    schemaVersion: 1,
+    targetPath: "controller-window",
+    providerPath: "windows-foreground-bridge",
+    deliveryMode: "foreground",
+    selectionReason: null,
+    fallback: { used: true, reason: "cua-driver-foreground-not-confirmed" },
+  });
   assert.equal(activated.focusReceipt.status, "verified");
   assert.equal(activated.focusReceipt.target.kind, "activate_window");
   assert.deepEqual(calls, [{

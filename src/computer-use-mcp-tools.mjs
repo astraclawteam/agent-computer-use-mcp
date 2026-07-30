@@ -1,4 +1,4 @@
-export const MCP_RESULT_SCHEMA_VERSION = "5.3";
+export const MCP_RESULT_SCHEMA_VERSION = "5.4";
 
 const ANY_OBJECT = { type: "object", additionalProperties: true };
 const ANY_ARRAY = { type: "array", items: {} };
@@ -135,11 +135,12 @@ const LEGACY_COMPUTER_USE_MCP_TOOLS = [
       version: { type: "string" },
       phases: ANY_OBJECT,
       providers: ANY_OBJECT,
+      capabilityHandshake: ANY_OBJECT,
       actionPolicy: ANY_OBJECT,
       driver: ANY_OBJECT,
       ocr: ANY_OBJECT,
       prewarm: ANY_OBJECT,
-    }, ["status", "module", "version", "phases", "providers", "actionPolicy"]),
+    }, ["status", "module", "version", "phases", "providers", "capabilityHandshake", "actionPolicy"]),
   },
   {
     name: "computer.doctor",
@@ -523,9 +524,10 @@ const LEGACY_COMPUTER_USE_MCP_TOOLS = [
       pixelLimitedAction: { type: "boolean" },
       outcome: { type: "string" },
       effectiveDeliveryMode: { type: "string" },
+      execution: ANY_OBJECT,
       focusReceipt: ANY_OBJECT,
       capture: ANY_OBJECT,
-    }, ["status", "provider", "action", "result", "pixelLimitedAction"]),
+    }, ["status", "provider", "action", "result", "pixelLimitedAction", "execution"]),
   },
   {
     name: "computer.cancel",
@@ -856,6 +858,9 @@ const observeTool = {
       enum: ["identity"],
       description: "Identity means image/OCR x/y must be passed unchanged; do not add window.bounds.",
     },
+    coordinateScale: ANY_OBJECT,
+    focusedElement: { anyOf: [ANY_OBJECT, { type: "null" }] },
+    truncation: ANY_OBJECT,
     interactionContract: ANY_OBJECT,
     provider: { type: "string" },
     source: { type: "string" },
