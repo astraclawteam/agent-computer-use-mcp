@@ -1,12 +1,21 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
+import { mkdtemp, rm, unlink, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { test } from "node:test";
+import Ajv from "ajv";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { COMPUTER_USE_MCP_TOOLS } from "../src/computer-use-mcp-tools.mjs";
 import {
+  callTool,
+  compactComputerUseResult,
   createPlatformOcrSession,
   main,
+  observeComputer,
+  projectComputerUseMediaResult,
+  renderComputerUseTextResult,
   runComputerUseMcpServer,
   shouldAutoStartComputerUseMcpServer,
 } from "../src/computer-use-mcp-server.mjs";
@@ -14,6 +23,326 @@ import {
 test("source and SEA entrypoints share one MCP composition", () => {
   assert.equal(typeof main, "function");
   assert.equal(main, runComputerUseMcpServer);
+});
+
+test("model-facing MCP text uses compact Markdown while structuredContent stays lossless", async () => {
+  const payload = {
+    status: "idle",
+    foregroundWindow: { windowId: 7, title: "Example", isForeground: true },
+    windows: [
+      { windowId: 7, title: "Example", isForeground: true },
+      { windowId: 8, title: "Background", isForeground: false },
+    ],
+  };
+  const result = await callTool({
+    async listState() {
+      return payload;
+    },
+  }, "computer.observe", { mode: "state" });
+
+  assert.match(result.content[0].text, /^# Computer Use Result\n/u);
+  assert.match(result.content[0].text, /## windows \(2\)/u);
+  assert.equal(result.structuredContent.foregroundWindow.title, "Example");
+  assert.ok(
+    result.content[0].text.length < JSON.stringify(result.structuredContent, null, 2).length,
+    "compact Markdown should be smaller than the former pretty-JSON projection",
+  );
+  assert.equal(renderComputerUseTextResult(null), "# Computer Use Result\n\n- **value**: null");
+});
+
+test("indeterminate desktop actions remain successful MCP calls that require observation", async () => {
+  const result = await callTool({
+    async act() {
+      return {
+        status: "indeterminate",
+        outcome: "unverified",
+        action: "type_text",
+        result: {
+          effect: "possibly_applied",
+          verified: false,
+          replaySafe: false,
+        },
+        pixelLimitedAction: true,
+      };
+    },
+  }, "computer.act", {
+    action: {
+      kind: "type_text",
+      observationId: "capture-1",
+      x: 100,
+      y: 50,
+      value: "example",
+    },
+  });
+
+  assert.equal(result.isError, false);
+  assert.equal(result.structuredContent.status, "indeterminate");
+  assert.equal(result.structuredContent.outcome, "unverified");
+  assert.equal(result.structuredContent.result.replaySafe, false);
+});
+
+test("unified OCR observation preserves the active controller context", async () => {
+  const calls = [];
+  const result = await observeComputer({
+    async capture(args) {
+      calls.push(args);
+      return { status: "ok", source: "ocr", elements: [] };
+    },
+    async ocrRegion() {
+      throw new Error("legacy standalone OCR route must not be used");
+    },
+  }, {
+    mode: "ocr-region",
+    languages: ["zh", "en"],
+  });
+
+  assert.deepEqual(calls, [{ mode: "ocr-region", languages: ["zh", "en"] }]);
+  assert.deepEqual(result, { status: "ok", source: "ocr", elements: [] });
+});
+
+test("successful unified OCR observations satisfy the public result envelope", async () => {
+  const result = await callTool({
+    async capture() {
+      return {
+        status: "ok",
+        source: "ocr",
+        observationId: "ocr-1",
+        modelPack: "pp-ocr-v6-small",
+        modelFormat: "onnx",
+        sessionMode: "persistent",
+        runtime: "onnxruntime",
+        executionProvider: "cpu",
+        cacheHit: false,
+        crop: null,
+        timings: { totalMs: 125 },
+        elements: [],
+        includeUserOverlay: false,
+      };
+    },
+  }, "computer.observe", { mode: "ocr-region" });
+
+  assert.equal(result.isError, false);
+  assert.equal(result.structuredContent.resultSchemaVersion, "5.3");
+  assert.equal(result.structuredContent.includeUserOverlay, false);
+  const observe = COMPUTER_USE_MCP_TOOLS.find((tool) => tool.name === "computer.observe");
+  const validate = new Ajv({ strict: false }).compile(observe.outputSchema);
+  assert.equal(validate(result.structuredContent), true, JSON.stringify(validate.errors));
+});
+
+test("semantic-first screenshot observations satisfy the strict public result envelope", async () => {
+  const result = await callTool({
+    async capture() {
+      return {
+        status: "ok",
+        mode: "semantic",
+        requestedMode: "screenshot",
+        perceptionRouting: {
+          selectedMode: "semantic",
+          avoidedVision: true,
+          sufficient: true,
+          actionableElementCount: 24,
+          namedActionableRatio: 1,
+        },
+        source: "cua-driver",
+        observationId: "semantic-short-circuit",
+        elements: [],
+        includeUserOverlay: false,
+      };
+    },
+  }, "computer.observe", { mode: "screenshot" });
+
+  assert.equal(result.isError, false);
+  const observe = COMPUTER_USE_MCP_TOOLS.find((tool) => tool.name === "computer.observe");
+  const validate = new Ajv({ strict: false }).compile(observe.outputSchema);
+  assert.equal(validate(result.structuredContent), true, JSON.stringify(validate.errors));
+});
+
+test("screenshot observations return MCP ImageContent without exposing the connector temp path", async () => {
+  const png = Buffer.from("89504e470d0a1a0a0000000d49484452", "hex");
+  const result = await callTool({
+    async capture() {
+      return {
+        status: "ok",
+        source: "window-capture",
+        artifact: { path: "C:\\Temp\\agent-computer-use-mcp-private\\window.png", mimeType: "image/png" },
+        capture: { path: "C:\\Temp\\agent-computer-use-mcp-private\\window.png", width: 800, height: 600 },
+      };
+    },
+    async readOwnedArtifact(filePath) {
+      assert.equal(filePath, "C:\\Temp\\agent-computer-use-mcp-private\\window.png");
+      return png;
+    },
+  }, "computer.observe", {
+    mode: "screenshot",
+    visualQuestion: "Locate the search field in the current application window.",
+  });
+
+  assert.equal(result.isError, false);
+  assert.deepEqual(result.content[1], {
+    type: "image",
+    data: png.toString("base64"),
+    mimeType: "image/png",
+  });
+  assert.equal(result.structuredContent.artifact.delivery, "mcp-image-content");
+  assert.equal(result.structuredContent.artifact.path, undefined);
+  assert.equal(result.structuredContent.capture.path, undefined);
+  assert.equal(result._meta["xiaozhiclaw/visual-understanding"].mode, "auto");
+  assert.deepEqual(result._meta["xiaozhiclaw/visual-understanding-capability"], {
+    sameTransaction: true,
+    requestField: "visualQuestion",
+  });
+  assert.equal(
+    result._meta["xiaozhiclaw/visual-understanding"].instruction,
+    "Locate the search field in the current application window.",
+  );
+  assert.doesNotMatch(JSON.stringify(result), /agent-computer-use-mcp-private/u);
+});
+
+test("plain screenshot observations do not spend the Host vision budget", async () => {
+  const png = Buffer.from("89504e470d0a1a0a0000000d49484452", "hex");
+  const result = await callTool({
+    async capture() {
+      return {
+        status: "ok",
+        artifact: { path: "C:\\Temp\\agent-computer-use-mcp-private\\window.png", mimeType: "image/png" },
+        capture: { path: "C:\\Temp\\agent-computer-use-mcp-private\\window.png", width: 800, height: 600 },
+      };
+    },
+    async readOwnedArtifact() {
+      return png;
+    },
+  }, "computer.observe", { mode: "screenshot" });
+
+  assert.equal(result.isError, false);
+  assert.deepEqual(result._meta["xiaozhiclaw/visual-understanding-capability"], {
+    sameTransaction: true,
+    requestField: "visualQuestion",
+  });
+  assert.equal(result._meta["xiaozhiclaw/visual-understanding"], undefined);
+  assert.equal(result.content[1].type, "image");
+});
+
+test("screenshot ImageContent survives deletion of the private handoff file", async () => {
+  const { ComputerUseProviderRouter } = await import("../src/computer-use-provider-router.mjs");
+  const artifactRoot = await mkdtemp(join(tmpdir(), "computer-use-media-pin-"));
+  const png = Buffer.from("89504e470d0a1a0a0000000d49484452", "hex");
+  let screenshotPath;
+  const router = new ComputerUseProviderRouter({
+    artifactRoot,
+    driver: {
+      async findWindow() {
+        return {
+          windowId: "window-1",
+          title: "Media Test",
+          pid: 101,
+          bounds: { x: 10, y: 20, width: 320, height: 200 },
+        };
+      },
+      async captureScreenshot({ outputPath }) {
+        screenshotPath = outputPath;
+        await writeFile(outputPath, png);
+        const capture = {
+          status: "ok",
+          source: "test-capture",
+          path: outputPath,
+          window: {
+            id: "window-1",
+            title: "Media Test",
+            pid: 101,
+            bounds: { x: 10, y: 20, width: 320, height: 200 },
+          },
+        };
+        Object.defineProperty(capture, "artifactBytes", {
+          enumerable: false,
+          value: png,
+        });
+        await unlink(outputPath);
+        return capture;
+      },
+    },
+  });
+
+  try {
+    await router.requestAccess({ titlePart: "Media Test", tier: "observe" });
+    const observation = await router.capture({ mode: "screenshot" });
+    assert.equal(screenshotPath.endsWith("window.png"), true);
+    const projected = await projectComputerUseMediaResult(
+      router,
+      "computer.observe",
+      { mode: "screenshot" },
+      observation,
+    );
+    assert.equal(projected.imageContent[0].data, png.toString("base64"));
+    assert.equal(projected.structuredContent.artifact.path, undefined);
+  } finally {
+    await rm(artifactRoot, { recursive: true, force: true });
+  }
+});
+
+test("OCR observations remain structured-only and omit internal capture paths", async () => {
+  const projected = await projectComputerUseMediaResult({}, "computer.observe", { mode: "ocr-region" }, {
+    status: "ok",
+    imagePath: "C:\\Temp\\agent-computer-use-mcp-private\\window.png",
+    capture: { path: "C:\\Temp\\agent-computer-use-mcp-private\\window.png", title: "WeChat" },
+    observation: { text: "发送", elements: [{ name: "发送" }] },
+  });
+
+  assert.deepEqual(projected.imageContent, []);
+  assert.equal(projected.structuredContent.imagePath, undefined);
+  assert.equal(projected.structuredContent.capture.path, undefined);
+  assert.equal(projected.structuredContent.observation.text, "发送");
+});
+
+test("MCP projection keeps OCR grounding compact without weakening the router observation", async () => {
+  const fullElement = {
+    elementToken: "ocr-1",
+    elementIndex: 0,
+    role: "text",
+    name: "Save",
+    value: "Save",
+    rawTextSha256: "a".repeat(64),
+    state: {},
+    actions: ["click"],
+    bounds: { x: 10, y: 20, width: 80, height: 24 },
+    sourceRegion: { x: 10, y: 20, width: 80, height: 24 },
+    confidence: 0.99,
+    source: "ocr",
+    proposalId: "ocr-proposal-1",
+    modelIdentity: {
+      provider: "xiaozhiclaw-ocr-sidecar",
+      modelPack: "pp-ocrv6-small",
+      runtime: "onnxruntime-directml",
+    },
+    support: [{ provider: "ocr", confidence: 0.99, proposalId: "ocr-proposal-1" }],
+    guessedAction: false,
+    pixelLimitedAction: true,
+  };
+  const providerObservation = {
+    status: "ok",
+    source: "ocr",
+    elements: Array.from({ length: 180 }, (_, index) => ({
+      ...fullElement,
+      elementToken: `ocr-${index + 1}`,
+      elementIndex: index,
+      name: `Item ${index + 1}`,
+      value: `Item ${index + 1}`,
+    })),
+  };
+  providerObservation.text = providerObservation.elements.map((element) => element.name).join("\n");
+
+  const projected = compactComputerUseResult(providerObservation);
+
+  assert.equal(projected.elementCount, 180);
+  assert.equal(projected.elements[0].elementToken, "ocr-1");
+  assert.deepEqual(projected.elements[0].bounds, fullElement.bounds);
+  assert.equal(projected.elements[0].modelIdentity, undefined);
+  assert.equal(projected.elements[0].rawTextSha256, undefined);
+  assert.equal(projected.elements[0].sourceRegion, undefined);
+  assert.equal(projected.elements[0].support, undefined);
+  assert.equal(projected.text, undefined);
+  assert.ok(JSON.stringify(projected).length < 40_000);
+  assert.equal(providerObservation.elements[0].modelIdentity.provider, "xiaozhiclaw-ocr-sidecar");
+  assert.equal(providerObservation.elements[0].rawTextSha256.length, 64);
 });
 
 test("protected imports never auto-start a second stdio server", () => {
@@ -123,15 +452,27 @@ test("agent-computer-use-mcp freezes the local MCP tool contract", () => {
     { required: ["titlePart"] },
     { required: ["windowId"] },
     { required: ["target"] },
+    { required: ["applicationToken"] },
   ]);
   assert.deepEqual(acquire.inputSchema.properties.target.enum, ["foreground"]);
+  assert.equal(acquire.inputSchema.properties.applicationToken.type, "string");
+  assert.deepEqual(acquire._meta["xiaozhiclaw/resourceLifecycle"], {
+    schemaVersion: 1,
+    operation: "acquire",
+    resourceType: "desktop-control",
+    scope: "turn",
+    cleanupTool: "computer.release",
+  });
 
   const observe = COMPUTER_USE_MCP_TOOLS.find((tool) => tool.name === "computer.observe");
   assert.equal(observe.annotations.readOnlyHint, true);
   assert.deepEqual(observe.inputSchema.properties.mode.enum, ["state", "semantic", "screenshot", "capture-window", "ocr-region", "diff"]);
+  assert.equal(observe.inputSchema.properties.visualQuestion.type, "string");
   assert.ok(observe.outputSchema.properties.foregroundWindow);
   assert.ok(observe.outputSchema.properties.windows);
   assert.ok(observe.outputSchema.properties.windowDiscovery);
+  assert.ok(observe.outputSchema.properties.applications);
+  assert.ok(observe.outputSchema.properties.applicationDiscovery);
   assert.deepEqual(observe.outputSchema.properties.window, {
     type: "object",
     additionalProperties: true,
@@ -143,7 +484,30 @@ test("agent-computer-use-mcp freezes the local MCP tool contract", () => {
   assert.deepEqual(act.inputSchema.required, ["action"]);
   assert.deepEqual(act.outputSchema.allOf[0].else.required, ["status", "provider", "action", "result", "pixelLimitedAction"]);
   assert.deepEqual(act.outputSchema.allOf[0].then.required, ["status", "error"]);
-  assert.deepEqual(act.inputSchema.properties.action.properties.kind.enum, ["set_value", "type_text", "click", "press_key"]);
+  assert.deepEqual(act.inputSchema.properties.action.properties.kind.enum, ["activate_window", "set_value", "type_text", "click", "press_key"]);
+  assert.equal(act.inputSchema.properties.action.properties.focusReceiptId.type, "string");
+  assert.deepEqual(act.inputSchema.properties.action.properties.coordinateSpace.enum, ["window-local", "screen"]);
+  assert.deepEqual(
+    act.inputSchema.properties.action.properties.inputBehavior.enum,
+    ["incremental", "commit"],
+  );
+  assert.deepEqual(
+    act.inputSchema.properties.action.allOf[2].then.required,
+    ["textMode", "inputBehavior"],
+  );
+  assert.equal(act.inputSchema.properties.action.properties.inputBehavior.default, undefined);
+  assert.deepEqual(
+    act.inputSchema.properties.action.allOf[0].then.required,
+    ["observationId", "x", "y", "coordinateSpace"],
+  );
+  assert.deepEqual(
+    act.inputSchema.properties.action.allOf[1].then.required,
+    ["interactionIntent"],
+  );
+  assert.deepEqual(
+    act.inputSchema.properties.action.properties.interactionIntent.enum,
+    ["activate-recognized-text", "focus-editable", "activate-control", "select-item"],
+  );
   assert.equal(act.inputSchema.properties.action.properties.observationId.type, "string");
   assert.equal(act.inputSchema.properties.action.properties.x.type, "number");
   assert.equal(act.inputSchema.properties.action.properties.y.type, "number");
@@ -163,6 +527,14 @@ test("agent-computer-use-mcp freezes the local MCP tool contract", () => {
     assert.ok(capability.summary.length > 0, `${tool.name} semantic summary is non-empty`);
     assert.ok(Array.isArray(capability.modalities), `${tool.name} declares supported modalities`);
   }
+
+  const release = COMPUTER_USE_MCP_TOOLS.find((tool) => tool.name === "computer.release");
+  assert.deepEqual(release._meta["xiaozhiclaw/resourceLifecycle"], {
+    schemaVersion: 1,
+    operation: "release",
+    resourceType: "desktop-control",
+    scope: "turn",
+  });
 });
 
 test("agent-computer-use-mcp answers initialize, tools/list, and health over stdio", async () => {
@@ -350,7 +722,14 @@ test("provider router manages request/capture/action/cancel lifecycle", async ()
   const action = await router.act({ action: { kind: "set_value", elementToken: "name", value: "xiaozhi" } });
   assert.equal(action.status, "ok");
   assert.equal(action.pixelLimitedAction, false);
-  const typed = await router.act({ action: { kind: "type_text", elementToken: "document", value: "Notepad text" } });
+  const typed = await router.act({
+    action: {
+      kind: "type_text",
+      elementToken: "document",
+      value: "Notepad text",
+      textMode: "insert",
+    },
+  });
   assert.equal(typed.result.verify, "confirmed");
 
   const state = await router.listState();
@@ -363,6 +742,47 @@ test("provider router manages request/capture/action/cancel lifecycle", async ()
   assert.equal((await router.listState()).activeController, null);
   assert.deepEqual(overlayCalls.map((call) => call.method), ["start", "stop"]);
   assert.deepEqual(calls.map((call) => call.method), ["findWindow", "capture", "setValue", "typeText"]);
+});
+
+test("provider router activates the acquired window without perception coordinates", async () => {
+  const { ComputerUseProviderRouter } = await import("../src/computer-use-provider-router.mjs");
+  const calls = [];
+  const router = new ComputerUseProviderRouter({
+    driver: {
+      async findWindow() {
+        return { windowId: 42, title: "Background App", pid: 1234 };
+      },
+      async activateWindow(args) {
+        calls.push(args);
+        return {
+          status: "ok",
+          effect: "applied",
+          verified: true,
+          foregroundWindow: { windowId: 42, title: "Background App", pid: 1234, isForeground: true },
+        };
+      },
+    },
+    overlayRuntime: {
+      async start() {
+        return { visible: true };
+      },
+      async stop() {},
+    },
+  });
+
+  await router.requestAccess({ titlePart: "Background App", tier: "full", agentId: "agent-1" });
+  const activated = await router.act({ action: { kind: "activate_window" } });
+
+  assert.equal(activated.status, "ok");
+  assert.equal(activated.outcome, "applied");
+  assert.equal(activated.effectiveDeliveryMode, "foreground");
+  assert.equal(activated.pixelLimitedAction, false);
+  assert.equal(activated.focusReceipt.status, "verified");
+  assert.equal(activated.focusReceipt.target.kind, "activate_window");
+  assert.deepEqual(calls, [{
+    window: { windowId: 42, title: "Background App", pid: 1234 },
+  }]);
+  await router.cancel({ reason: "test-complete" });
 });
 
 test("provider router exposes foreground discovery without acquiring or cancelling control", async () => {
@@ -414,9 +834,160 @@ test("provider router exposes foreground discovery without acquiring or cancelli
   const access = await router.requestAccess({ target: "foreground", tier: "observe" });
   assert.equal(access.status, "granted");
   assert.deepEqual(calls, [
-    { method: "listWindows", args: { onScreenOnly: true } },
+    { method: "listWindows", args: { onScreenOnly: false } },
     { method: "findWindow", args: { target: "foreground", windowId: undefined, titlePart: undefined } },
   ]);
+});
+
+test("state observation projects opaque application tokens that acquire can use to restore a window", async () => {
+  const { ComputerUseProviderRouter } = await import("../src/computer-use-provider-router.mjs");
+  const calls = [];
+  const router = new ComputerUseProviderRouter({
+    driver: {
+      async listWindows() {
+        return [];
+      },
+      async listApps() {
+        return [{
+          name: "Restorable App",
+          kind: "desktop",
+          running: true,
+          active: false,
+          pid: 101,
+          lastUsed: "2026-07-30T00:00:00Z",
+          launchPath: "C:\\private\\restorable.exe",
+        }];
+      },
+      async launchApp(args) {
+        calls.push(args);
+        return {
+          status: "launched",
+          pid: 101,
+          windows: [{
+            windowId: "restored-window",
+            title: "Restored App",
+            pid: 101,
+            bounds: { x: 10, y: 20, width: 640, height: 480 },
+          }],
+        };
+      },
+    },
+  });
+
+  const state = await router.listState();
+  assert.equal(state.applicationDiscovery.status, "ready");
+  assert.equal(state.applications.length, 1);
+  assert.match(state.applications[0].applicationToken, /^application-/u);
+  assert.equal(JSON.stringify(state).includes("C:\\private"), false);
+
+  const access = await router.requestAccess({
+    applicationToken: state.applications[0].applicationToken,
+    tier: "observe",
+  });
+  assert.equal(access.status, "granted");
+  assert.equal(access.controller.window.windowId, "restored-window");
+  assert.deepEqual(calls, [{ launchPath: "C:\\private\\restorable.exe" }]);
+});
+
+test("same-Agent acquire retries reuse or retarget the lease and active observations renew its idle timeout", async () => {
+  const { ComputerUseProviderRouter } = await import("../src/computer-use-provider-router.mjs");
+  let now = 1_000;
+  let foregroundWindow = {
+    windowId: "window-a",
+    title: "Window A",
+    pid: 101,
+    bounds: { x: 10, y: 20, width: 300, height: 180 },
+  };
+  const visualCalls = [];
+  const router = new ComputerUseProviderRouter({
+    clock: {
+      now: () => now,
+      iso: (timeMs = now) => new Date(timeMs).toISOString(),
+    },
+    driver: {
+      async findWindow() {
+        return foregroundWindow;
+      },
+      async capture() {
+        return {
+          observationId: `observation-${now}`,
+          elements: [],
+          includeUserOverlay: false,
+        };
+      },
+      async startCursor() {
+        visualCalls.push("cursor.start");
+      },
+      async stopCursor() {
+        visualCalls.push("cursor.stop");
+      },
+    },
+    overlayRuntime: {
+      async start({ targetRect }) {
+        visualCalls.push(`overlay.start:${targetRect.windowId}`);
+        return { visible: true, windowId: targetRect.windowId };
+      },
+      async stop(handle) {
+        visualCalls.push(`overlay.stop:${handle.windowId}`);
+      },
+    },
+  });
+
+  const first = await router.requestAccess({
+    target: "foreground",
+    tier: "full",
+    leaseTtlMs: 50,
+  });
+  now = 1_025;
+  await router.capture({ mode: "semantic" });
+  assert.equal((await router.listState()).activeController.expiresAt, new Date(1_075).toISOString());
+
+  now = 1_051;
+  const reused = await router.requestAccess({
+    target: "foreground",
+    tier: "full",
+    leaseTtlMs: 50,
+  });
+  assert.equal(reused.status, "reused");
+  assert.equal(reused.controller.controllerId, first.controller.controllerId);
+  assert.equal(reused.startsDesktopControl, false);
+  assert.deepEqual(visualCalls, ["cursor.start", "overlay.start:window-a"]);
+
+  foregroundWindow = {
+    windowId: "window-b",
+    title: "Window B",
+    pid: 101,
+    bounds: { x: 30, y: 40, width: 500, height: 320 },
+  };
+  const retargeted = await router.requestAccess({
+    target: "foreground",
+    tier: "full",
+    leaseTtlMs: 50,
+  });
+  assert.equal(retargeted.status, "granted");
+  assert.notEqual(retargeted.controller.controllerId, first.controller.controllerId);
+  assert.equal(retargeted.controller.window.windowId, "window-b");
+  assert.deepEqual(visualCalls, [
+    "cursor.start",
+    "overlay.start:window-a",
+    "overlay.stop:window-a",
+    "cursor.stop",
+    "cursor.start",
+    "overlay.start:window-b",
+  ]);
+  assert.equal(
+    (await router.listState()).auditEvents.some((event) => event.type === "computer.access.replaced"),
+    true,
+  );
+
+  await assert.rejects(
+    () => router.requestAccess({
+      target: "foreground",
+      tier: "full",
+      agentId: "different-agent",
+    }),
+    { code: "controller.already_active" },
+  );
 });
 
 test("failed window resolution remains a tool failure and never cancels the controller lifecycle", async () => {

@@ -1,4 +1,7 @@
 import assert from "node:assert/strict";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { test } from "node:test";
 import { CuaDriverMcpClient, CuaDriverMcpDriver } from "../src/cua-driver-mcp-driver.mjs";
 
@@ -187,10 +190,483 @@ test("CuaDriverMcpDriver maps request/capture/action to cua-driver MCP tools", a
   ]);
 });
 
-test("CuaDriverMcpDriver discovers the foreground window from canonical z-order", async () => {
+test("CuaDriverMcpDriver uses verified Windows Unicode input for coordinate-grounded foreground text", async () => {
+  const calls = [];
+  const unicodeCalls = [];
+  const driver = new CuaDriverMcpDriver({
+    session: "unicode-session",
+    unicodeInput: async (args) => {
+      unicodeCalls.push(args);
+      return {
+        status: "ok",
+        utf16CodeUnits: args.text.length,
+        clipboardRestored: true,
+        changeSignalDelivered: true,
+        deliveryPath: "windows_clipboard_transaction",
+      };
+    },
+    client: {
+      async start() {
+        calls.push({ method: "start" });
+      },
+      async callTool(name, args) {
+        calls.push({ method: "callTool", name, args });
+        return { status: "ok" };
+      },
+    },
+  });
+  const window = { windowId: 42, pid: 1234 };
+
+  const result = await driver.typeText({
+    window,
+    x: 160,
+    y: 55,
+    value: "宋鹏",
+    textMode: "replace-all",
+    deliveryMode: "foreground",
+  });
+
+  assert.deepEqual(calls, [
+    { method: "start" },
+    { method: "callTool", name: "start_session", args: { session: "unicode-session" } },
+    {
+      method: "callTool",
+      name: "bring_to_front",
+      args: { pid: 1234, window_id: 42 },
+    },
+    {
+      method: "callTool",
+      name: "click",
+      args: {
+        pid: 1234,
+        window_id: 42,
+        x: 160,
+        y: 55,
+        delivery_mode: "foreground",
+        session: "unicode-session",
+      },
+    },
+  ]);
+  assert.deepEqual(unicodeCalls, [{
+    windowId: 42,
+    processId: 1234,
+    text: "宋鹏",
+    replaceAll: true,
+    inputBehavior: "incremental",
+  }]);
+  assert.deepEqual(result, {
+    status: "ok",
+    path: "windows_clipboard_transaction",
+    characters: 2,
+    utf16CodeUnits: 2,
+    clipboardRestored: true,
+    changeSignalDelivered: true,
+    textMode: "replace-all",
+    inputBehavior: "incremental",
+    effect: "possibly_applied",
+    verified: false,
+  });
+});
+
+test("CuaDriverMcpDriver activates a window and verifies the foreground result", async () => {
+  const calls = [];
+  const driver = new CuaDriverMcpDriver({
+    session: "activate-window-session",
+    client: {
+      async start() {},
+      async callTool(name, args) {
+        calls.push({ name, args });
+        if (name === "bring_to_front") {
+          return {
+            landed_on_target: true,
+            previous_fg_hwnd: "0x7",
+            now_fg_hwnd: "0x2a",
+            target_hwnd: "0x2a",
+          };
+        }
+        return { status: "ok" };
+      },
+    },
+  });
+
+  const result = await driver.activateWindow({
+    window: { windowId: 42, title: "Target App", pid: 1234 },
+  });
+
+  assert.equal(result.status, "ok");
+  assert.equal(result.verified, true);
+  assert.equal(result.foregroundWindow.windowId, 42);
+  assert.deepEqual(calls, [
+    { name: "start_session", args: { session: "activate-window-session" } },
+    { name: "bring_to_front", args: { pid: 1234, window_id: 42 } },
+  ]);
+});
+
+test("CuaDriverMcpDriver never treats z-order as foreground confirmation", async () => {
+  const calls = [];
+  const driver = new CuaDriverMcpDriver({
+    session: "activate-window-failure-session",
+    foregroundWindowActivator: async (args) => {
+      calls.push({ name: "foregroundWindowActivator", args });
+      return {
+        landed_on_target: false,
+        previous_fg_hwnd: "0x303a4",
+        now_fg_hwnd: "0x303a4",
+        target_hwnd: "0x2f90b8e",
+      };
+    },
+    client: {
+      async start() {},
+      async callTool(name, args) {
+        calls.push({ name, args });
+        if (name === "bring_to_front") {
+          return {
+            landed_on_target: false,
+            previous_fg_hwnd: "0x303a4",
+            now_fg_hwnd: "0x303a4",
+            target_hwnd: "0x2f90b8e",
+            raised: true,
+          };
+        }
+        return { status: "ok" };
+      },
+    },
+  });
+
+  const result = await driver.activateWindow({
+    window: { windowId: 49875854, title: "Target App", pid: 1234 },
+  });
+
+  assert.equal(result.status, "indeterminate");
+  assert.equal(result.verified, false);
+  assert.equal(result.foregroundWindow, null);
+  assert.equal(calls.filter((call) => call.name === "bring_to_front").length, 3);
+  assert.equal(calls.some((call) => call.name === "list_windows"), false);
+  assert.equal(calls.filter((call) => call.name === "foregroundWindowActivator").length, 1);
+});
+
+test("CuaDriverMcpDriver uses the bounded Windows bridge after the driver cannot land", async () => {
+  const calls = [];
+  const driver = new CuaDriverMcpDriver({
+    session: "activate-window-fallback-session",
+    foregroundWindowActivator: async (args) => {
+      calls.push({ name: "foregroundWindowActivator", args });
+      return {
+        status: "ok",
+        path: "windows-foreground-bridge",
+        landed_on_target: true,
+        previous_fg_hwnd: "0x303a4",
+        now_fg_hwnd: "0x2f90b8e",
+        target_hwnd: "0x2f90b8e",
+      };
+    },
+    client: {
+      async start() {},
+      async callTool(name, args) {
+        calls.push({ name, args });
+        if (name === "bring_to_front") {
+          return {
+            landed_on_target: false,
+            previous_fg_hwnd: "0x303a4",
+            now_fg_hwnd: "0x303a4",
+            target_hwnd: "0x2f90b8e",
+          };
+        }
+        return { status: "ok" };
+      },
+    },
+  });
+
+  const result = await driver.activateWindow({
+    window: { windowId: 49875854, title: "Target App", pid: 1234 },
+  });
+
+  assert.equal(result.status, "ok");
+  assert.equal(result.verified, true);
+  assert.equal(result.activation.path, "windows-foreground-bridge");
+  assert.equal(result.driverActivation.landed_on_target, false);
+  assert.equal(result.foregroundWindow.windowId, 49875854);
+  assert.equal(calls.filter((call) => call.name === "bring_to_front").length, 3);
+  assert.equal(calls.filter((call) => call.name === "foregroundWindowActivator").length, 1);
+});
+
+test("CuaDriverMcpDriver keeps semantic Unicode text on the cua-driver path", async () => {
+  const calls = [];
+  const unicodeCalls = [];
+  const driver = new CuaDriverMcpDriver({
+    session: "semantic-unicode-session",
+    unicodeInput: async (args) => {
+      unicodeCalls.push(args);
+      return { status: "ok" };
+    },
+    client: {
+      async start() {},
+      async callTool(name, args) {
+        calls.push({ name, args });
+        return { status: "ok", verified: true };
+      },
+    },
+  });
+  const window = { windowId: 42, pid: 1234 };
+
+  const result = await driver.typeText({
+    window,
+    elementToken: "semantic-edit",
+    elementIndex: 7,
+    value: "宋鹏",
+    deliveryMode: "background",
+  });
+
+  assert.equal(result.status, "ok");
+  assert.deepEqual(unicodeCalls, []);
+  assert.deepEqual(calls.at(-1), {
+    name: "type_text",
+    args: {
+      pid: 1234,
+      window_id: 42,
+      element_index: 7,
+      element_token: "semantic-edit",
+      text: "宋鹏",
+      delivery_mode: "background",
+      session: "semantic-unicode-session",
+    },
+  });
+});
+
+test("CuaDriverMcpDriver captures the exact screenshot coordinate source used by pixel actions", async () => {
+  const calls = [];
+  const driver = new CuaDriverMcpDriver({
+    session: "screenshot-coordinate-session",
+    client: {
+      async start() {},
+      async callTool(name, args) {
+        calls.push({ name, args });
+        if (name === "get_window_state") {
+          return {
+            screenshot_file_path: args.screenshot_out_file,
+            window: {
+              id: 42,
+              title: "微信",
+              pid: 1234,
+              bounds: { x: 447, y: 144, width: 954, height: 704 },
+            },
+          };
+        }
+        return { status: "ok" };
+      },
+    },
+  });
+
+  const capture = await driver.captureScreenshot({
+    window: {
+      windowId: 42,
+      title: "微信",
+      pid: 1234,
+      bounds: { x: 0, y: 0, width: 1, height: 1 },
+    },
+    outputPath: "C:\\controlled\\window.png",
+  });
+
+  assert.deepEqual(calls, [
+    { name: "start_session", args: { session: "screenshot-coordinate-session" } },
+    {
+      name: "get_window_state",
+      args: {
+        pid: 1234,
+        window_id: 42,
+        include_screenshot: true,
+        screenshot_out_file: "C:\\controlled\\window.png",
+        max_elements: 500,
+        max_depth: 20,
+        session: "screenshot-coordinate-session",
+      },
+    },
+  ]);
+  assert.deepEqual(capture, {
+    status: "ok",
+    provider: "cua-driver",
+    source: "cua-driver-window-state",
+    title: "微信",
+    path: "C:\\controlled\\window.png",
+    method: "cua-driver-get_window_state",
+    hwnd: 42,
+    x: 447,
+    y: 144,
+    width: 954,
+    height: 704,
+    window: {
+      id: 42,
+      title: "微信",
+      pid: 1234,
+      bounds: { x: 447, y: 144, width: 954, height: 704 },
+    },
+  });
+});
+
+test("CuaDriverMcpDriver reports the PNG pixel bounds rather than the outer window frame", async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), "cua-driver-png-size-"));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const outputPath = join(directory, "window.png");
+  const driver = new CuaDriverMcpDriver({
+    session: "screenshot-pixel-bounds-session",
+    client: {
+      async start() {},
+      async callTool(name, args) {
+        if (name === "get_window_state") {
+          const header = Buffer.alloc(24);
+          Buffer.from("89504e470d0a1a0a", "hex").copy(header, 0);
+          header.write("IHDR", 12, "ascii");
+          header.writeUInt32BE(952, 16);
+          header.writeUInt32BE(702, 20);
+          await writeFile(args.screenshot_out_file, header);
+          return {
+            screenshot_file_path: args.screenshot_out_file,
+            window: {
+              id: 42,
+              title: "微信",
+              pid: 1234,
+              bounds: { x: 447, y: 144, width: 954, height: 704 },
+            },
+          };
+        }
+        return { status: "ok" };
+      },
+    },
+  });
+
+  const capture = await driver.captureScreenshot({
+    window: {
+      windowId: 42,
+      title: "微信",
+      pid: 1234,
+      bounds: { x: 447, y: 144, width: 954, height: 704 },
+    },
+    outputPath,
+  });
+
+  assert.equal(capture.width, 952);
+  assert.equal(capture.height, 702);
+  assert.deepEqual(capture.window.bounds, { x: 447, y: 144, width: 952, height: 702 });
+  assert.equal(Buffer.isBuffer(capture.artifactBytes), true);
+  assert.equal(capture.artifactBytes.byteLength, 24);
+  assert.equal(Object.keys(capture).includes("artifactBytes"), false);
+});
+
+test("CuaDriverMcpDriver waits for a bounded delayed screenshot handoff", async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), "cua-driver-delayed-png-"));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const outputPath = join(directory, "window.png");
+  let delayedWrite;
+  const driver = new CuaDriverMcpDriver({
+    session: "screenshot-delayed-handoff-session",
+    client: {
+      async start() {},
+      async callTool(name, args) {
+        if (name === "get_window_state") {
+          const header = Buffer.alloc(24);
+          Buffer.from("89504e470d0a1a0a", "hex").copy(header, 0);
+          header.write("IHDR", 12, "ascii");
+          header.writeUInt32BE(640, 16);
+          header.writeUInt32BE(480, 20);
+          delayedWrite = new Promise((resolve, reject) => {
+            setTimeout(() => writeFile(args.screenshot_out_file, header).then(resolve, reject), 40);
+          });
+          return {
+            screenshot_file_path: args.screenshot_out_file,
+            window: {
+              id: 42,
+              title: "Delayed",
+              pid: 1234,
+              bounds: { x: 10, y: 20, width: 642, height: 482 },
+            },
+          };
+        }
+        return { status: "ok" };
+      },
+    },
+  });
+
+  const capture = await driver.captureScreenshot({
+    window: {
+      windowId: 42,
+      title: "Delayed",
+      pid: 1234,
+      bounds: { x: 10, y: 20, width: 642, height: 482 },
+    },
+    outputPath,
+  });
+  await delayedWrite;
+
+  assert.equal(capture.width, 640);
+  assert.equal(capture.height, 480);
+  assert.equal(Buffer.isBuffer(capture.artifactBytes), true);
+});
+
+test("CuaDriverMcpDriver lists launchable apps and restores one through its private launch path", async () => {
+  const calls = [];
+  let windowPolls = 0;
+  const driver = new CuaDriverMcpDriver({
+    session: "application-restore-session",
+    client: {
+      async start() {},
+      async callTool(name, args) {
+        calls.push({ name, args });
+        if (name === "list_apps") {
+          return {
+            apps: [{
+              name: "Restorable App",
+              kind: "desktop",
+              running: false,
+              active: false,
+              pid: 0,
+              last_used: "2026-07-30T00:00:00Z",
+              launch_path: "\"C:\\Program Files\\Restorable\\restorable.exe\" --desktop",
+            }],
+            processes: [{ name: "restorable.exe", pid: 404 }],
+          };
+        }
+        if (name === "launch_app") return { pid: 404, name: "Restorable App", windows: [] };
+        if (name === "list_windows") {
+          windowPolls += 1;
+          return {
+            windows: [{
+              window_id: 77,
+              title: "Restored App",
+              app_name: "restorable.exe",
+              pid: 404,
+              bounds: { x: 20, y: 30, width: 640, height: 480 },
+              z_index: 1,
+            }],
+          };
+        }
+        return { status: "ok" };
+      },
+    },
+  });
+
+  const apps = await driver.listApps();
+  assert.equal(apps[0].running, true);
+  assert.equal(apps[0].pid, 404);
+  const launch = await driver.launchApp({ launchPath: apps[0].launchPath });
+  assert.equal(launch.windows[0].windowId, 77);
+  assert.equal(windowPolls, 1);
+  assert.deepEqual(calls.find(({ name }) => name === "launch_app"), {
+    name: "launch_app",
+    args: {
+      launch_path: "\"C:\\Program Files\\Restorable\\restorable.exe\" --desktop",
+      start_minimized: false,
+    },
+  });
+});
+
+test("CuaDriverMcpDriver discovers the foreground window from the native foreground handle", async () => {
   const calls = [];
   const driver = new CuaDriverMcpDriver({
     session: "foreground-discovery",
+    foregroundWindowProbe: async () => {
+      calls.push({ method: "foregroundWindowProbe" });
+      return "91";
+    },
     client: {
       async start() {
         calls.push({ method: "start" });

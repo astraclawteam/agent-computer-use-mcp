@@ -1,7 +1,16 @@
 const SEMANTIC_SOURCES = new Set(["cua-driver", "uia", "uia-som", "semantic"]);
 
 export function admitPerceptionAction({ observation, element, action, now = Date.now() } = {}) {
-  if (!isRecord(observation) || !isRecord(action)) return denied("observation.insufficient");
+  if (!isRecord(action)) return denied("observation.insufficient");
+  if (action.kind === "activate_window") return allowed(false);
+  if ((action.kind === "press_key" || action.kind === "type_text") && !hasPixelCoordinates(action)
+    && action.elementToken === undefined && action.elementIndex === undefined) {
+    if (typeof action.focusReceiptId !== "string" || action.focusReceiptId.trim() === "") {
+      return denied("focus.receipt_required");
+    }
+    return allowed(false);
+  }
+  if (!isRecord(observation)) return denied("observation.insufficient");
   if (observation.includeUserOverlay !== false) return denied("observation.overlay_contaminated");
   if (Number.isFinite(observation.expiresAt) && observation.expiresAt <= now) return denied("observation.expired");
   if (observation.window?.id && action.windowId && String(observation.window.id) !== String(action.windowId)) {
@@ -15,6 +24,38 @@ export function admitPerceptionAction({ observation, element, action, now = Date
     if (!["click", "type_text", "press_key"].includes(action.kind)) return denied("observation.insufficient");
     if (action.guessedAction === true || !coordinatesWithinObservation(action, observation)) {
       return denied("observation.insufficient");
+    }
+    if (action.kind === "click" && !isPixelClickIntent(action.interactionIntent)) {
+      return denied("target.interaction_intent_required", {
+        allowedInteractionIntents: [
+          "activate-recognized-text",
+          "focus-editable",
+          "activate-control",
+          "select-item",
+        ],
+        nextAction: "Declare what the pixel click is intended to do. A click whose purpose is text focus must use focus-editable and screenshot-grounded editable-interior geometry.",
+      });
+    }
+    if (action.kind === "click"
+      && isOcrTextGeometry(observation)
+      && action.interactionIntent !== "activate-recognized-text") {
+      return denied("target.visual_grounding_required", {
+        reason: "OCR geometry can activate recognized text, but it cannot prove a control interior, list-item interior, or editable focus surface.",
+        rejectedGrounding: "ocr-recognized-text",
+        interactionIntent: action.interactionIntent,
+        requiredObservationMode: "screenshot",
+        nextAction: "Capture a fresh screenshot and visually ground the intended control interior before clicking.",
+      });
+    }
+    if ((action.kind === "type_text" || action.kind === "press_key")
+      && isOcrTextGeometry(observation)) {
+      return denied("target.editable_interior_required", {
+        reason: "OCR coordinates identify recognized glyph geometry, not the parent control's editable interior.",
+        rejectedGrounding: "ocr-recognized-text",
+        requiredObservationMode: "screenshot",
+        requiredGrounding: "editable-interior",
+        nextAction: "Capture a fresh screenshot, ask the Host image-understanding path for a point strictly inside the intended editable surface (excluding icons, labels, borders, and affordances), then use that screenshot observationId and projected point in one type_text action.",
+      });
     }
     return allowed(true);
   }
@@ -48,6 +89,7 @@ export function admitPerceptionAction({ observation, element, action, now = Date
   const fused = element.source === "local-proposal-fusion" && providers.size >= 2;
   const exactOcr = element.source === "ocr"
     && action.kind === "click"
+    && action.interactionIntent === "activate-recognized-text"
     && providers.size === 1
     && providers.has("ocr")
     && typeof element.name === "string"
@@ -61,8 +103,19 @@ function allowed(pixelLimitedAction) {
   return Object.freeze({ allowed: true, code: "action.allowed", pixelLimitedAction });
 }
 
-function denied(code) {
-  return Object.freeze({ allowed: false, code, pixelLimitedAction: false });
+function denied(code, detail = {}) {
+  return Object.freeze({ allowed: false, code, pixelLimitedAction: false, ...detail });
+}
+
+function isOcrTextGeometry(observation) {
+  return observation.source === "ocr" || observation.mode === "ocr";
+}
+
+function isPixelClickIntent(value) {
+  return value === "activate-recognized-text"
+    || value === "focus-editable"
+    || value === "activate-control"
+    || value === "select-item";
 }
 
 function isBox(value) {

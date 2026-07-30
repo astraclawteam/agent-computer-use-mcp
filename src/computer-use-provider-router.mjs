@@ -1,6 +1,6 @@
-import { mkdtemp } from "node:fs/promises";
+import { mkdtemp, readFile, realpath, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { isAbsolute, join, relative, resolve } from "node:path";
 import { randomUUID } from "node:crypto";
 import { DEFAULT_OCR_PREWARM_BUCKETS, expandRegionToBucket } from "./crop-bucket.mjs";
 import { computeDirtyRegion } from "./image-diff.mjs";
@@ -21,6 +21,9 @@ import { createRepairProgressPlan } from "./repair-progress-plan.mjs";
 import { cleanupRuntimeState } from "./runtime-cleanup.mjs";
 
 const ACTION_OBSERVATION_TTL_MS = 30_000;
+const VISUAL_GROUNDING_OBSERVATION_TTL_MS = 120_000;
+const FOCUS_RECEIPT_TTL_MS = 5_000;
+const STABLE_SEMANTIC_SOURCES = new Set(["cua-driver", "uia", "uia-som", "semantic"]);
 
 export class ComputerUseProviderRouter {
   constructor(options = {}) {
@@ -51,6 +54,12 @@ export class ComputerUseProviderRouter {
     this.activeController = null;
     this.pendingAccessApproval = null;
     this.lastCapture = null;
+    this.pendingUnverifiedMutation = null;
+    this.actionTail = Promise.resolve();
+    this.activeFocusReceipt = null;
+    this.semanticElementAliases = new Map();
+    this.currentSemanticElements = new Map();
+    this.applicationCatalog = new Map();
     this.pendingRepairApproval = null;
     this.assetOperationManager = options.assetOperationManager ?? null;
     this.assetCloseComplete = false;
@@ -62,6 +71,8 @@ export class ComputerUseProviderRouter {
     this.lifecycleGeneration = 0;
     this.operationTickets = new Set();
     this.assetDeliveryConfig = options.assetDeliveryConfig ?? null;
+    this.ownedArtifactCache = new Map();
+    this.ownedArtifactCacheBytes = 0;
     this.installCacheDoctor = options.installCacheDoctor ?? runInstallCacheDoctor;
     this.auditEvents = [];
     this.policy = options.policy ?? createComputerUsePolicy(options.policyOptions);
@@ -469,9 +480,6 @@ export class ComputerUseProviderRouter {
   }
 
   async requestAccessOperation(args, ticket) {
-    if (!this.driver?.findWindow) {
-      fail("provider.unavailable", "cua-driver is not available", { provider: "cua-driver" });
-    }
     await this.awaitExternal(
       ticket,
       () => this.expireActiveController({ throwOnExpire: false }, ticket),
@@ -479,11 +487,6 @@ export class ComputerUseProviderRouter {
     if (this.controllerRequestInProgress) {
       fail("controller.request_in_progress", "A Gateway-managed Computer Use controller request is already in progress.", {
         includeUserOverlay: false,
-      });
-    }
-    if (this.activeController) {
-      fail("controller.already_active", "A Gateway-managed Computer Use controller is already active.", {
-        controllerId: this.activeController.controllerId,
       });
     }
     this.expireAccessApproval();
@@ -494,35 +497,78 @@ export class ComputerUseProviderRouter {
         includeUserOverlay: false,
       });
     }
+    const tier = args.tier ?? "full";
+    const agentId = args.agentId ?? "unknown";
+    const selectors = [
+      args.target === "foreground",
+      args.windowId !== undefined,
+      typeof args.titlePart === "string" && args.titlePart.trim() !== "",
+      typeof args.applicationToken === "string" && args.applicationToken.trim() !== "",
+    ].filter(Boolean).length;
+    if (selectors !== 1) {
+      fail(
+        selectors === 0 ? "window.selector_required" : "window.selector_conflict",
+        "Select exactly one target using target=\"foreground\", windowId, titlePart, or applicationToken.",
+        {
+          retryable: true,
+          nextTool: "computer.observe",
+        },
+      );
+    }
+    if (args.applicationToken) {
+      if (!this.driver?.launchApp) {
+        fail("provider.unavailable", "Application activation is not available.", {
+          provider: "cua-driver",
+        });
+      }
+    } else if (!this.driver?.findWindow) {
+      fail("provider.unavailable", "Window discovery is not available.", {
+        provider: "cua-driver",
+      });
+    }
+    if (this.activeController && (
+      args.approvalRequired === true
+      || this.activeController.agentId !== agentId
+    )) {
+      fail("controller.already_active", "A Gateway-managed Computer Use controller is already active.", {
+        controllerId: this.activeController.controllerId,
+      });
+    }
     this.controllerRequestInProgress = true;
     const grant = this.beginControlGrant();
     try {
-      const tier = args.tier ?? "full";
-      const selectors = [
-        args.target === "foreground",
-        args.windowId !== undefined,
-        typeof args.titlePart === "string" && args.titlePart.trim() !== "",
-      ].filter(Boolean).length;
-      if (selectors !== 1) {
-        fail(
-          selectors === 0 ? "window.selector_required" : "window.selector_conflict",
-          "Select exactly one window using target=\"foreground\", windowId, or titlePart.",
-          {
-            retryable: true,
-            nextTool: "computer.observe",
-          },
-        );
-      }
       let window;
       try {
-        window = await this.awaitExternal(
-          ticket,
-          () => this.driver.findWindow({
-            target: args.target,
-            windowId: args.windowId,
-            titlePart: args.titlePart,
-          }),
-        );
+        if (args.applicationToken) {
+          const application = this.applicationCatalog.get(args.applicationToken);
+          if (!application) {
+            fail("application.token_invalid", "The application token is missing or stale.", {
+              retryable: true,
+              nextTool: "computer.observe",
+              suggestedAction: "Call computer.observe mode=\"state\" and use the returned applicationToken.",
+            });
+          }
+          const launch = await this.awaitExternal(
+            ticket,
+            () => this.driver.launchApp({ launchPath: application.launchPath }),
+          );
+          window = launch.windows?.[0];
+          if (!window) {
+            fail("window.not_found", "The application was activated but no controllable window appeared.", {
+              retryable: true,
+              nextTool: "computer.observe",
+            });
+          }
+        } else {
+          window = await this.awaitExternal(
+            ticket,
+            () => this.driver.findWindow({
+              target: args.target,
+              windowId: args.windowId,
+              titlePart: args.titlePart,
+            }),
+          );
+        }
       } catch (error) {
         this.assertOperationTicket(ticket);
         if (error?.code === "window.not_found" || String(error?.message ?? "").startsWith("window.not_found")) {
@@ -540,6 +586,40 @@ export class ComputerUseProviderRouter {
       }
       this.assertControlGrant(grant);
       this.enforcePolicyDecision(this.policy.evaluateAccessRequest({ tier, window }));
+      if (this.activeController) {
+        if (
+          controllerWindowId(this.activeController.window) === controllerWindowId(window)
+          && this.activeController.tier === tier
+        ) {
+          this.renewActiveController();
+          this.recordAudit("computer.access.reused", {
+            controllerId: this.activeController.controllerId,
+            title: this.activeController.window.title,
+            tier: this.activeController.tier,
+          });
+          return {
+            status: "reused",
+            approval: { status: "not_required" },
+            controller: this.activeController,
+            overlay: this.overlayHandle,
+            startsDesktopControl: false,
+            includeUserOverlay: false,
+          };
+        }
+        const previous = this.activeController;
+        this.activeController = null;
+        this.lastCapture = null;
+        this.pendingUnverifiedMutation = null;
+        this.activeFocusReceipt = null;
+        await this.awaitExternal(ticket, () => this.stopControlVisuals(ticket));
+        this.recordAudit("computer.access.replaced", {
+          controllerId: previous.controllerId,
+          previousTitle: previous.window.title,
+          nextTitle: window.title,
+          previousTier: previous.tier,
+          nextTier: tier,
+        });
+      }
       if (args.approvalRequired === true) {
         const approvalTtlMs = Math.max(1, args.approvalTtlMs ?? 300000);
         const requestedAtMs = this.clock.now();
@@ -580,7 +660,7 @@ export class ComputerUseProviderRouter {
       const leaseTtlMs = Math.max(1, args.leaseTtlMs ?? 300000);
       return await this.awaitExternal(ticket, () => this.grantAccessController({
         tier,
-        agentId: args.agentId ?? "unknown",
+        agentId,
         window,
         leaseTtlMs,
         approval: { status: "not_required" },
@@ -706,10 +786,35 @@ export class ComputerUseProviderRouter {
         timeoutMs: args.timeoutMs,
       }, ticket))).observation;
     } else if (mode === "screenshot") {
-      observation = await this.awaitExternal(ticket, () => this.captureWindowOperation({
-        titlePart: this.activeController.window.title,
-        timeoutMs: args.timeoutMs,
-      }, ticket));
+      let semanticObservation = null;
+      if (this.driver?.capture) {
+        try {
+          semanticObservation = await this.awaitExternal(ticket, () => this.driver.capture({
+            window: this.activeController.window,
+            mode: "semantic",
+            controllerId: this.activeController.controllerId,
+          }));
+        } catch (error) {
+          this.assertOperationTicket(ticket);
+        }
+      }
+      const semanticAssessment = assessSemanticActionability(semanticObservation);
+      if (semanticAssessment.sufficient) {
+        observation = {
+          ...semanticObservation,
+          requestedMode: "screenshot",
+          perceptionRouting: {
+            selectedMode: "semantic",
+            avoidedVision: true,
+            ...semanticAssessment,
+          },
+        };
+      } else {
+        observation = await this.awaitExternal(ticket, () => this.captureWindowOperation({
+          titlePart: this.activeController.window.title,
+          timeoutMs: args.timeoutMs,
+        }, ticket));
+      }
     } else {
       fail("capture.mode_unsupported", `Unsupported capture mode: ${mode}`);
     }
@@ -719,6 +824,8 @@ export class ComputerUseProviderRouter {
       observationId: observation.observationId ?? `capture-${Date.now()}`,
       provider: observation.provider ?? "gateway-managed",
     });
+    this.rememberSemanticElements(this.lastCapture);
+    this.pendingUnverifiedMutation = null;
     this.recordAudit("computer.capture.created", {
       controllerId: this.activeController.controllerId,
       mode,
@@ -728,44 +835,146 @@ export class ComputerUseProviderRouter {
   }
 
   act(args = {}) {
-    return this.runOperation((ticket) => this.actOperation(args, ticket));
+    const execute = () => this.runOperation((ticket) => this.actOperation(args, ticket));
+    const operation = this.actionTail.then(execute, execute);
+    this.actionTail = operation.catch(() => {});
+    return operation;
   }
 
   async actOperation(args = {}, ticket) {
     await this.awaitExternal(ticket, () => this.requireActiveController(ticket));
-    const action = args.action;
-    const { admission, driverTarget } = this.validateAction(action);
+    const actionObservation = this.lastCapture;
+    const action = normalizeActionCoordinates(
+      args.action,
+      this.lastCapture,
+      this.activeController?.window,
+    );
+    if (this.pendingUnverifiedMutation) {
+      fail(
+        "action.observation_required_after_unverified_mutation",
+        "A previous text mutation may already have changed the target. Observe the current window before any further action; never replay a possibly-applied write.",
+        {
+          actionKind: this.pendingUnverifiedMutation.actionKind,
+          replaySafe: false,
+          nextAction: "Call computer.observe with semantic, screenshot, or ocr-region mode, then decide from the fresh state.",
+        },
+      );
+    }
+    const { admission, driverTarget, element, focusReceipt } = this.validateAction(action);
+    const effectiveDeliveryMode = resolveEffectiveDeliveryMode(action, admission, focusReceipt);
+    if (action.kind === "activate_window" || action.kind === "click" || action.kind === "set_value"
+      || ((action.kind === "type_text" || action.kind === "press_key") && !focusReceipt)) {
+      this.activeFocusReceipt = null;
+    }
     this.recordAudit("computer.action.started", {
       controllerId: this.activeController.controllerId,
       kind: action.kind,
       elementToken: action.elementToken,
       elementIndex: action.elementIndex,
+      effectiveDeliveryMode,
     });
 
     let result;
+    let outcome = "applied";
     try {
-      if (action.kind === "set_value") {
+      if (action.kind === "activate_window") {
+        if (!this.driver?.activateWindow) fail("provider.unavailable", "window activation provider is not available");
+        result = await this.awaitExternal(ticket, () => this.driver.activateWindow({
+          window: this.activeController.window,
+        }));
+        if (isExplicitlyUnverified(result)) {
+          result = describeUnverifiedAction(result, action);
+          outcome = "unverified";
+        } else if (hasVerifiedFocus(result)) {
+          try {
+            const observation = await this.captureOperation({ mode: "semantic" }, ticket);
+            result = { ...result, observation };
+          } catch (error) {
+            this.assertOperationTicket(ticket);
+            result = {
+              ...result,
+              observation: {
+                status: "unavailable",
+                error: {
+                  code: error?.code ?? "verification.capture_failed",
+                  message: error instanceof Error ? error.message : String(error),
+                },
+              },
+            };
+          }
+          this.activeFocusReceipt = this.createFocusReceipt({ action, element, driverTarget });
+        }
+      } else if (action.kind === "set_value") {
         if (!this.driver?.setValue) fail("provider.unavailable", "set_value provider is not available");
         result = await this.awaitExternal(ticket, () => this.driver.setValue({
           window: this.activeController.window,
           ...driverTarget,
           value: action.value,
         }));
+        if (isExplicitlyUnverified(result)) {
+          result = describeUnverifiedAction(result, action);
+          outcome = "unverified";
+        }
       } else if (action.kind === "type_text") {
         if (!this.driver?.typeText) fail("provider.unavailable", "type_text provider is not available");
         result = await this.awaitExternal(ticket, () => this.driver.typeText({
           window: this.activeController.window,
           ...driverTarget,
           value: action.value,
-          deliveryMode: action.deliveryMode ?? "background",
+          textMode: action.textMode,
+          inputBehavior: action.inputBehavior ?? "incremental",
+          deliveryMode: effectiveDeliveryMode,
         }));
+        if (!isVerifiedTextMutation(result)) {
+          const verification = admission.pixelLimitedAction === false && (element || focusReceipt)
+            ? await this.verifySemanticStateTransition(actionObservation, ticket)
+            : null;
+          if (verification?.verified) {
+            result = {
+              ...result,
+              effect: "verified",
+              verified: true,
+              verification,
+            };
+          } else {
+            result = {
+              ...describePossiblyAppliedTextMutation(result),
+              ...(verification ? { verification } : {}),
+            };
+            outcome = "unverified";
+          }
+        }
       } else if (action.kind === "click") {
         if (!this.driver?.click) fail("provider.unavailable", "click provider is not available");
         result = await this.awaitExternal(ticket, () => this.driver.click({
           window: this.activeController.window,
           ...driverTarget,
-          deliveryMode: action.deliveryMode ?? "background",
+          deliveryMode: effectiveDeliveryMode,
         }));
+        if (isExplicitlyUnverified(result)) {
+          const verification = admission.pixelLimitedAction === false && element
+            ? await this.verifySemanticStateTransition(actionObservation, ticket)
+            : null;
+          if (verification?.verified) {
+            result = {
+              ...result,
+              effect: "verified",
+              verified: true,
+              verification,
+            };
+          } else if (admission.pixelLimitedAction === false && element) {
+            result = describeDeliveredSemanticClick(result, verification);
+            outcome = "delivered";
+          } else {
+            result = {
+              ...describeUnverifiedAction(result, action),
+              ...(verification ? { verification } : {}),
+            };
+            outcome = "unverified";
+          }
+        } else if (hasVerifiedFocus(result)) {
+          this.activeFocusReceipt = this.createFocusReceipt({ action, element, driverTarget });
+        }
       } else if (action.kind === "press_key") {
         if (!this.driver?.pressKey) fail("provider.unavailable", "press_key provider is not available");
         result = await this.awaitExternal(ticket, () => this.driver.pressKey({
@@ -773,8 +982,27 @@ export class ComputerUseProviderRouter {
           ...driverTarget,
           key: action.key,
           modifiers: action.modifiers,
-          deliveryMode: action.deliveryMode ?? "background",
+          deliveryMode: effectiveDeliveryMode,
         }));
+        if (isExplicitlyUnverified(result)) {
+          const verification = admission.pixelLimitedAction === false && (element || focusReceipt)
+            ? await this.verifySemanticStateTransition(actionObservation, ticket)
+            : null;
+          if (verification?.verified) {
+            result = {
+              ...result,
+              effect: "verified",
+              verified: true,
+              verification,
+            };
+          } else {
+            result = {
+              ...describeUnverifiedAction(result),
+              ...(verification ? { verification } : {}),
+            };
+            outcome = "unverified";
+          }
+        }
       }
     } catch (error) {
       this.assertOperationTicket(ticket);
@@ -786,26 +1014,72 @@ export class ComputerUseProviderRouter {
       throw error;
     }
 
+    if (outcome === "unverified" && action.kind !== "activate_window") {
+      this.activeFocusReceipt = null;
+      this.pendingUnverifiedMutation = {
+        actionKind: action.kind,
+        controllerId: this.activeController.controllerId,
+        observationId: this.lastCapture?.observationId,
+        value: action.kind === "type_text" ? action.value : undefined,
+        target: describeActionTarget(action, element, driverTarget),
+      };
+    }
     const actionResult = {
-      status: result.status ?? "ok",
+      status: outcome === "unverified" ? "indeterminate" : (result.status ?? "ok"),
       provider: "gateway-managed",
       action: action.kind,
       result,
       pixelLimitedAction: admission.pixelLimitedAction,
+      outcome,
+      effectiveDeliveryMode,
       includeUserOverlay: false,
     };
+    if (this.activeFocusReceipt) actionResult.focusReceipt = serializeFocusReceipt(this.activeFocusReceipt);
     if (action.captureAfter) {
       actionResult.capture = await this.awaitExternal(
         ticket,
         () => this.captureOperation({ mode: "semantic" }, ticket),
       );
     }
-    this.recordAudit("computer.action.completed", {
+    this.recordAudit(
+      outcome === "unverified" ? "computer.action.indeterminate" : "computer.action.completed",
+      {
       controllerId: this.activeController.controllerId,
       kind: action.kind,
       status: actionResult.status,
+      outcome,
     });
     return actionResult;
+  }
+
+  async verifySemanticStateTransition(beforeObservation, ticket) {
+    try {
+      const afterObservation = await this.captureOperation({ mode: "semantic" }, ticket);
+      const beforeFingerprint = semanticStateFingerprint(beforeObservation);
+      const afterFingerprint = semanticStateFingerprint(afterObservation);
+      const changed = beforeFingerprint !== null
+        && afterFingerprint !== null
+        && beforeFingerprint !== afterFingerprint;
+      return {
+        status: beforeFingerprint === null || afterFingerprint === null
+          ? "unavailable"
+          : (changed ? "changed" : "unchanged"),
+        verified: changed,
+        method: "semantic-state-transition",
+        observation: afterObservation,
+      };
+    } catch (error) {
+      this.assertOperationTicket(ticket);
+      return {
+        status: "unavailable",
+        verified: false,
+        method: "semantic-state-transition",
+        error: {
+          code: error?.code ?? "verification.capture_failed",
+          message: error instanceof Error ? error.message : String(error),
+        },
+      };
+    }
   }
 
   cancel(args = {}) {
@@ -821,6 +1095,10 @@ export class ComputerUseProviderRouter {
     const previousApproval = this.getPendingAccessApproval();
     this.pendingAccessApproval = null;
     this.activeController = null;
+    this.pendingUnverifiedMutation = null;
+    this.activeFocusReceipt = null;
+    this.semanticElementAliases.clear();
+    this.currentSemanticElements.clear();
     await this.awaitExternal(ticket, () => this.stopControlVisuals(ticket));
     this.recordAudit("computer.cancelled", {
       controllerId: previous?.controllerId,
@@ -843,7 +1121,11 @@ export class ComputerUseProviderRouter {
     const previousApproval = this.getPendingAccessApproval();
     this.pendingAccessApproval = null;
     this.activeController = null;
+    this.pendingUnverifiedMutation = null;
+    this.activeFocusReceipt = null;
     this.lastCapture = null;
+    this.semanticElementAliases.clear();
+    this.currentSemanticElements.clear();
     this.pendingRepairApproval = null;
     let firstError;
     try {
@@ -883,6 +1165,11 @@ export class ComputerUseProviderRouter {
     let windows = [];
     let foregroundWindow = null;
     let windowDiscovery;
+    let applications = [];
+    let applicationDiscovery = {
+      status: "unavailable",
+      source: "cua-driver",
+    };
     if (!this.driver?.listWindows) {
       windowDiscovery = {
         status: "unavailable",
@@ -896,9 +1183,9 @@ export class ComputerUseProviderRouter {
       try {
         windows = await this.awaitExternal(
           ticket,
-          () => this.driver.listWindows({ onScreenOnly: true }),
+          () => this.driver.listWindows({ onScreenOnly: false }),
         );
-        foregroundWindow = windows.find((window) => window.isForeground) ?? windows[0] ?? null;
+        foregroundWindow = windows.find((window) => window.isForeground) ?? null;
         windowDiscovery = {
           status: "ready",
           source: "cua-driver",
@@ -906,6 +1193,36 @@ export class ComputerUseProviderRouter {
       } catch (error) {
         this.assertOperationTicket(ticket);
         windowDiscovery = {
+          status: "unavailable",
+          source: "cua-driver",
+          error: serializeToolError(error),
+        };
+      }
+    }
+    if (this.driver?.listApps) {
+      try {
+        const discovered = await this.awaitExternal(ticket, () => this.driver.listApps());
+        this.applicationCatalog.clear();
+        applications = discovered.map((application) => {
+          const applicationToken = `application-${randomUUID()}`;
+          this.applicationCatalog.set(applicationToken, application);
+          return {
+            applicationToken,
+            name: application.name,
+            kind: application.kind,
+            running: application.running,
+            active: application.active,
+            pid: application.pid,
+            lastUsed: application.lastUsed,
+          };
+        });
+        applicationDiscovery = {
+          status: "ready",
+          source: "cua-driver",
+        };
+      } catch (error) {
+        this.assertOperationTicket(ticket);
+        applicationDiscovery = {
           status: "unavailable",
           source: "cua-driver",
           error: serializeToolError(error),
@@ -921,6 +1238,8 @@ export class ComputerUseProviderRouter {
       foregroundWindow,
       windows,
       windowDiscovery,
+      applications,
+      applicationDiscovery,
       auditEvents: this.auditEvents.slice(-50),
       startsDesktopControl: false,
       includeUserOverlay: false,
@@ -936,15 +1255,27 @@ export class ComputerUseProviderRouter {
       ticket,
       () => this.createArtifactPath("window.png", ticket),
     );
-    const capture = await this.awaitExternal(ticket, () => captureWindowPngByTitle(args.titlePart, outputPath, {
-      timeoutMs: args.timeoutMs,
-    }));
+    const capture = this.activeController && this.driver?.captureScreenshot
+      ? await this.awaitExternal(ticket, () => this.driver.captureScreenshot({
+          window: this.activeController.window,
+          outputPath,
+        }))
+      : await this.awaitExternal(ticket, () => captureWindowPngByTitle(args.titlePart, outputPath, {
+          timeoutMs: args.timeoutMs,
+        }));
+    if (args.outputPath === undefined && typeof capture.path === "string") {
+      await this.awaitExternal(ticket, () => this.pinOwnedArtifact(
+        capture.path,
+        capture.artifactBytes,
+      ));
+    }
     const result = {
       status: "ok",
       provider: "gateway-managed",
-      source: "window-capture",
+      source: capture.source ?? "window-capture",
       observationId: `capture-window-${Date.now()}`,
       capture,
+      ...(capture.window ? { window: capture.window } : {}),
       artifact: { path: capture.path, mimeType: "image/png" },
       elements: [],
       includeUserOverlay: false,
@@ -1019,6 +1350,18 @@ export class ComputerUseProviderRouter {
       window: capture ? { title: capture.title } : undefined,
       languageClass: args.languageClass ?? "mixed",
     });
+    if (capture
+      && Number.isFinite(capture.x)
+      && Number.isFinite(capture.y)
+      && Number.isFinite(capture.width)
+      && Number.isFinite(capture.height)) {
+      observation.capture = {
+        x: capture.x,
+        y: capture.y,
+        width: capture.width,
+        height: capture.height,
+      };
+    }
     this.ocrIdentity = pickOcrIdentity(response);
     const actionObservation = this.createActionObservation(observation);
     this.lastCapture = actionObservation;
@@ -1113,6 +1456,10 @@ export class ComputerUseProviderRouter {
       };
       this.activeController = null;
       this.lastCapture = null;
+      this.pendingUnverifiedMutation = null;
+      this.activeFocusReceipt = null;
+      this.semanticElementAliases.clear();
+      this.currentSemanticElements.clear();
       this.pendingRepairApproval = null;
       this.pendingAccessApproval = null;
       if (this.closeContext.previous) {
@@ -1225,6 +1572,66 @@ export class ComputerUseProviderRouter {
     return join(this.artifactRoot, `${Date.now()}-${name}`);
   }
 
+  async readOwnedArtifact(filePath, options = {}) {
+    if (!this.artifactRoot || typeof filePath !== "string" || !isAbsolute(filePath)) {
+      fail("artifact.not_owned", "The requested capture is not owned by this Computer Use session.");
+    }
+    const cacheKey = resolve(filePath);
+    const cached = this.ownedArtifactCache.get(cacheKey);
+    if (cached) {
+      this.ownedArtifactCache.delete(cacheKey);
+      this.ownedArtifactCache.set(cacheKey, cached);
+      return Buffer.from(cached);
+    }
+    const root = await realpath(resolve(this.artifactRoot));
+    const candidate = await realpath(resolve(filePath));
+    const relation = relative(root, candidate);
+    if (relation.startsWith("..") || isAbsolute(relation)) {
+      fail("artifact.not_owned", "The requested capture is outside this Computer Use session.");
+    }
+    const info = await stat(candidate);
+    const maxBytes = options.maxBytes ?? 20 * 1024 * 1024;
+    if (!info.isFile() || info.size <= 0 || info.size > maxBytes) {
+      fail("artifact.invalid", "The requested capture is not a valid bounded image asset.");
+    }
+    return readFile(candidate);
+  }
+
+  async pinOwnedArtifact(filePath, capturedBytes) {
+    let bytes;
+    if (Buffer.isBuffer(capturedBytes)) {
+      if (!this.artifactRoot || typeof filePath !== "string" || !isAbsolute(filePath)) {
+        fail("artifact.not_owned", "The requested capture is not owned by this Computer Use session.");
+      }
+      const root = resolve(this.artifactRoot);
+      const candidate = resolve(filePath);
+      const relation = relative(root, candidate);
+      if (relation.startsWith("..") || isAbsolute(relation)) {
+        fail("artifact.not_owned", "The requested capture is outside this Computer Use session.");
+      }
+      if (capturedBytes.byteLength <= 0 || capturedBytes.byteLength > 20 * 1024 * 1024) {
+        fail("artifact.invalid", "The requested capture is not a valid bounded image asset.");
+      }
+      bytes = capturedBytes;
+    } else {
+      bytes = await this.readOwnedArtifact(filePath, { maxBytes: 20 * 1024 * 1024 });
+    }
+    const cacheKey = resolve(filePath);
+    const previous = this.ownedArtifactCache.get(cacheKey);
+    if (previous) this.ownedArtifactCacheBytes -= previous.byteLength;
+    const pinned = Buffer.from(bytes);
+    this.ownedArtifactCache.delete(cacheKey);
+    this.ownedArtifactCache.set(cacheKey, pinned);
+    this.ownedArtifactCacheBytes += pinned.byteLength;
+    while (this.ownedArtifactCache.size > 8 || this.ownedArtifactCacheBytes > 32 * 1024 * 1024) {
+      const oldestKey = this.ownedArtifactCache.keys().next().value;
+      const oldest = this.ownedArtifactCache.get(oldestKey);
+      this.ownedArtifactCache.delete(oldestKey);
+      this.ownedArtifactCacheBytes -= oldest.byteLength;
+    }
+    return pinned;
+  }
+
   async requireActiveController(ticket) {
     await this.awaitExternal(
       ticket,
@@ -1233,6 +1640,19 @@ export class ComputerUseProviderRouter {
     if (!this.activeController) {
       fail("controller.required", "A Gateway-managed Computer Use controller is required.");
     }
+    this.renewActiveController();
+  }
+
+  renewActiveController() {
+    if (!this.activeController) return null;
+    if (!Number.isFinite(this.activeController.leaseTtlMs) || this.activeController.leaseTtlMs <= 0) {
+      return this.activeController;
+    }
+    const renewedAtMs = this.clock.now();
+    const expiresAtMs = renewedAtMs + this.activeController.leaseTtlMs;
+    this.activeController.expiresAtMs = expiresAtMs;
+    this.activeController.expiresAt = this.clock.iso(expiresAtMs);
+    return this.activeController;
   }
 
   async expireActiveController({ throwOnExpire = false } = {}, ticket) {
@@ -1248,6 +1668,8 @@ export class ComputerUseProviderRouter {
         },
       );
       this.lastCapture = null;
+      this.pendingUnverifiedMutation = null;
+      this.activeFocusReceipt = null;
       await this.awaitExternal(ticket, () => this.stopControlVisuals(ticket));
       this.recordAudit("computer.controller.expired", {
         controllerId: pending.controller.controllerId,
@@ -1261,6 +1683,10 @@ export class ComputerUseProviderRouter {
     const previous = this.activeController;
     this.activeController = null;
     this.lastCapture = null;
+    this.pendingUnverifiedMutation = null;
+    this.activeFocusReceipt = null;
+    this.semanticElementAliases.clear();
+    this.currentSemanticElements.clear();
     await this.awaitExternal(ticket, () => this.stopControlVisuals(ticket));
     this.recordAudit("computer.controller.expired", {
       controllerId: previous.controllerId,
@@ -1341,7 +1767,10 @@ export class ComputerUseProviderRouter {
       }
       throw error;
     }
+    this.semanticElementAliases.clear();
+    this.currentSemanticElements.clear();
     this.activeController = controller;
+    this.activeFocusReceipt = null;
     this.recordAudit("computer.access.granted", {
       controllerId: controller.controllerId,
       title: window.title,
@@ -1365,7 +1794,9 @@ export class ComputerUseProviderRouter {
       observation: this.lastCapture,
     });
     this.enforcePolicyDecision(decision);
-    const element = resolveObservationElement(this.lastCapture, action);
+    const element = resolveObservationElement(this.lastCapture, action)
+      ?? this.resolveSemanticElementAlias(action);
+    const focusReceipt = this.validateFocusReceipt(action);
     const admission = admitPerceptionAction({
       observation: this.lastCapture,
       element,
@@ -1376,31 +1807,158 @@ export class ComputerUseProviderRouter {
       },
       now: this.clock.now(),
     });
-    if (!admission.allowed) fail(admission.code, admission.code, admission);
+    if (!admission.allowed) fail(admission.code, perceptionAdmissionMessage(admission), admission);
     return {
       admission,
       driverTarget: resolveDriverActionTarget(action, element, admission.pixelLimitedAction),
+      element,
+      focusReceipt,
+    };
+  }
+
+  rememberSemanticElements(observation) {
+    const elements = observation?.elements ?? observation?.observation?.elements ?? [];
+    if (!Array.isArray(elements)) return;
+    const current = new Map();
+    for (const element of elements) {
+      if (!isStableSemanticElement(element)) continue;
+      const identity = semanticElementIdentity(element);
+      const existing = current.get(identity);
+      current.set(identity, existing ? null : element);
+      if (typeof element.elementToken === "string" && element.elementToken.trim() !== "") {
+        this.semanticElementAliases.set(element.elementToken, {
+          controllerId: this.activeController?.controllerId,
+          identity,
+        });
+      }
+    }
+    this.currentSemanticElements = new Map(
+      [...current.entries()].filter(([, element]) => element !== null),
+    );
+  }
+
+  resolveSemanticElementAlias(action = {}) {
+    if (action.kind !== "click" || typeof action.elementToken !== "string") return null;
+    const alias = this.semanticElementAliases.get(action.elementToken);
+    if (!alias || alias.controllerId !== this.activeController?.controllerId) return null;
+    return this.currentSemanticElements.get(alias.identity) ?? null;
+  }
+
+  validateFocusReceipt(action = {}) {
+    if (!isTargetlessKeyboardAction(action)) return null;
+    if (!this.activeFocusReceipt || action.focusReceiptId !== this.activeFocusReceipt.id) {
+      fail(
+        "focus.receipt_invalid",
+        "The supplied focus receipt does not belong to the active Computer Use controller.",
+        { focusVerified: false },
+      );
+    }
+    const now = this.clock.now();
+    if (this.activeFocusReceipt.expiresAtMs <= now) {
+      this.activeFocusReceipt = null;
+      fail(
+        "focus.receipt_expired",
+        "The focus receipt has expired. Observe the window and explicitly ground the next action.",
+        { focusVerified: false },
+      );
+    }
+    if (this.activeFocusReceipt.controllerId !== this.activeController?.controllerId
+      || this.activeFocusReceipt.windowId !== controllerWindowId(this.activeController?.window)) {
+      this.activeFocusReceipt = null;
+      fail(
+        "focus.receipt_invalid",
+        "The focus receipt no longer matches the active controller window.",
+        { focusVerified: false },
+      );
+    }
+    return this.activeFocusReceipt;
+  }
+
+  createFocusReceipt({ action, element, driverTarget }) {
+    const issuedAtMs = this.clock.now();
+    return {
+      id: randomUUID(),
+      status: "verified",
+      controllerId: this.activeController.controllerId,
+      windowId: controllerWindowId(this.activeController.window),
+      observationId: this.lastCapture?.observationId,
+      target: describeActionTarget(action, element, driverTarget),
+      issuedAt: this.clock.iso(issuedAtMs),
+      issuedAtMs,
+      expiresAt: this.clock.iso(issuedAtMs + FOCUS_RECEIPT_TTL_MS),
+      expiresAtMs: issuedAtMs + FOCUS_RECEIPT_TTL_MS,
     };
   }
 
   createActionObservation(observation) {
     const now = this.clock.now();
+    const ocrTextGeometry = observation.source === "ocr" || observation.mode === "ocr";
+    const observationTtlMs = isImageBearingObservation(observation)
+      ? VISUAL_GROUNDING_OBSERVATION_TTL_MS
+      : ACTION_OBSERVATION_TTL_MS;
     const leaseExpiry = Number.isFinite(this.activeController?.expiresAtMs)
       ? this.activeController.expiresAtMs
       : Date.parse(this.activeController?.expiresAt ?? "");
+    const captureBounds = observation.capture
+      && Number.isFinite(observation.capture.x)
+      && Number.isFinite(observation.capture.y)
+      && Number.isFinite(observation.capture.width)
+      && Number.isFinite(observation.capture.height)
+      ? {
+          x: observation.capture.x,
+          y: observation.capture.y,
+          width: observation.capture.width,
+          height: observation.capture.height,
+        }
+      : undefined;
+    const observedBounds = captureBounds
+      ?? observation.window?.bounds
+      ?? this.activeController?.window?.bounds;
+    const coordinateBounds = Number.isFinite(observedBounds?.width)
+      && Number.isFinite(observedBounds?.height)
+      ? {
+          x: 0,
+          y: 0,
+          width: observedBounds.width,
+          height: observedBounds.height,
+        }
+      : undefined;
     return {
       ...observation,
       observationId: observation.observationId ?? `observation-${now}`,
+      coordinateSpace: "window-local",
+      ...(coordinateBounds ? {
+        coordinateBounds,
+        coordinateTransform: "identity",
+      } : {}),
+      interactionContract: {
+        textEntry: {
+          actionKind: "type_text",
+          atomicFocus: true,
+          separateFocusClick: false,
+          requiresExplicitTextMode: true,
+          textModes: {
+            insert: "Insert at the current caret without clearing existing content.",
+            "replace-all": "Atomically focus the grounded editable point, select all existing content, and enter the exact value.",
+          },
+          coordinateRule: ocrTextGeometry
+            ? "fresh-screenshot-editable-interior-required"
+            : "copy-grounded-editable-interior-point",
+          acceptsOcrTextPoint: false,
+          requiresVisualGrounding: ocrTextGeometry,
+          verification: "fresh-observation",
+        },
+      },
       window: {
         ...(observation.window ?? {}),
         id: controllerWindowId(this.activeController?.window),
         title: this.activeController?.window?.title ?? observation.window?.title,
-        bounds: this.activeController?.window?.bounds ?? observation.window?.bounds,
+        bounds: observedBounds,
       },
       controllerId: this.activeController?.controllerId,
       expiresAt: Math.min(
-        Number.isFinite(leaseExpiry) ? leaseExpiry : now + ACTION_OBSERVATION_TTL_MS,
-        now + ACTION_OBSERVATION_TTL_MS,
+        Number.isFinite(leaseExpiry) ? leaseExpiry : now + observationTtlMs,
+        now + observationTtlMs,
       ),
       includeUserOverlay: false,
     };
@@ -1746,6 +2304,19 @@ function pickOcrIdentity(response) {
   return identity;
 }
 
+function perceptionAdmissionMessage(admission) {
+  if (admission?.code === "target.editable_interior_required") {
+    return "OCR text geometry cannot safely focus a keyboard target. Ground the editable interior from a fresh screenshot before typing.";
+  }
+  if (admission?.code === "target.interaction_intent_required") {
+    return "Pixel clicks must declare their intended UI effect before the Host can admit the action.";
+  }
+  if (admission?.code === "target.visual_grounding_required") {
+    return "The declared click intent requires control geometry from a fresh screenshot; OCR glyph geometry is insufficient.";
+  }
+  return admission?.code ?? "observation.insufficient";
+}
+
 function resolveObservationElement(observation, action) {
   const elements = observation?.elements ?? observation?.observation?.elements ?? [];
   if (typeof action?.elementToken === "string") {
@@ -1755,11 +2326,208 @@ function resolveObservationElement(observation, action) {
   return null;
 }
 
+function semanticStateFingerprint(observation) {
+  const elements = observation?.elements ?? observation?.observation?.elements ?? [];
+  if (!Array.isArray(elements) || elements.length === 0) return null;
+  return JSON.stringify(elements.map((element) => ({
+    role: element?.role ?? null,
+    name: element?.name ?? null,
+    value: element?.value ?? null,
+    state: element?.state ?? null,
+    actions: Array.isArray(element?.actions) ? [...element.actions].sort() : [],
+    bounds: element?.bounds ?? null,
+  })));
+}
+
+function isStableSemanticElement(element) {
+  return element
+    && typeof element.elementToken === "string"
+    && Array.isArray(element.actions)
+    && element.actions.length > 0
+    && element.pixelLimitedAction !== true
+    && STABLE_SEMANTIC_SOURCES.has(element.source);
+}
+
+function semanticElementIdentity(element) {
+  const bounds = element?.bounds;
+  return JSON.stringify({
+    role: element?.role ?? null,
+    name: element?.name ?? null,
+    actions: [...(element?.actions ?? [])].sort(),
+    bounds: Number.isFinite(bounds?.x)
+      && Number.isFinite(bounds?.y)
+      && Number.isFinite(bounds?.width)
+      && Number.isFinite(bounds?.height)
+      ? [bounds.x, bounds.y, bounds.width, bounds.height]
+      : null,
+  });
+}
+
+function assessSemanticActionability(observation) {
+  const elements = observation?.elements ?? observation?.observation?.elements ?? [];
+  if (!Array.isArray(elements) || elements.length === 0) {
+    return {
+      sufficient: false,
+      actionableElementCount: 0,
+      namedActionableRatio: 0,
+    };
+  }
+  const actionable = elements.filter((element) => Array.isArray(element?.actions) && element.actions.length > 0);
+  const named = actionable.filter((element) => typeof element?.name === "string" && element.name.trim() !== "");
+  const namedActionableRatio = actionable.length === 0 ? 0 : named.length / actionable.length;
+  return {
+    sufficient: actionable.length >= 3 && namedActionableRatio >= 0.8,
+    actionableElementCount: actionable.length,
+    namedActionableRatio: Number(namedActionableRatio.toFixed(3)),
+  };
+}
+
+function isVerifiedTextMutation(result) {
+  return result?.verified === true
+    || result?.verify === "confirmed"
+    || result?.effect === "verified"
+    || result?.effect === "confirmed";
+}
+
+function isExplicitlyUnverified(result) {
+  return result?.verified === false
+    || result?.focusVerified === false
+    || result?.focus?.verified === false
+    || result?.verify === "unreadable"
+    || result?.verify === "unverified"
+    || result?.effect === "unverifiable"
+    || result?.effect === "possibly_applied";
+}
+
+function hasVerifiedFocus(result) {
+  return result?.focusVerified === true
+    || result?.focus?.verified === true
+    || (
+      result?.verified === true
+      && result?.foregroundWindow?.isForeground === true
+    );
+}
+
+function describePossiblyAppliedTextMutation(result) {
+  const { escalation: _unsafeReplayAdvice, ...details } = result ?? {};
+  return {
+    ...details,
+    effect: "possibly_applied",
+    verified: false,
+    replaySafe: false,
+    verificationRequired: "fresh_observation",
+    nextAction: "Call computer.observe and inspect the fresh target state. Retry type_text only if that observation proves the intended text is absent.",
+  };
+}
+
+function describeUnverifiedAction(result, action = {}) {
+  const { escalation: _unsafeReplayAdvice, ...details } = result ?? {};
+  const described = {
+    ...details,
+    effect: details.effect ?? "unverifiable",
+    verified: false,
+    replaySafe: false,
+    verificationRequired: "fresh_observation",
+    nextAction: "Call computer.observe and inspect the fresh target state before any further action.",
+  };
+  if (action.kind === "click") {
+    described.recovery = {
+      requiresFreshObservation: true,
+      sameActionReplayAllowed: false,
+      textEntry: {
+        when: "The intended interaction is text entry on a custom-drawn surface.",
+        useActionKind: "type_text",
+        targetRequirement: "Capture a fresh screenshot, visually verify focus, and ground a point strictly inside the editable surface. Use that screenshot observationId and projected x/y in one type_text call. OCR glyph bounds and interactionPoint values cannot ground keyboard actions. Never add window.bounds.x/y to window-local coordinates.",
+      },
+    };
+  }
+  return described;
+}
+
+function describeDeliveredSemanticClick(result, verification) {
+  const { escalation: _unsafeReplayAdvice, ...details } = result ?? {};
+  return {
+    ...details,
+    effect: "delivered_unobserved",
+    delivered: true,
+    deliveryMethod: "semantic-accessibility-invoke",
+    verified: false,
+    replaySafe: false,
+    completionEligible: false,
+    verificationRequired: "later_observable_boundary",
+    nextAction: "Do not replay this click. Continue with the next distinct planned action when the workflow has one, then verify the next stable observable state before claiming completion.",
+    ...(verification ? { verification } : {}),
+  };
+}
+
+function isTargetlessKeyboardAction(action = {}) {
+  return (action.kind === "type_text" || action.kind === "press_key")
+    && action.elementToken === undefined
+    && action.elementIndex === undefined
+    && !(Number.isFinite(action.x) && Number.isFinite(action.y));
+}
+
+function isImageBearingObservation(observation = {}) {
+  return (typeof observation.artifact?.mimeType === "string"
+      && observation.artifact.mimeType.startsWith("image/"))
+    || observation.source === "window-capture"
+    || observation.source === "cua-driver-window-state";
+}
+
+function normalizeActionCoordinates(action = {}, observation, window) {
+  const hasX = Number.isFinite(action.x);
+  const hasY = Number.isFinite(action.y);
+  if (!hasX && !hasY) return action;
+  if (!hasX || !hasY) {
+    fail(
+      "action.coordinates_incomplete",
+      "Coordinate actions require both x and y.",
+      { coordinateSpace: action.coordinateSpace ?? null },
+    );
+  }
+  if (action.coordinateSpace !== "window-local" && action.coordinateSpace !== "screen") {
+    fail(
+      "action.coordinate_space_required",
+      "Coordinate actions must explicitly declare coordinateSpace as window-local or screen.",
+      {
+        allowedCoordinateSpaces: ["window-local", "screen"],
+        observationId: observation?.observationId ?? null,
+      },
+    );
+  }
+  if (action.coordinateSpace === "window-local") return action;
+  const bounds = observation?.window?.bounds ?? window?.bounds;
+  if (!Number.isFinite(bounds?.x) || !Number.isFinite(bounds?.y)) {
+    fail(
+      "action.screen_coordinates_unavailable",
+      "Screen coordinates cannot be translated because the observed window origin is unavailable.",
+      { observationId: observation?.observationId ?? null },
+    );
+  }
+  return {
+    ...action,
+    x: action.x - bounds.x,
+    y: action.y - bounds.y,
+    coordinateSpace: "window-local",
+    suppliedCoordinateSpace: "screen",
+  };
+}
+
+function resolveEffectiveDeliveryMode(action, admission, focusReceipt) {
+  if (action.kind === "activate_window") return "foreground";
+  if (action.deliveryMode) return action.deliveryMode;
+  if (admission.pixelLimitedAction || focusReceipt) return "foreground";
+  return "background";
+}
+
 function resolveDriverActionTarget(action, element, pixelLimitedAction) {
   if (!pixelLimitedAction) {
+    if (action.elementToken === undefined && action.elementIndex === undefined) return {};
     return {
-      elementToken: action.elementToken,
-      elementIndex: action.elementIndex,
+      elementToken: element?.elementToken ?? action.elementToken,
+      elementIndex: action.elementIndex === undefined
+        ? undefined
+        : (element?.elementIndex ?? action.elementIndex),
     };
   }
   if (Number.isFinite(action.x) && Number.isFinite(action.y)) {
@@ -1770,6 +2538,33 @@ function resolveDriverActionTarget(action, element, pixelLimitedAction) {
   return {
     x: region.x + (region.width / 2),
     y: region.y + (region.height / 2),
+  };
+}
+
+function describeActionTarget(action, element, driverTarget) {
+  const target = { kind: action.kind };
+  if (typeof action.elementToken === "string") target.elementToken = action.elementToken;
+  if (Number.isSafeInteger(action.elementIndex)) target.elementIndex = action.elementIndex;
+  if (Number.isFinite(driverTarget?.x) && Number.isFinite(driverTarget?.y)) {
+    target.x = driverTarget.x;
+    target.y = driverTarget.y;
+  }
+  const bounds = element?.sourceRegion ?? element?.bounds;
+  if (bounds) target.bounds = { ...bounds };
+  return target;
+}
+
+function serializeFocusReceipt(receipt) {
+  return {
+    id: receipt.id,
+    status: receipt.status,
+    controllerId: receipt.controllerId,
+    windowId: receipt.windowId,
+    observationId: receipt.observationId,
+    target: receipt.target,
+    issuedAt: receipt.issuedAt,
+    expiresAt: receipt.expiresAt,
+    expiresAtMs: receipt.expiresAtMs,
   };
 }
 
@@ -1871,6 +2666,15 @@ function policyMessage(decision) {
   }
   if (decision.code === "action.value_required") {
     return "set_value and type_text require a string value.";
+  }
+  if (decision.code === "action.text_mode_required") {
+    return "type_text requires textMode insert or replace-all.";
+  }
+  if (decision.code === "action.input_behavior_unsupported") {
+    return "type_text inputBehavior must be incremental or commit.";
+  }
+  if (decision.code === "action.replace_all_requires_pixel_target") {
+    return "type_text replace-all requires screenshot-grounded x/y. Use set_value for a semantic editable element.";
   }
   if (decision.code === "action.key_required") {
     return "press_key requires a key.";

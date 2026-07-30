@@ -79,11 +79,13 @@ try {
   const diskText = await readFile(outputFile, "utf8");
   const release = await server.callTool("computer.release", { reason: "phase-1-4-complete" });
   const stateAfterRelease = await server.callTool("computer.observe", { mode: "state" });
+  const clickOutcomeIsHonest = click.status === "ok"
+    || (click.status === "indeterminate" && click.outcome === "unverified");
   const passed = diskText === expectedText
     && access.status === "granted"
     && capture.includeUserOverlay === false
     && setValue.status === "ok"
-    && click.status === "ok"
+    && clickOutcomeIsHonest
     && stateBeforeRelease.status === "active"
     && stateAfterRelease.status === "idle";
 
@@ -112,6 +114,8 @@ try {
     setValue,
     click: {
       status: click.status,
+      outcome: click.outcome,
+      externallyVerifiedBy: diskText === expectedText ? "saved-file-bytes" : null,
       provider: click.provider,
       pixelLimitedAction: click.pixelLimitedAction,
       includeUserOverlay: click.includeUserOverlay,

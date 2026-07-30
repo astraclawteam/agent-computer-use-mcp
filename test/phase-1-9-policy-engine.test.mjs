@@ -75,7 +75,7 @@ test("permission policy validates action tiers, allowlist, and secure fields", a
   }), {
     allowed: false,
     code: "action.kind_unsupported",
-    allowedKinds: ["set_value", "type_text", "click", "press_key"],
+    allowedKinds: ["activate_window", "set_value", "type_text", "click", "press_key"],
     includeUserOverlay: false,
   });
 
@@ -96,6 +96,60 @@ test("permission policy validates action tiers, allowlist, and secure fields", a
     action: { kind: "click", elementToken: "save" },
     observation,
   }).allowed, true);
+
+  assert.equal(policy.validateAction({
+    tier: "full",
+    action: { kind: "activate_window" },
+    observation,
+  }).allowed, true);
+
+  assert.deepEqual(policy.validateAction({
+    tier: "full",
+    action: { kind: "press_key", key: "escape" },
+    observation,
+  }), {
+    allowed: false,
+    code: "focus.receipt_required",
+    includeUserOverlay: false,
+  });
+
+  assert.deepEqual(policy.validateAction({
+    tier: "full",
+    action: { kind: "type_text", value: "focused input", textMode: "insert" },
+    observation,
+  }), {
+    allowed: false,
+    code: "focus.receipt_required",
+    includeUserOverlay: false,
+  });
+
+  assert.equal(policy.validateAction({
+    tier: "full",
+    action: {
+      kind: "type_text",
+      value: "focused input",
+      textMode: "insert",
+      focusReceiptId: "focus-1",
+    },
+    observation,
+  }).allowed, true);
+
+  assert.deepEqual(policy.validateAction({
+    tier: "full",
+    action: {
+      kind: "type_text",
+      value: "focused input",
+      textMode: "insert",
+      inputBehavior: "application-specific",
+      focusReceiptId: "focus-1",
+    },
+    observation,
+  }), {
+    allowed: false,
+    code: "action.input_behavior_unsupported",
+    allowedInputBehaviors: ["incremental", "commit"],
+    includeUserOverlay: false,
+  });
 });
 
 test("provider router applies policy to request access and password field actions", async () => {
