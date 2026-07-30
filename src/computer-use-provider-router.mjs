@@ -103,7 +103,7 @@ export class ComputerUseProviderRouter {
     const result = {
       status: "ready",
       module: "agent-computer-use-mcp",
-      version: "0.0.9",
+      version: "0.0.10",
       phases: {
         "0.9": "contract-freeze",
         "0.10": "release-metadata-changelog",
@@ -908,11 +908,16 @@ export class ComputerUseProviderRouter {
       && this.lastVisualUnderstandingDigest === currentDigest;
     const explicitVisualQuestion = typeof args.visualQuestion === "string"
       && args.visualQuestion.trim() !== "";
+    const baselineOcrAttempts = previous?.baselineOcrAttempts ?? 0;
+    const retryBaselineOcr = unchanged
+      && previous?.ocrBaselineReady !== true
+      && baselineOcrAttempts < 2;
+    const shouldRunLocalOcr = !unchanged || retryBaselineOcr;
     let localObservation = null;
     let ocrRegion = null;
     let ocrError = null;
 
-    if (!unchanged) {
+    if (shouldRunLocalOcr) {
       ocrRegion = dirtyRegion ? expandRegionToBucket(dirtyRegion) : null;
       try {
         const ocr = await this.awaitExternal(ticket, () => this.ocrRegionOperation({
@@ -933,20 +938,38 @@ export class ComputerUseProviderRouter {
     const localElements = Array.isArray(localObservation?.elements)
       ? localObservation.elements.length
       : 0;
+    const completedFullWindowOcr = shouldRunLocalOcr
+      && ocrRegion === null
+      && localObservation !== null;
+    const ocrBaselineReady = previous?.ocrBaselineReady === true || completedFullWindowOcr;
+    const nextBaselineOcrAttempts = shouldRunLocalOcr && ocrRegion === null
+      ? baselineOcrAttempts + 1
+      : baselineOcrAttempts;
     const visualUnderstandingEligible = explicitVisualQuestion && !repeatedVisualFrame;
     if (visualUnderstandingEligible) this.lastVisualUnderstandingDigest = currentDigest;
-    this.lastScreenshot = { path: imagePath, digest: currentDigest, windowId };
+    this.lastScreenshot = {
+      path: imagePath,
+      digest: currentDigest,
+      windowId,
+      ocrBaselineReady,
+      baselineOcrAttempts: nextBaselineOcrAttempts,
+    };
 
     return {
       ...screenshot,
       ...(localObservation ? { localObservation } : {}),
       perceptionRouting: {
-        selectedMode: unchanged
-          ? "unchanged-frame"
+        selectedMode: retryBaselineOcr
+          ? "window-ocr-baseline-retry"
+          : unchanged
+            ? "unchanged-frame"
           : (dirtyRegion ? "changed-region-ocr" : "window-ocr"),
         changedRegionFirst: true,
         localCropFirst: dirtyRegion !== null,
         ocrFirst: true,
+        baselineOcrRequired: !ocrBaselineReady,
+        baselineOcrRetry: retryBaselineOcr,
+        baselineOcrAttempts: nextBaselineOcrAttempts,
         screenshotDigest: `sha256:${currentDigest}`,
         frameStatus: unchanged ? "unchanged" : (dirtyRegion ? "changed-region" : "new-frame"),
         dirtyRegion,

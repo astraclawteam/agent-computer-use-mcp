@@ -2,6 +2,12 @@
 
 All notable changes to `agent-computer-use-mcp` are tracked here.
 
+## 0.0.10
+
+- Retry a missing full-window OCR baseline once when the first screenshot arrived before the local sidecar was ready.
+- Preserve static dialogs and overlays in structured observation instead of losing them to later changed-region-only scans.
+- Return immediately to changed-region and local-crop-first routing after the bounded baseline succeeds.
+
 ## 0.0.9
 
 - Ground custom-drawn text entry from the complete editable surface instead of inferring a point from adjacent action buttons or toolbar icons.

@@ -424,6 +424,85 @@ test("unchanged screenshot digest suppresses repeated Host vision after local OC
   }
 });
 
+test("unchanged screenshot retries one missing full-window OCR baseline after sidecar startup failure", async () => {
+  const { ComputerUseProviderRouter } = await import("../src/computer-use-provider-router.mjs");
+  const artifactRoot = await mkdtemp(join(tmpdir(), "computer-use-ocr-baseline-retry-"));
+  const png = Buffer.from(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Y9ZQmcAAAAASUVORK5CYII=",
+    "base64",
+  );
+  const ocrRequests = [];
+  const router = new ComputerUseProviderRouter({
+    artifactRoot,
+    ocrSession: {
+      async start() {},
+      async recognize(request) {
+        ocrRequests.push(request);
+        if (ocrRequests.length === 1) throw new Error("sidecar warming");
+        return {
+          status: "ok",
+          items: [{
+            text: "Blocking overlay",
+            confidence: 0.99,
+            bounds: { x: 0, y: 0, width: 1, height: 1 },
+          }],
+        };
+      },
+      async close() {},
+    },
+    driver: {
+      async findWindow() {
+        return {
+          windowId: "window-baseline-retry",
+          title: "Baseline Retry",
+          pid: 204,
+          bounds: { x: 0, y: 0, width: 1, height: 1 },
+        };
+      },
+      async capture() {
+        return { observationId: "semantic-empty", elements: [] };
+      },
+      async captureScreenshot({ outputPath }) {
+        await writeFile(outputPath, png);
+        return {
+          status: "ok",
+          path: outputPath,
+          width: 1,
+          height: 1,
+          window: {
+            id: "window-baseline-retry",
+            title: "Baseline Retry",
+            pid: 204,
+            bounds: { x: 0, y: 0, width: 1, height: 1 },
+          },
+        };
+      },
+    },
+  });
+
+  try {
+    await router.requestAccess({ titlePart: "Baseline Retry", tier: "observe" });
+    const first = await router.capture({ mode: "screenshot" });
+    const second = await router.capture({ mode: "screenshot" });
+    const third = await router.capture({ mode: "screenshot" });
+
+    assert.equal(first.perceptionRouting.selectedMode, "window-ocr");
+    assert.equal(first.perceptionRouting.baselineOcrRequired, true);
+    assert.equal(first.perceptionRouting.baselineOcrAttempts, 1);
+    assert.equal(second.perceptionRouting.selectedMode, "window-ocr-baseline-retry");
+    assert.equal(second.perceptionRouting.baselineOcrRetry, true);
+    assert.equal(second.perceptionRouting.baselineOcrRequired, false);
+    assert.equal(second.localObservation.elements[0].name, "Blocking overlay");
+    assert.equal(third.perceptionRouting.selectedMode, "unchanged-frame");
+    assert.equal(third.perceptionRouting.baselineOcrRetry, false);
+    assert.equal(ocrRequests.length, 2);
+    assert.equal(ocrRequests.every((request) => request.crop == null), true);
+  } finally {
+    await router.close();
+    await rm(artifactRoot, { recursive: true, force: true });
+  }
+});
+
 test("changed screenshots run cropped changed-region OCR before Host vision", async () => {
   const { ComputerUseProviderRouter } = await import("../src/computer-use-provider-router.mjs");
   const artifactRoot = await mkdtemp(join(tmpdir(), "computer-use-changed-region-"));
