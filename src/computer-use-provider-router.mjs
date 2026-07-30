@@ -20,6 +20,16 @@ import { createComputerUsePolicy } from "./computer-use-policy.mjs";
 import { createRepairProgressPlan } from "./repair-progress-plan.mjs";
 import { cleanupRuntimeState } from "./runtime-cleanup.mjs";
 
+function sameRequestContext(left, right) {
+  if (!left || !right) return left === right;
+  return left.schemaVersion === 1
+    && right.schemaVersion === 1
+    && left.ownerId === right.ownerId
+    && left.agentId === right.agentId
+    && left.projectId === right.projectId
+    && left.sessionId === right.sessionId;
+}
+
 export class ComputerUseProviderRouter {
   constructor(options = {}) {
     this.ocr = options.ocrSession ?? new OcrSidecarSession();
@@ -47,6 +57,7 @@ export class ComputerUseProviderRouter {
     };
     this.controllerRequestInProgress = false;
     this.activeController = null;
+    this.activeControllerRequestContext = null;
     this.pendingAccessApproval = null;
     this.lastCapture = null;
     this.pendingRepairApproval = null;
@@ -479,11 +490,6 @@ export class ComputerUseProviderRouter {
         includeUserOverlay: false,
       });
     }
-    if (this.activeController) {
-      fail("controller.already_active", "A Gateway-managed Computer Use controller is already active.", {
-        controllerId: this.activeController.controllerId,
-      });
-    }
     this.expireAccessApproval();
     if (this.pendingAccessApproval) {
       fail("controller.approval_pending", "A Gateway-managed Computer Use approval request is already pending.", {
@@ -538,6 +544,41 @@ export class ComputerUseProviderRouter {
       }
       this.assertControlGrant(grant);
       this.enforcePolicyDecision(this.policy.evaluateAccessRequest({ tier, window }));
+      if (this.activeController) {
+        const requestedAgentId = args.requestContext?.agentId ?? args.agentId ?? "unknown";
+        const sameController = this.activeController.agentId === requestedAgentId
+          && this.activeController.tier === tier
+          && controllerWindowId(this.activeController.window) === controllerWindowId(window)
+          && sameRequestContext(this.activeControllerRequestContext, args.requestContext);
+        if (!sameController) {
+          fail("controller.already_active", "A Gateway-managed Computer Use controller is already active.", {
+            controllerId: this.activeController.controllerId,
+          });
+        }
+        const leaseTtlMs = Math.max(1, args.leaseTtlMs ?? this.activeController.leaseTtlMs ?? 300000);
+        const renewedAtMs = this.clock.now();
+        this.activeController = {
+          ...this.activeController,
+          window,
+          leaseTtlMs,
+          expiresAtMs: renewedAtMs + leaseTtlMs,
+          expiresAt: this.clock.iso(renewedAtMs + leaseTtlMs),
+        };
+        this.recordAudit("computer.controller.renewed", {
+          controllerId: this.activeController.controllerId,
+          title: window.title,
+          tier,
+        });
+        return {
+          status: "granted",
+          approval: { status: "existing_grant" },
+          controller: this.activeController,
+          overlay: this.overlayHandle,
+          startsDesktopControl: false,
+          includeUserOverlay: false,
+          reused: true,
+        };
+      }
       if (args.approvalRequired === true) {
         const approvalTtlMs = Math.max(1, args.approvalTtlMs ?? 300000);
         const requestedAtMs = this.clock.now();
@@ -555,7 +596,8 @@ export class ComputerUseProviderRouter {
             windowId: args.windowId,
             target: args.target,
             tier,
-            agentId: args.agentId ?? "unknown",
+            agentId: args.requestContext?.agentId ?? args.agentId ?? "unknown",
+            requestContext: args.requestContext,
             reason: args.reason ?? null,
             leaseTtlMs: args.leaseTtlMs,
             window,
@@ -578,7 +620,8 @@ export class ComputerUseProviderRouter {
       const leaseTtlMs = Math.max(1, args.leaseTtlMs ?? 300000);
       return await this.awaitExternal(ticket, () => this.grantAccessController({
         tier,
-        agentId: args.agentId ?? "unknown",
+        agentId: args.requestContext?.agentId ?? args.agentId ?? "unknown",
+        requestContext: args.requestContext,
         window,
         leaseTtlMs,
         approval: { status: "not_required" },
@@ -670,6 +713,7 @@ export class ComputerUseProviderRouter {
       return await this.awaitExternal(ticket, () => this.grantAccessController({
         tier: request.tier,
         agentId: request.agentId,
+        requestContext: request.requestContext,
         window: request.window,
         leaseTtlMs: Math.max(1, args.leaseTtlMs ?? request.leaseTtlMs ?? 300000),
         approval: { ...this.serializeAccessApproval(pending), status: "approved" },
@@ -687,7 +731,7 @@ export class ComputerUseProviderRouter {
   }
 
   async captureOperation(args = {}, ticket) {
-    await this.awaitExternal(ticket, () => this.requireActiveController(ticket));
+    await this.awaitExternal(ticket, () => this.requireActiveController(ticket, args.requestContext));
     const mode = args.mode ?? "semantic";
     let observation;
     if (mode === "semantic") {
@@ -733,7 +777,7 @@ export class ComputerUseProviderRouter {
   }
 
   async actOperation(args = {}, ticket) {
-    await this.awaitExternal(ticket, () => this.requireActiveController(ticket));
+    await this.awaitExternal(ticket, () => this.requireActiveController(ticket, args.requestContext));
     const action = args.action;
     this.validateAction(action);
     this.recordAudit("computer.action.started", {
@@ -792,7 +836,7 @@ export class ComputerUseProviderRouter {
     if (action.captureAfter) {
       actionResult.capture = await this.awaitExternal(
         ticket,
-        () => this.captureOperation({ mode: "semantic" }, ticket),
+        () => this.captureOperation({ mode: "semantic", requestContext: args.requestContext }, ticket),
       );
     }
     this.recordAudit("computer.action.completed", {
@@ -808,6 +852,7 @@ export class ComputerUseProviderRouter {
   }
 
   async cancelOperation(args = {}, ticket) {
+    this.assertControllerRequestContext(args.requestContext);
     this.invalidateControlGrant(
       "controller.cancelled",
       "The Gateway-managed Computer Use controller request was cancelled.",
@@ -816,6 +861,7 @@ export class ComputerUseProviderRouter {
     const previousApproval = this.getPendingAccessApproval();
     this.pendingAccessApproval = null;
     this.activeController = null;
+    this.activeControllerRequestContext = null;
     await this.awaitExternal(ticket, () => this.stopControlVisuals(ticket));
     this.recordAudit("computer.cancelled", {
       controllerId: previous?.controllerId,
@@ -838,6 +884,7 @@ export class ComputerUseProviderRouter {
     const previousApproval = this.getPendingAccessApproval();
     this.pendingAccessApproval = null;
     this.activeController = null;
+    this.activeControllerRequestContext = null;
     this.lastCapture = null;
     this.pendingRepairApproval = null;
     let firstError;
@@ -1093,6 +1140,7 @@ export class ComputerUseProviderRouter {
         previousAccessApproval: this.getPendingAccessApproval(),
       };
       this.activeController = null;
+      this.activeControllerRequestContext = null;
       this.lastCapture = null;
       this.pendingRepairApproval = null;
       this.pendingAccessApproval = null;
@@ -1206,13 +1254,24 @@ export class ComputerUseProviderRouter {
     return join(this.artifactRoot, `${Date.now()}-${name}`);
   }
 
-  async requireActiveController(ticket) {
+  async requireActiveController(ticket, requestContext) {
     await this.awaitExternal(
       ticket,
       () => this.expireActiveController({ throwOnExpire: true }, ticket),
     );
     if (!this.activeController) {
       fail("controller.required", "A Gateway-managed Computer Use controller is required.");
+    }
+    this.assertControllerRequestContext(requestContext);
+  }
+
+  assertControllerRequestContext(requestContext) {
+    if (!this.activeControllerRequestContext) return;
+    if (!sameRequestContext(this.activeControllerRequestContext, requestContext)) {
+      fail("controller.lease_mismatch", "The active Computer Use controller belongs to another Host session.", {
+        controllerId: this.activeController.controllerId,
+        includeUserOverlay: false,
+      });
     }
   }
 
@@ -1241,6 +1300,7 @@ export class ComputerUseProviderRouter {
     if (!this.activeController?.expiresAtMs || this.activeController.expiresAtMs > this.clock.now()) return false;
     const previous = this.activeController;
     this.activeController = null;
+    this.activeControllerRequestContext = null;
     this.lastCapture = null;
     await this.awaitExternal(ticket, () => this.stopControlVisuals(ticket));
     this.recordAudit("computer.controller.expired", {
@@ -1291,7 +1351,7 @@ export class ComputerUseProviderRouter {
     };
   }
 
-  async grantAccessController({ tier, agentId, window, leaseTtlMs, approval, grant, ticket }) {
+  async grantAccessController({ tier, agentId, requestContext, window, leaseTtlMs, approval, grant, ticket }) {
     const startedAtMs = this.clock.now();
     const expiresAtMs = startedAtMs + leaseTtlMs;
     const controller = {
@@ -1323,6 +1383,7 @@ export class ComputerUseProviderRouter {
       throw error;
     }
     this.activeController = controller;
+    this.activeControllerRequestContext = requestContext ?? null;
     this.recordAudit("computer.access.granted", {
       controllerId: controller.controllerId,
       title: window.title,
