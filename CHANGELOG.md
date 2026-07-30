@@ -2,6 +2,12 @@
 
 All notable changes to `agent-computer-use-mcp` are tracked here.
 
+## 0.0.15
+
+- Preserve the active Host request context across action verification observations.
+- Keep semantic clicks, text actions, key presses, and activation follow-up captures on the acquiring session lease.
+- Prevent correctly delivered desktop actions from being misreported as another Host session's controller.
+
 ## 0.0.14
 
 - Wait for bounded asynchronous screenshot handoff before projecting secure MCP image content.
