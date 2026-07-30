@@ -165,7 +165,7 @@ function createMcpConnection(executablePath, cwd, environment = {}) {
       return result.structuredContent ?? result;
     },
     close: async () => {
-      await client.callTool({ name: "computer.revoke", arguments: { reason: "layer-a-client-close" } }).catch(() => {});
+      await client.callTool({ name: "computer.release", arguments: { reason: "layer-a-client-close" } }).catch(() => {});
       await client.close().catch((error) => {
         throw smokeError("sea_smoke.close_failed", `${error.message}; stderr=${stderr}`);
       });

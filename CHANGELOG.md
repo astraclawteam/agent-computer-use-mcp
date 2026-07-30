@@ -2,6 +2,15 @@
 
 All notable changes to `agent-computer-use-mcp` are tracked here.
 
+## 0.0.6
+
+- Deliver owned screenshots as secure MCP image content and compact Markdown without exposing temporary local paths.
+- Add verified foreground activation, tray application restore, screenshot-bound coordinate contracts, focus receipts, and explicit interaction intent.
+- Add incremental native Unicode input and clipboard transaction modes for reliable Chinese text entry and live search controls.
+- Keep OCR as the low-latency text path while requiring screenshot or visual grounding for editable interiors and complex layouts.
+- Treat indeterminate mutations as non-replayable outcomes that require a fresh observation, and always release Computer Use state after completion or failure.
+- Harden Windows SEA assembly by acquiring hash-locked assets explicitly in CI and pruning all non-Windows-x64 ONNX native targets.
+
 ## 0.0.5
 
 - Preserve fresh OCR and screenshot observations so their bounded coordinates and high-confidence text tokens can be used by `computer.act`.
