@@ -50,6 +50,11 @@ test("builds one Runtime-compatible win32-x64 artifact rooted at artifact/", asy
   assert.equal(result.publisherInput.artifacts[0].platform, "win32");
   assert.equal(result.publisherInput.artifacts[0].arch, "x64");
   assert.equal(result.publisherInput.artifacts[0].format, "tar.gz");
+  assert.deepEqual(result.publisherInput.manifest.branding, {
+    iconUrl: "https://xiaozhi.qlogicagent.com/assets/skills/mcp-computer-use.svg",
+    color: "#4F46E5",
+    vendor: "AstraClaw",
+  });
   assert.deepEqual(result.manifest.target, { platform: "win32", arch: "x64" });
   assert.equal(result.inventory.files.some(({ path }) => path === "bin/agent-computer-use-mcp.exe"), true);
   assert.equal(result.inventory.files.some(({ path }) => path.startsWith("driver/")), true);
