@@ -2,6 +2,12 @@
 
 All notable changes to `agent-computer-use-mcp` are tracked here.
 
+## 0.0.9
+
+- Ground custom-drawn text entry from the complete editable surface instead of inferring a point from adjacent action buttons or toolbar icons.
+- Expose structured safe-interior point-selection and occlusion recovery metadata to MCP Hosts.
+- Stop coordinate retries from typing through dialogs, sheets, or other overlays; require a fresh non-occluded screenshot before retry.
+
 ## 0.0.8
 
 - Restore tray-only Windows applications through generic session-process discovery and opaque application tokens without leaking executable paths.
