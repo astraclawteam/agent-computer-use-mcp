@@ -153,6 +153,7 @@ export class CuaDriverMcpDriver {
         }))
           .filter((window) => !payload.pid || window.pid === payload.pid);
       }
+      windows.sort(compareWindowControllability);
       return {
         status: "launched",
         pid: payload.pid ?? windows[0]?.pid ?? 0,
@@ -201,10 +202,12 @@ export class CuaDriverMcpDriver {
         window = windows.find((item) => String(item.windowId) === String(windowId));
       } else if (typeof titlePart === "string" && titlePart.trim() !== "") {
         const expected = titlePart.trim().toLowerCase();
-        window = windows.find((item) => (
-          item.title.toLowerCase().includes(expected)
-          || item.appName?.toLowerCase().includes(expected)
-        ));
+        window = windows
+          .filter((item) => (
+            item.title.toLowerCase().includes(expected)
+            || item.appName?.toLowerCase().includes(expected)
+          ))
+          .sort(compareWindowControllability)[0];
       } else {
         throw windowSelectionError(
           "window.selector_required",
@@ -921,6 +924,22 @@ function compareApplications(left, right) {
 
 function compareWindowZOrder(left, right) {
   return right.zIndex - left.zIndex;
+}
+
+function compareWindowControllability(left, right) {
+  const areaDifference = boundedWindowArea(right) - boundedWindowArea(left);
+  if (areaDifference !== 0) return areaDifference;
+  if (left.isOnScreen !== right.isOnScreen) return left.isOnScreen ? -1 : 1;
+  return compareWindowZOrder(left, right);
+}
+
+function boundedWindowArea(window) {
+  const width = Number(window?.bounds?.width);
+  const height = Number(window?.bounds?.height);
+  return Number.isFinite(width) && width > 0
+    && Number.isFinite(height) && height > 0
+    ? width * height
+    : 0;
 }
 
 function isComputerUseOverlayWindow(window) {

@@ -928,7 +928,13 @@ export class ComputerUseProviderRouter {
             LOCAL_OCR_LATENCY_BUDGET_MS,
           ),
         }, ticket));
-        localObservation = ocr.observation;
+        localObservation = {
+          ...ocr.observation,
+          coordinateSpace: screenshot.coordinateSpace,
+          coordinateBounds: screenshot.coordinateBounds,
+          coordinateTransform: screenshot.coordinateTransform,
+          coordinateScale: screenshot.coordinateScale,
+        };
       } catch (error) {
         this.assertOperationTicket(ticket);
         ocrError = serializeToolError(error);

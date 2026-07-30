@@ -493,6 +493,7 @@ test("unchanged screenshot retries one missing full-window OCR baseline after si
     assert.equal(second.perceptionRouting.baselineOcrRetry, true);
     assert.equal(second.perceptionRouting.baselineOcrRequired, false);
     assert.equal(second.localObservation.elements[0].name, "Blocking overlay");
+    assert.deepEqual(second.localObservation.coordinateBounds, { x: 0, y: 0, width: 1, height: 1 });
     assert.equal(third.perceptionRouting.selectedMode, "unchanged-frame");
     assert.equal(third.perceptionRouting.baselineOcrRetry, false);
     assert.equal(ocrRequests.length, 2);
