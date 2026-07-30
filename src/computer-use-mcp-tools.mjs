@@ -737,6 +737,7 @@ const semanticCapabilityMeta = ({
   modalities = [],
   constraints = [],
 }) => Object.freeze({
+  "xiaozhiclaw/acceptsRequestContext": Object.freeze({ schemaVersion: 1 }),
   "xiaozhiclaw/semanticCapability": Object.freeze({
     schemaVersion: 1,
     summary,

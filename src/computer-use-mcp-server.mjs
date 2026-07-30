@@ -48,7 +48,7 @@ export async function runComputerUseMcpServer(options = {}) {
 
   server.setRequestHandler(CallToolRequestSchema, async (request) => {
     const { name, arguments: args = {} } = request.params;
-    return callTool(router, name, args);
+    return callTool(router, name, args, request.params._meta?.["xiaozhiclaw/requestContext"]);
   });
 
   let unregisterShutdownHandlers = () => {};
@@ -89,7 +89,7 @@ export function createPlatformOcrSession(platformRuntime, options = {}) {
   });
 }
 
-export async function callTool(router, name, args) {
+export async function callTool(router, name, args, requestContext) {
   let structuredContent;
   try {
     if (name === "computer.health") {
@@ -104,13 +104,13 @@ export async function callTool(router, name, args) {
         packageRoot: process.cwd(),
       });
     } else if (name === "computer.acquire") {
-      structuredContent = await router.requestAccess(args);
+      structuredContent = await router.requestAccess({ ...args, requestContext });
     } else if (name === "computer.observe") {
-      structuredContent = await observeComputer(router, args);
+      structuredContent = await observeComputer(router, args, requestContext);
     } else if (name === "computer.act") {
-      structuredContent = await router.act(args);
+      structuredContent = await router.act({ ...args, requestContext });
     } else if (name === "computer.release") {
-      structuredContent = await router.cancel(args);
+      structuredContent = await router.cancel({ ...args, requestContext });
     } else {
       throw new Error(`tool_not_found: ${name}`);
     }
@@ -311,11 +311,15 @@ function compactPerceptionElement(element) {
   return compacted;
 }
 
-export async function observeComputer(router, args) {
+export async function observeComputer(router, args, requestContext) {
   const { mode, ...options } = args;
   if (mode === "state") return router.listState();
   if (mode === "semantic" || mode === "screenshot" || mode === "ocr-region") {
-    return router.capture({ ...options, mode });
+    return router.capture({
+      ...options,
+      mode,
+      ...(requestContext === undefined ? {} : { requestContext }),
+    });
   }
   if (mode === "capture-window") return router.captureWindow(options);
   if (mode === "diff") return router.observeDiff(options);
