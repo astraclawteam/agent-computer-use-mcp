@@ -1204,6 +1204,74 @@ test("provider router renews an identical controller request instead of failing 
   await router.close();
 });
 
+test("semantic action verification preserves the active Host request context", async () => {
+  const { ComputerUseProviderRouter } = await import("../src/computer-use-provider-router.mjs");
+  let captureCount = 0;
+  const router = new ComputerUseProviderRouter({
+    driver: {
+      async findWindow() {
+        return {
+          windowId: "window-context",
+          title: "Context App",
+          pid: 101,
+          bounds: { x: 0, y: 0, width: 320, height: 200 },
+        };
+      },
+      async capture() {
+        captureCount += 1;
+        return {
+          observationId: `observation-${captureCount}`,
+          source: "cua-driver",
+          mode: "semantic",
+          elements: [{
+            elementToken: "activate",
+            role: "Button",
+            name: captureCount === 1 ? "Enter" : "Entered",
+            actions: ["click"],
+          }],
+        };
+      },
+      async click() {
+        return {
+          status: "ok",
+          effect: "delivered_unobserved",
+          verified: false,
+          delivered: true,
+        };
+      },
+    },
+  });
+  const requestContext = {
+    schemaVersion: 1,
+    ownerId: "owner-1",
+    agentId: "agent-1",
+    projectId: "project-1",
+    sessionId: "session-1",
+  };
+
+  await router.requestAccess({
+    titlePart: "Context App",
+    tier: "full",
+    requestContext,
+  });
+  await router.capture({ mode: "semantic", requestContext });
+  const action = await router.act({
+    action: {
+      kind: "click",
+      elementToken: "activate",
+      interactionIntent: "activate-control",
+    },
+    requestContext,
+  });
+
+  assert.equal(action.status, "ok");
+  assert.equal(action.result.effect, "verified");
+  assert.equal(action.result.verification.status, "changed");
+  assert.equal(action.result.verification.error, undefined);
+  assert.equal(captureCount, 2);
+  await router.close({ requestContext });
+});
+
 test("state observation projects opaque application tokens that acquire can use to restore a window", async () => {
   const { ComputerUseProviderRouter } = await import("../src/computer-use-provider-router.mjs");
   const calls = [];

@@ -1054,7 +1054,10 @@ export class ComputerUseProviderRouter {
           outcome = "unverified";
         } else if (hasVerifiedFocus(result)) {
           try {
-            const observation = await this.captureOperation({ mode: "semantic" }, ticket);
+            const observation = await this.captureOperation({
+              mode: "semantic",
+              requestContext: args.requestContext,
+            }, ticket);
             result = { ...result, observation };
           } catch (error) {
             this.assertOperationTicket(ticket);
@@ -1094,7 +1097,7 @@ export class ComputerUseProviderRouter {
         }));
         if (!isVerifiedTextMutation(result)) {
           const verification = admission.pixelLimitedAction === false && (element || focusReceipt)
-            ? await this.verifySemanticStateTransition(actionObservation, ticket)
+            ? await this.verifySemanticStateTransition(actionObservation, args.requestContext, ticket)
             : null;
           if (verification?.verified) {
             result = {
@@ -1120,7 +1123,7 @@ export class ComputerUseProviderRouter {
         }));
         if (isExplicitlyUnverified(result)) {
           const verification = admission.pixelLimitedAction === false && element
-            ? await this.verifySemanticStateTransition(actionObservation, ticket)
+            ? await this.verifySemanticStateTransition(actionObservation, args.requestContext, ticket)
             : null;
           if (verification?.verified) {
             result = {
@@ -1153,7 +1156,7 @@ export class ComputerUseProviderRouter {
         }));
         if (isExplicitlyUnverified(result)) {
           const verification = admission.pixelLimitedAction === false && (element || focusReceipt)
-            ? await this.verifySemanticStateTransition(actionObservation, ticket)
+            ? await this.verifySemanticStateTransition(actionObservation, args.requestContext, ticket)
             : null;
           if (verification?.verified) {
             result = {
@@ -1226,9 +1229,12 @@ export class ComputerUseProviderRouter {
     return actionResult;
   }
 
-  async verifySemanticStateTransition(beforeObservation, ticket) {
+  async verifySemanticStateTransition(beforeObservation, requestContext, ticket) {
     try {
-      const afterObservation = await this.captureOperation({ mode: "semantic" }, ticket);
+      const afterObservation = await this.captureOperation({
+        mode: "semantic",
+        requestContext,
+      }, ticket);
       const beforeFingerprint = semanticStateFingerprint(beforeObservation);
       const afterFingerprint = semanticStateFingerprint(afterObservation);
       const changed = beforeFingerprint !== null
