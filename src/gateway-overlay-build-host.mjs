@@ -64,7 +64,7 @@ export function createGatewayOverlayPublishArgs(outputRoot, options = {}) {
     "--nologo",
     "-p:PublishSingleFile=true",
     "-p:IncludeNativeLibrariesForSelfExtract=true",
-    "-p:EnableCompressionInSingleFile=true",
+    "-p:EnableCompressionInSingleFile=false",
     "-p:DebugType=None",
   ];
 }

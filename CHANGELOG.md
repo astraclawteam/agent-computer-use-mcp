@@ -7,6 +7,7 @@ All notable changes to `agent-computer-use-mcp` are tracked here.
 - Keep semantic observations, screenshots, and actions bound to the acquired native window handle.
 - Ignore transient same-process auxiliary-window identity and off-screen bounds returned after activation.
 - Prevent focus and coordinate drift when the captured primary surface differs from an auxiliary provider window.
+- Keep the self-contained overlay single-file package uncompressed so first-run startup remains within the product latency budget.
 
 ## 0.0.12
 
