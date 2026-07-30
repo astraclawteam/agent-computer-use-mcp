@@ -885,24 +885,28 @@ function positiveRatio(numerator, denominator) {
 }
 
 async function readPngArtifact(filePath) {
-  for (let attempt = 0; attempt < 8; attempt += 1) {
+  for (let attempt = 0; attempt < 50; attempt += 1) {
     try {
       const bytes = await readFile(filePath);
       if (bytes.byteLength < 24
         || bytes.toString("hex", 0, 8) !== "89504e470d0a1a0a"
         || bytes.toString("ascii", 12, 16) !== "IHDR") {
-        return undefined;
+        if (attempt === 49) return undefined;
+        await new Promise((resolve) => setTimeout(resolve, 50));
+        continue;
       }
       const width = bytes.readUInt32BE(16);
       const height = bytes.readUInt32BE(20);
       if (!Number.isSafeInteger(width) || width <= 0
         || !Number.isSafeInteger(height) || height <= 0) {
-        return undefined;
+        if (attempt === 49) return undefined;
+        await new Promise((resolve) => setTimeout(resolve, 50));
+        continue;
       }
       return { width, height, bytes };
     } catch {
-      if (attempt === 7) return undefined;
-      await new Promise((resolve) => setTimeout(resolve, 25));
+      if (attempt === 49) return undefined;
+      await new Promise((resolve) => setTimeout(resolve, 50));
     }
   }
   return undefined;

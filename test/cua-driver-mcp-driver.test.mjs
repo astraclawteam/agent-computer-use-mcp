@@ -670,7 +670,7 @@ test("CuaDriverMcpDriver waits for a bounded delayed screenshot handoff", async 
           header.writeUInt32BE(640, 16);
           header.writeUInt32BE(480, 20);
           delayedWrite = new Promise((resolve, reject) => {
-            setTimeout(() => writeFile(args.screenshot_out_file, header).then(resolve, reject), 40);
+            setTimeout(() => writeFile(args.screenshot_out_file, header).then(resolve, reject), 600);
           });
           return {
             screenshot_file_path: args.screenshot_out_file,
