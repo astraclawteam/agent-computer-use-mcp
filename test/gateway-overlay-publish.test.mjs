@@ -21,7 +21,7 @@ test("gateway overlay release publish freezes the self-contained single-file con
       "--nologo",
       "-p:PublishSingleFile=true",
       "-p:IncludeNativeLibrariesForSelfExtract=true",
-      "-p:EnableCompressionInSingleFile=true",
+      "-p:EnableCompressionInSingleFile=false",
       "-p:DebugType=None",
     ],
   );
