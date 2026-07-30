@@ -33,7 +33,7 @@ export async function runComputerUseMcpServer(options = {}) {
   const server = new Server(
     {
       name: "agent-computer-use-mcp",
-      version: "0.0.14",
+      version: "0.0.15",
     },
     {
       capabilities: {
