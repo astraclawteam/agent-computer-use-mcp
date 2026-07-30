@@ -2,6 +2,15 @@
 
 All notable changes to `agent-computer-use-mcp` are tracked here.
 
+## 0.0.8
+
+- Restore tray-only Windows applications through generic session-process discovery and opaque application tokens without leaking executable paths.
+- Prioritize semantic observation, screenshot digest comparison, changed-region or local OCR, and only then explicit Host visual understanding.
+- Suppress repeated visual-model calls when the screenshot digest is unchanged and expose the local OCR fallback in the same observation transaction.
+- Treat empty OCR crops as valid observations instead of provider failures.
+- Compress application state into `active`, `visible`, `recoverable`, or `installed` model-facing records without application-name keywords or regular expressions.
+- Preserve the official Hub card branding and link project discovery to the Xiaozhi Agent release page.
+
 ## 0.0.7
 
 - Add a versioned capability handshake so the Host can inspect lifecycle, observation, action, delivery, and security support without expanding the Agent tool surface.
