@@ -134,9 +134,31 @@ export class CuaDriverMcpDriver {
     });
   }
 
-  launchApp({ launchPath }) {
+  launchApp({ launchPath, pid, running = false }) {
     return this.runWork(async (ticket) => {
       await this.ensureStartedResources(ticket);
+      if (running === true && Number.isSafeInteger(pid) && pid > 0) {
+        const existingWindows = (await this.listWindowsResources(ticket, {
+          onScreenOnly: false,
+          includeForeground: false,
+        }))
+          .filter((window) => window.pid === pid)
+          .sort(compareWindowControllability);
+        for (const existingWindow of existingWindows) {
+          const activation = await this.activateWindowResources(ticket, existingWindow);
+          if (activation.verified === true) {
+            return {
+              status: "restored",
+              pid,
+              name: null,
+              windows: [
+                activation.foregroundWindow,
+                ...existingWindows.filter((window) => window.windowId !== existingWindow.windowId),
+              ],
+            };
+          }
+        }
+      }
       const result = await this.client.callTool("launch_app", {
         launch_path: launchPath,
         start_minimized: false,
@@ -147,11 +169,12 @@ export class CuaDriverMcpDriver {
       for (let attempt = 0; windows.length === 0 && attempt < 8; attempt += 1) {
         await new Promise((resolve) => setTimeout(resolve, 250));
         this.assertWorkTicket(ticket);
+        const launchedPid = payload.pid ?? pid;
         windows = (await this.listWindowsResources(ticket, {
           onScreenOnly: false,
           includeForeground: false,
         }))
-          .filter((window) => !payload.pid || window.pid === payload.pid);
+          .filter((window) => !launchedPid || window.pid === launchedPid);
       }
       windows.sort(compareWindowControllability);
       return {
@@ -335,75 +358,77 @@ export class CuaDriverMcpDriver {
   }
 
   activateWindow({ window }) {
-    return this.runWork(async (ticket) => {
-      await this.ensureStartedResources(ticket);
-      let activation = null;
-      for (let attempt = 0; attempt < 3; attempt += 1) {
-        activation = await this.client.callTool("bring_to_front", {
-          pid: window.pid,
-          window_id: window.windowId,
-        });
-        this.assertWorkTicket(ticket);
-        const driverConfirmed = activation?.landed_on_target === true
-          || (
-            activation?.landed_on_target !== false
-            && sameNativeWindowId(activation?.now_fg_hwnd, window.windowId)
-          );
-        if (driverConfirmed) {
-          return {
-            status: "ok",
-            effect: "applied",
-            verified: true,
-            activation,
-            foregroundWindow: {
-              ...window,
-              isForeground: true,
-            },
-          };
-        }
-        if (attempt < 2) await new Promise((resolve) => setTimeout(resolve, 75));
-      }
-      let fallbackActivation = null;
-      let fallbackError = null;
-      try {
-        fallbackActivation = await this.foregroundWindowActivator({
-          windowId: window.windowId,
-          processId: window.pid,
-        });
-        this.assertWorkTicket(ticket);
-      } catch (error) {
-        this.assertWorkTicket(ticket);
-        fallbackError = {
-          code: error?.code ?? "foreground_activation.failed",
-          message: error instanceof Error ? error.message : String(error),
-        };
-      }
-      if (fallbackActivation?.landed_on_target === true
-        && sameNativeWindowId(fallbackActivation?.now_fg_hwnd, window.windowId)) {
+    return this.runWork((ticket) => this.activateWindowResources(ticket, window));
+  }
+
+  async activateWindowResources(ticket, window) {
+    await this.ensureStartedResources(ticket);
+    let activation = null;
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      activation = await this.client.callTool("bring_to_front", {
+        pid: window.pid,
+        window_id: window.windowId,
+      });
+      this.assertWorkTicket(ticket);
+      const driverConfirmed = activation?.landed_on_target === true
+        || (
+          activation?.landed_on_target !== false
+          && sameNativeWindowId(activation?.now_fg_hwnd, window.windowId)
+        );
+      if (driverConfirmed) {
         return {
           status: "ok",
           effect: "applied",
           verified: true,
-          activation: fallbackActivation,
-          driverActivation: activation,
+          activation,
           foregroundWindow: {
             ...window,
             isForeground: true,
           },
         };
       }
-      return {
-        status: "indeterminate",
-        effect: "possibly_applied",
-        verified: false,
-        replaySafe: true,
-        activation: fallbackActivation ?? activation,
-        driverActivation: activation,
-        ...(fallbackError ? { fallbackError } : {}),
-        foregroundWindow: null,
-        nextAction: "Call computer.observe mode=\"state\" and verify foregroundWindow before interacting.",
+      if (attempt < 2) await new Promise((resolve) => setTimeout(resolve, 75));
+    }
+    let fallbackActivation = null;
+    let fallbackError = null;
+    try {
+      fallbackActivation = await this.foregroundWindowActivator({
+        windowId: window.windowId,
+        processId: window.pid,
+      });
+      this.assertWorkTicket(ticket);
+    } catch (error) {
+      this.assertWorkTicket(ticket);
+      fallbackError = {
+        code: error?.code ?? "foreground_activation.failed",
+        message: error instanceof Error ? error.message : String(error),
       };
-    });
+    }
+    if (fallbackActivation?.landed_on_target === true
+      && sameNativeWindowId(fallbackActivation?.now_fg_hwnd, window.windowId)) {
+      return {
+        status: "ok",
+        effect: "applied",
+        verified: true,
+        activation: fallbackActivation,
+        driverActivation: activation,
+        foregroundWindow: {
+          ...window,
+          isForeground: true,
+        },
+      };
+    }
+    return {
+      status: "indeterminate",
+      effect: "possibly_applied",
+      verified: false,
+      replaySafe: true,
+      activation: fallbackActivation ?? activation,
+      driverActivation: activation,
+      ...(fallbackError ? { fallbackError } : {}),
+      foregroundWindow: null,
+      nextAction: "Call computer.observe mode=\"state\" and verify foregroundWindow before interacting.",
+    };
   }
 
   setValue({ window, elementToken, elementIndex, value }) {

@@ -103,7 +103,7 @@ export class ComputerUseProviderRouter {
     const result = {
       status: "ready",
       module: "agent-computer-use-mcp",
-      version: "0.0.13",
+      version: "0.0.14",
       phases: {
         "0.9": "contract-freeze",
         "0.10": "release-metadata-changelog",
@@ -573,7 +573,11 @@ export class ComputerUseProviderRouter {
           }
           const launch = await this.awaitExternal(
             ticket,
-            () => this.driver.launchApp({ launchPath: application.launchPath }),
+            () => this.driver.launchApp({
+              launchPath: application.launchPath,
+              pid: application.pid,
+              running: application.running,
+            }),
           );
           window = launch.windows?.[0];
           if (!window) {

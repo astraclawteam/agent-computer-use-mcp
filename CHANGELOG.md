@@ -2,6 +2,13 @@
 
 All notable changes to `agent-computer-use-mcp` are tracked here.
 
+## 0.0.14
+
+- Wait for bounded asynchronous screenshot handoff before projecting secure MCP image content.
+- Retry missing and partially written PNG assets without exposing connector-private file paths.
+- Prevent real desktop screenshot observations from failing with transient `ENOENT` errors.
+- Restore an existing hidden or off-screen process window before falling back to launching another application instance.
+
 ## 0.0.13
 
 - Keep semantic observations, screenshots, and actions bound to the acquired native window handle.

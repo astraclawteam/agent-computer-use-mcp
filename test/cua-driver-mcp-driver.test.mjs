@@ -761,6 +761,55 @@ test("CuaDriverMcpDriver lists launchable apps and restores one through its priv
   });
 });
 
+test("CuaDriverMcpDriver restores an existing process window before launching another instance", async () => {
+  const calls = [];
+  const driver = new CuaDriverMcpDriver({
+    session: "existing-process-window-session",
+    client: {
+      async start() {},
+      async callTool(name, args) {
+        calls.push({ name, args });
+        if (name === "list_windows") {
+          return {
+            windows: [{
+              window_id: 77,
+              title: "Existing App",
+              app_name: "existing.exe",
+              pid: 404,
+              is_on_screen: false,
+              bounds: { x: -32000, y: -32000, width: 952, height: 702 },
+              z_index: 1,
+            }],
+          };
+        }
+        if (name === "bring_to_front") {
+          return {
+            landed_on_target: true,
+            now_fg_hwnd: "77",
+          };
+        }
+        if (name === "launch_app") throw new Error("must not launch a running app with a restorable window");
+        return { status: "ok" };
+      },
+    },
+  });
+
+  const result = await driver.launchApp({
+    launchPath: "C:\\Program Files\\Existing\\existing.exe",
+    pid: 404,
+    running: true,
+  });
+
+  assert.equal(result.status, "restored");
+  assert.equal(result.windows[0].windowId, 77);
+  assert.equal(result.windows[0].isForeground, true);
+  assert.equal(calls.some(({ name }) => name === "launch_app"), false);
+  assert.deepEqual(calls.filter(({ name }) => name === "bring_to_front"), [{
+    name: "bring_to_front",
+    args: { pid: 404, window_id: 77 },
+  }]);
+});
+
 test("CuaDriverMcpDriver projects a restorable token source for tray-only processes", async () => {
   const driver = new CuaDriverMcpDriver({
     session: "tray-process-discovery-session",
