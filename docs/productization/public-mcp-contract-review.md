@@ -1,7 +1,7 @@
 # Public MCP Contract Review
 
 - Schema Version: 1
-- Result Schema Version: 5.3
+- Result Schema Version: 5.4
 - Requires Human Review: true
 - Compatibility Reviewed: true
 - Overlay Exclusion Reviewed: true
@@ -12,10 +12,10 @@ This review records the public `computer.*` MCP contract that requires human PR 
 | Tool | Review Status | Compatibility | Overlay Exclusion | Desktop Control | Notes |
 | --- | --- | --- | --- | --- | --- |
 | computer.acquire | reviewed | compatible | overlay-free | reviewed | May start desktop control only after policy and approval requirements. |
-| computer.observe | reviewed | compatible | overlay-free | reviewed | Combines state, semantic capture, screenshot, OCR, and diff while preserving includeUserOverlay=false. |
-| computer.act | reviewed | compatible | overlay-free | reviewed | State-changing action remains allowlisted and policy-gated. |
+| computer.observe | reviewed | compatible | overlay-free | reviewed | Combines state, semantic capture, screenshot, OCR, and diff while preserving includeUserOverlay=false; coordinate observations expose focus, truncation, and scale evidence. |
+| computer.act | reviewed | compatible | overlay-free | reviewed | State-changing action remains allowlisted and policy-gated; successful results expose the selected target/provider path and an explicit fallback reason. |
 | computer.release | reviewed | compatible | overlay-free | reviewed | Stops active control and clears pending access without leaving an observation overlay. |
-| computer.health | reviewed | compatible | overlay-free | reviewed | Host-only health report; never projected to the Agent. |
+| computer.health | reviewed | compatible | overlay-free | reviewed | Host-only health report includes the versioned capability handshake; never projected to the Agent. |
 | computer.doctor | reviewed | compatible | overlay-free | reviewed | Host-only diagnostics; repair actions remain plan-only. |
 | computer.installation | reviewed | compatible | overlay-free | reviewed | Host-only install manifest and client config templates. |
 | computer.repair | reviewed | compatible | overlay-free | reviewed | Host-only and approval-bound; settings request a plan without immediate execution. |

@@ -1984,9 +1984,13 @@ export class ComputerUseProviderRouter {
           height: observedBounds.height,
         }
       : undefined;
-    const coordinateScale = observation.coordinateScale
-      ?? observation.capture?.coordinateScale
-      ?? createIdentityCoordinateScale(coordinateBounds);
+    const coordinateScale = coordinateBounds
+      ? (
+          observation.coordinateScale
+          ?? observation.capture?.coordinateScale
+          ?? createIdentityCoordinateScale(coordinateBounds)
+        )
+      : undefined;
     return {
       ...observation,
       observationId: observation.observationId ?? `observation-${now}`,
