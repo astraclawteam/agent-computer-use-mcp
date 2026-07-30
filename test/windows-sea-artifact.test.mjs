@@ -4,7 +4,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
-import { buildWindowsSeaArtifact, verifyWindowsSeaArtifactTree } from "../src/windows-sea-artifact.mjs";
+import {
+  buildWindowsSeaArtifact,
+  pruneOnnxRuntimeNativeTargets,
+  verifyWindowsSeaArtifactTree,
+} from "../src/windows-sea-artifact.mjs";
 
 test("builds one Runtime-compatible win32-x64 artifact rooted at artifact/", async (t) => {
   const root = await mkdtemp(join(tmpdir(), "computer-use-sea-"));
@@ -74,4 +78,27 @@ test("Windows SEA verification rejects foreign ONNX native targets", async (t) =
   await assert.rejects(verifyWindowsSeaArtifactTree(root, {
     files: [{ path, sizeBytes: 1, sha256: "a".repeat(64) }],
   }), /foreign.*native|native.*target/i);
+});
+
+test("ONNX runtime pruning retains only the Windows x64 native target", async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "computer-use-sea-onnx-prune-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  for (const target of ["darwin/arm64", "linux/x64", "win32/arm64", "win32/x64"]) {
+    const targetRoot = join(root, "bin", "napi-v6", ...target.split("/"));
+    await mkdir(targetRoot, { recursive: true });
+    await writeFile(join(targetRoot, "onnxruntime.native"), target);
+  }
+
+  await pruneOnnxRuntimeNativeTargets(root);
+
+  assert.equal(
+    await readFile(join(root, "bin", "napi-v6", "win32", "x64", "onnxruntime.native"), "utf8"),
+    "win32/x64",
+  );
+  for (const target of ["darwin/arm64", "linux/x64", "win32/arm64"]) {
+    await assert.rejects(
+      readFile(join(root, "bin", "napi-v6", ...target.split("/"), "onnxruntime.native"), "utf8"),
+      { code: "ENOENT" },
+    );
+  }
 });

@@ -155,6 +155,11 @@ test("OCR sidecar response is merged as pixel-limited OCR observation elements",
   assert.equal(observation.elements[0].role, "text");
   assert.equal(observation.elements[0].name, "Save");
   assert.deepEqual(observation.elements[0].bounds, { x: 640, y: 228, width: 62, height: 30 });
+  assert.deepEqual(observation.elements[0].interactionPoint, { x: 671, y: 243 });
+  assert.equal(observation.elements[0].geometryKind, "recognized-text");
+  assert.equal(observation.elements[0].interactionPointSemantics, "recognized-text-center");
+  assert.equal(observation.elements[0].controlBoundsKnown, false);
+  assert.equal(observation.elements[0].editableInteriorKnown, false);
   assert.equal(observation.elements[0].pixelLimitedAction, true);
   assert.equal(observation.elements[0].source, "ocr");
 });

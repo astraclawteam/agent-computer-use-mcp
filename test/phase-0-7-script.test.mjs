@@ -99,11 +99,10 @@ test("Phase 1.4 script drives real desktop actions through the MCP module", () =
 
   const runner = readFileSync("src/phase-1-4-real-mcp-action.mjs", "utf8");
   assert.match(runner, /computer-use-mcp-server\.mjs/);
-  assert.match(runner, /computer\.request_access/);
-  assert.match(runner, /computer\.capture/);
+  assert.match(runner, /computer\.acquire/);
+  assert.match(runner, /computer\.observe/);
   assert.match(runner, /computer\.act/);
-  assert.match(runner, /computer\.list_state/);
-  assert.match(runner, /computer\.cancel/);
+  assert.match(runner, /computer\.release/);
   assert.match(runner, /NativeComputerUseLab/);
   assert.match(runner, /includeUserOverlay/);
 });

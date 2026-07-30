@@ -98,6 +98,88 @@ test("provider router reuses OCR only for identical overlay-free region pixels",
   assert.deepEqual(await readFile(imagePath), await readFile(imagePath));
 });
 
+test("title-based OCR replaces stale minimized geometry with the restored capture", async (t) => {
+  const clickCalls = [];
+  const imagePath = resolve("test/fixtures/perception/regressions/images/quick-visual-canvas.png");
+  const router = new ComputerUseProviderRouter({
+    driver: {
+      async click(args) {
+        clickCalls.push(args);
+        return { status: "ok", verified: true };
+      },
+    },
+    ocrSession: {
+      async start() {},
+      async recognize() {
+        return {
+          ...MODEL,
+          items: [{ text: "搜索", bounds: { x: 80, y: 32, width: 34, height: 26 }, confidence: 0.99 }],
+          timings: { totalMs: 10 },
+        };
+      },
+      async close() {},
+    },
+  });
+  t.after(() => router.close());
+  router.activeController = {
+    controllerId: "controller-restored",
+    tier: "full",
+    window: {
+      id: "window-restored",
+      windowId: "window-restored",
+      title: "Weixin",
+      pid: 100,
+      bounds: { x: -32_000, y: -32_000, width: 146, height: 21 },
+    },
+    expiresAt: new Date(Date.now() + 60_000).toISOString(),
+    expiresAtMs: Date.now() + 60_000,
+  };
+  router.captureWindowOperation = async () => ({
+    capture: {
+      path: imagePath,
+      title: "Weixin",
+      x: 440,
+      y: 144,
+      width: 968,
+      height: 711,
+    },
+  });
+
+  const result = await router.ocrRegion({ titlePart: "Weixin" });
+  assert.deepEqual(result.observation.capture, {
+    x: 440,
+    y: 144,
+    width: 968,
+    height: 711,
+  });
+  assert.deepEqual(result.observation.window.bounds, {
+    x: 440,
+    y: 144,
+    width: 968,
+    height: 711,
+  });
+  assert.deepEqual(result.observation.coordinateBounds, {
+    x: 0,
+    y: 0,
+    width: 968,
+    height: 711,
+  });
+
+  await router.act({
+    action: {
+      kind: "click",
+      elementToken: "ocr-1",
+      observationId: result.observation.observationId,
+      coordinateSpace: "window-local",
+      x: 97,
+      y: 45,
+      interactionIntent: "activate-recognized-text",
+    },
+  });
+  assert.equal(clickCalls.length, 1);
+  assert.deepEqual({ x: clickCalls[0].x, y: clickCalls[0].y }, { x: 97, y: 45 });
+});
+
 function keyFor(pixels, windowId = "window-1", includeUserOverlay = false) {
   return createPerceptionRegionCacheKey({
     windowId,

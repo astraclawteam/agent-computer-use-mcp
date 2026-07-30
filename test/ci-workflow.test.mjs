@@ -11,6 +11,7 @@ test("CI validates source MCP and Windows SEA without legacy npm or commercial r
   assert.match(runs, /phase:1\.6/u);
   assert.match(runs, /phase:1\.7/u);
   assert.match(runs, /phase:1\.8/u);
-  assert.match(runs, /artifact:windows:build -- --skip-dotnet-build/u);
+  assert.match(runs, /artifact:windows:build -- --allow-network/u);
+  assert.doesNotMatch(runs, /--skip-dotnet-build/u);
   assert.doesNotMatch(source, /npm publish|NODE_AUTH_TOKEN|commercial|soak|platform-release|\.zip/iu);
 });

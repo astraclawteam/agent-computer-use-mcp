@@ -44,4 +44,4 @@ jobs:
         run: npm run phase:1.8
 
       - name: Verify Windows SEA packaging
-        run: npm run artifact:windows:build -- --skip-dotnet-build
+        run: npm run artifact:windows:build -- --allow-network
