@@ -40,7 +40,7 @@ The release assembly can produce a complete Windows x64 ZIP with the same protec
 node .\agent-computer-use-mcp-X.Y.Z-windows-x64\bin\agent-computer-use-mcp.mjs
 ```
 
-The ZIP requires Node.js 20 or newer. It requires no npm install, network access,
+The ZIP requires Node.js 24.x. It requires no npm install, network access,
 elevation, or setup program. The current tag workflow does not upload or publish
 this ZIP; GitHub/Gitee release distribution requires a separate operator flow.
 
