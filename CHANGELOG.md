@@ -2,6 +2,12 @@
 
 All notable changes to `agent-computer-use-mcp` are tracked here.
 
+## 0.0.16
+
+- Restore an already-running tray application through its exact system accessibility identity before launching an executable.
+- Preserve the discovered application display identity through the opaque application-token acquire path.
+- Prevent tray-only applications from being replaced by duplicate launcher windows when the original process can be restored.
+
 ## 0.0.15
 
 - Preserve the active Host request context across action verification observations.
