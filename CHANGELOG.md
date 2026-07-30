@@ -2,6 +2,12 @@
 
 All notable changes to `agent-computer-use-mcp` are tracked here.
 
+## 0.0.19
+
+- Restrict tray accessibility discovery to notification icon elements instead of traversing every desktop button.
+- Give the bounded native tray bridge enough time to complete on control-dense desktops.
+- Prevent a slow but valid tray restoration from falling through to duplicate application launch.
+
 ## 0.0.18
 
 - Prefer an opaque application token over a redundant title hint left from an earlier window lookup.
