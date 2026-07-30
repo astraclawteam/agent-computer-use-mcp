@@ -2,6 +2,12 @@
 
 All notable changes to `agent-computer-use-mcp` are tracked here.
 
+## 0.0.12
+
+- Prefer the bounded primary application surface when one process exposes same-title auxiliary windows.
+- Keep screenshot-backed OCR coordinates in the exact observation pixel space consumed by actions.
+- Preserve exact explicit-window selection while making tray restoration and natural-language targeting more reliable.
+
 ## 0.0.11
 
 - Keep bounded OCR baseline and changed-region routing metadata valid under the strict MCP output schema.
