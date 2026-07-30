@@ -1,7 +1,7 @@
 import { mkdtemp, readFile, realpath, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { isAbsolute, join, relative, resolve } from "node:path";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { DEFAULT_OCR_PREWARM_BUCKETS, expandRegionToBucket } from "./crop-bucket.mjs";
 import { computeDirtyRegion } from "./image-diff.mjs";
 import { ComputerUseMcpError, fail, serializeToolError } from "./computer-use-errors.mjs";
@@ -35,6 +35,7 @@ function sameRequestContext(left, right) {
 const ACTION_OBSERVATION_TTL_MS = 30_000;
 const VISUAL_GROUNDING_OBSERVATION_TTL_MS = 120_000;
 const FOCUS_RECEIPT_TTL_MS = 5_000;
+const LOCAL_OCR_LATENCY_BUDGET_MS = 5_000;
 const STABLE_SEMANTIC_SOURCES = new Set(["cua-driver", "uia", "uia-som", "semantic"]);
 
 export class ComputerUseProviderRouter {
@@ -67,6 +68,8 @@ export class ComputerUseProviderRouter {
     this.activeControllerRequestContext = null;
     this.pendingAccessApproval = null;
     this.lastCapture = null;
+    this.lastScreenshot = null;
+    this.lastVisualUnderstandingDigest = null;
     this.pendingUnverifiedMutation = null;
     this.actionTail = Promise.resolve();
     this.activeFocusReceipt = null;
@@ -847,10 +850,11 @@ export class ComputerUseProviderRouter {
           },
         };
       } else {
-        observation = await this.awaitExternal(ticket, () => this.captureWindowOperation({
+        const screenshot = await this.awaitExternal(ticket, () => this.captureWindowOperation({
           titlePart: this.activeController.window.title,
           timeoutMs: args.timeoutMs,
         }, ticket));
+        observation = await this.prioritizeLocalScreenshotPerception(screenshot, args, ticket);
       }
     } else {
       fail("capture.mode_unsupported", `Unsupported capture mode: ${mode}`);
@@ -869,6 +873,99 @@ export class ComputerUseProviderRouter {
       observationId: this.lastCapture.observationId,
     });
     return this.lastCapture;
+  }
+
+  async prioritizeLocalScreenshotPerception(screenshot, args, ticket) {
+    const imagePath = screenshot?.artifact?.path ?? screenshot?.capture?.path;
+    if (typeof imagePath !== "string" || !imagePath) return screenshot;
+
+    const currentDigest = await this.awaitExternal(ticket, async () => (
+      createHash("sha256").update(await this.readOwnedArtifact(imagePath)).digest("hex")
+    ));
+    const windowId = String(
+      this.activeController?.window?.windowId
+      ?? this.activeController?.window?.id
+      ?? this.activeController?.window?.title
+      ?? "active-window",
+    );
+    const previous = this.lastScreenshot?.windowId === windowId ? this.lastScreenshot : null;
+    let dirtyRegion = null;
+    let unchanged = false;
+    if (previous?.path) {
+      if (previous.digest === currentDigest) {
+        unchanged = true;
+      } else {
+        try {
+          dirtyRegion = await this.awaitExternal(ticket, () => computeDirtyRegion(previous.path, imagePath));
+          unchanged = dirtyRegion === null;
+        } catch (error) {
+          this.assertOperationTicket(ticket);
+        }
+      }
+    }
+
+    const repeatedVisualFrame = unchanged
+      && this.lastVisualUnderstandingDigest === currentDigest;
+    const explicitVisualQuestion = typeof args.visualQuestion === "string"
+      && args.visualQuestion.trim() !== "";
+    let localObservation = null;
+    let ocrRegion = null;
+    let ocrError = null;
+
+    if (!unchanged) {
+      ocrRegion = dirtyRegion ? expandRegionToBucket(dirtyRegion) : null;
+      try {
+        const ocr = await this.awaitExternal(ticket, () => this.ocrRegionOperation({
+          imagePath,
+          crop: ocrRegion,
+          timeoutMs: Math.min(
+            positiveTimeout(args.timeoutMs, LOCAL_OCR_LATENCY_BUDGET_MS),
+            LOCAL_OCR_LATENCY_BUDGET_MS,
+          ),
+        }, ticket));
+        localObservation = ocr.observation;
+      } catch (error) {
+        this.assertOperationTicket(ticket);
+        ocrError = serializeToolError(error);
+      }
+    }
+
+    const localElements = Array.isArray(localObservation?.elements)
+      ? localObservation.elements.length
+      : 0;
+    const visualUnderstandingEligible = explicitVisualQuestion && !repeatedVisualFrame;
+    if (visualUnderstandingEligible) this.lastVisualUnderstandingDigest = currentDigest;
+    this.lastScreenshot = { path: imagePath, digest: currentDigest, windowId };
+
+    return {
+      ...screenshot,
+      ...(localObservation ? { localObservation } : {}),
+      perceptionRouting: {
+        selectedMode: unchanged
+          ? "unchanged-frame"
+          : (dirtyRegion ? "changed-region-ocr" : "window-ocr"),
+        changedRegionFirst: true,
+        localCropFirst: dirtyRegion !== null,
+        ocrFirst: true,
+        screenshotDigest: `sha256:${currentDigest}`,
+        frameStatus: unchanged ? "unchanged" : (dirtyRegion ? "changed-region" : "new-frame"),
+        dirtyRegion,
+        ocrRegion,
+        localElementCount: localElements,
+        visualUnderstandingEligible,
+        avoidedVision: !visualUnderstandingEligible,
+        reason: repeatedVisualFrame
+          ? "unchanged-frame-visual-already-requested"
+          : explicitVisualQuestion
+            ? "explicit-complex-visual-question"
+            : localElements > 0
+              ? "structured-local-observation-available"
+              : ocrError
+                ? "local-ocr-unavailable"
+                : "no-explicit-visual-ambiguity",
+        ...(ocrError ? { ocrError } : {}),
+      },
+    };
   }
 
   act(args = {}) {
@@ -1143,6 +1240,8 @@ export class ComputerUseProviderRouter {
     this.activeControllerRequestContext = null;
     this.pendingUnverifiedMutation = null;
     this.activeFocusReceipt = null;
+    this.lastScreenshot = null;
+    this.lastVisualUnderstandingDigest = null;
     this.semanticElementAliases.clear();
     this.currentSemanticElements.clear();
     await this.awaitExternal(ticket, () => this.stopControlVisuals(ticket));
@@ -1171,6 +1270,8 @@ export class ComputerUseProviderRouter {
     this.pendingUnverifiedMutation = null;
     this.activeFocusReceipt = null;
     this.lastCapture = null;
+    this.lastScreenshot = null;
+    this.lastVisualUnderstandingDigest = null;
     this.semanticElementAliases.clear();
     this.currentSemanticElements.clear();
     this.pendingRepairApproval = null;
@@ -1253,19 +1354,34 @@ export class ComputerUseProviderRouter {
         applications = discovered.map((application) => {
           const applicationToken = `application-${randomUUID()}`;
           this.applicationCatalog.set(applicationToken, application);
+          const visible = windows.some((window) => (
+            Number.isSafeInteger(application.pid)
+            && Number.isSafeInteger(window.pid)
+            && application.pid === window.pid
+          ));
+          const state = application.active
+            ? "active"
+            : visible
+              ? "visible"
+              : application.running
+                ? "recoverable"
+                : "installed";
           return {
             applicationToken,
             name: application.name,
-            kind: application.kind,
-            running: application.running,
-            active: application.active,
-            pid: application.pid,
-            lastUsed: application.lastUsed,
+            state,
+            ...(application.active ? { active: true } : {}),
+            ...(visible ? { visible: true } : {}),
+            ...(application.running ? { running: true } : {}),
           };
         });
         applicationDiscovery = {
           status: "ready",
           source: "cua-driver",
+          total: applications.length,
+          active: applications.filter((application) => application.state === "active").length,
+          visible: applications.filter((application) => application.state === "visible").length,
+          recoverable: applications.filter((application) => application.state === "recoverable").length,
         };
       } catch (error) {
         this.assertOperationTicket(ticket);
@@ -2709,6 +2825,10 @@ function serializeFocusReceipt(receipt) {
 
 function controllerWindowId(window = {}) {
   return String(window.id ?? window.windowId ?? window.window_id ?? window.title ?? "unknown-window");
+}
+
+function positiveTimeout(value, fallback) {
+  return Number.isFinite(value) && value > 0 ? value : fallback;
 }
 
 function lifecycleClosedError() {
