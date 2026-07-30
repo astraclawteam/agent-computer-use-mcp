@@ -575,6 +575,7 @@ export class ComputerUseProviderRouter {
             ticket,
             () => this.driver.launchApp({
               launchPath: application.launchPath,
+              name: application.name,
               pid: application.pid,
               running: application.running,
             }),

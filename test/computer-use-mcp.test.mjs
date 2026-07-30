@@ -1321,6 +1321,7 @@ test("state observation projects opaque application tokens that acquire can use 
   assert.equal(access.controller.window.windowId, "restored-window");
   assert.deepEqual(calls, [{
     launchPath: "C:\\private\\restorable.exe",
+    name: "Restorable App",
     pid: 101,
     running: true,
   }]);
