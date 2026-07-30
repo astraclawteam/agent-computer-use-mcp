@@ -21,7 +21,7 @@ import { createRepairProgressPlan } from "./repair-progress-plan.mjs";
 import { cleanupRuntimeState } from "./runtime-cleanup.mjs";
 
 function sameRequestContext(left, right) {
-  if (!left || !right) return left === right;
+  if (!left || !right) return !left && !right;
   return left.schemaVersion === 1
     && right.schemaVersion === 1
     && left.ownerId === right.ownerId

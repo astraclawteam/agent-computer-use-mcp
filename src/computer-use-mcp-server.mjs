@@ -315,7 +315,11 @@ export async function observeComputer(router, args, requestContext) {
   const { mode, ...options } = args;
   if (mode === "state") return router.listState();
   if (mode === "semantic" || mode === "screenshot" || mode === "ocr-region") {
-    return router.capture({ ...options, mode, requestContext });
+    return router.capture({
+      ...options,
+      mode,
+      ...(requestContext === undefined ? {} : { requestContext }),
+    });
   }
   if (mode === "capture-window") return router.captureWindow(options);
   if (mode === "diff") return router.observeDiff(options);
