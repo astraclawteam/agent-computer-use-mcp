@@ -2,6 +2,12 @@
 
 All notable changes to `agent-computer-use-mcp` are tracked here.
 
+## 0.0.13
+
+- Keep semantic observations, screenshots, and actions bound to the acquired native window handle.
+- Ignore transient same-process auxiliary-window identity and off-screen bounds returned after activation.
+- Prevent focus and coordinate drift when the captured primary surface differs from an auxiliary provider window.
+
 ## 0.0.12
 
 - Prefer the bounded primary application surface when one process exposes same-title auxiliary windows.
