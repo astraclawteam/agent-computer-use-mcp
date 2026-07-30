@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { test } from "node:test";
@@ -162,4 +162,24 @@ test("OCR sidecar response is merged as pixel-limited OCR observation elements",
   assert.equal(observation.elements[0].editableInteriorKnown, false);
   assert.equal(observation.elements[0].pixelLimitedAction, true);
   assert.equal(observation.elements[0].source, "ocr");
+});
+
+test("empty OCR regions are valid observations instead of provider failures", async () => {
+  const observation = normalizeOcrSidecarResponse({
+    provider: "xiaozhiclaw-ocr-sidecar",
+    modelPack: "pp-ocrv6-small",
+    runtime: "onnxruntime-directml",
+    executionProvider: "DmlExecutionProvider",
+    items: [],
+    crop: { x: 0, y: 300, width: 280, height: 79 },
+    timings: { preprocessMs: 0, inferMs: 120, postprocessMs: 0, totalMs: 120 },
+  });
+  assert.equal(observation.elements.length, 0);
+  assert.equal(observation.source, "ocr");
+
+  const nativeSidecar = await readFile(
+    resolve("ocr-sidecar/xiaozhiclaw_ocr_sidecar_native.mjs"),
+    "utf8",
+  );
+  assert.doesNotMatch(nativeSidecar, /throw new Error\(`\$\{health\.executionProvider\} returned no OCR results`\)/u);
 });
