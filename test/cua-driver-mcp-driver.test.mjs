@@ -935,6 +935,49 @@ test("CuaDriverMcpDriver discovers the foreground window from the native foregro
   );
 });
 
+test("CuaDriverMcpDriver selects the controllable primary window over a same-title auxiliary surface", async () => {
+  const driver = new CuaDriverMcpDriver({
+    session: "primary-window-selection",
+    client: {
+      async start() {},
+      async callTool(name) {
+        if (name === "list_windows") {
+          return {
+            windows: [
+              {
+                window_id: 101,
+                title: "Target App",
+                app_name: "target.exe",
+                pid: 900,
+                z_index: 20,
+                is_on_screen: true,
+                bounds: { x: 0, y: 0, width: 146, height: 21 },
+              },
+              {
+                window_id: 102,
+                title: "Target App",
+                app_name: "target.exe",
+                pid: 900,
+                z_index: 5,
+                is_on_screen: false,
+                bounds: { x: 100, y: 100, width: 952, height: 702 },
+              },
+            ],
+          };
+        }
+        return { status: "ok" };
+      },
+    },
+  });
+
+  assert.deepEqual(await driver.findWindow({ titlePart: "Target App" }), {
+    windowId: 102,
+    title: "Target App",
+    pid: 900,
+    bounds: { x: 100, y: 100, width: 952, height: 702 },
+  });
+});
+
 test("CuaDriverMcpDriver leaves the cursor disabled when styling fails and still closes its session", async () => {
   const calls = [];
   const styleError = new Error("cursor style failed");
