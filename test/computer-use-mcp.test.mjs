@@ -839,6 +839,43 @@ test("provider router exposes foreground discovery without acquiring or cancelli
   ]);
 });
 
+test("provider router renews an identical controller request instead of failing already_active", async () => {
+  const { ComputerUseProviderRouter } = await import("../src/computer-use-provider-router.mjs");
+  let now = 1_000;
+  const overlayCalls = [];
+  const router = new ComputerUseProviderRouter({
+    clock: { now: () => now, iso: (value = now) => new Date(value).toISOString() },
+    driver: {
+      async findWindow() {
+        return { windowId: "win-1", title: "Computer Use Lab", bounds: { x: 0, y: 0, width: 300, height: 200 } };
+      },
+    },
+    overlayRuntime: {
+      async start() { overlayCalls.push("start"); return { visible: true }; },
+      async stop() { overlayCalls.push("stop"); },
+    },
+  });
+
+  const requestContext = { schemaVersion: 1, ownerId: "owner-1", agentId: "agent-1", projectId: "project-1", sessionId: "session-1" };
+  const first = await router.requestAccess({ target: "foreground", tier: "observe", agentId: "spoofed-agent", leaseTtlMs: 1_000, requestContext });
+  now = 1_500;
+  const renewed = await router.requestAccess({ target: "foreground", tier: "observe", agentId: "agent-1", leaseTtlMs: 2_000, requestContext });
+
+  assert.equal(renewed.status, "reused");
+  assert.equal(renewed.reused, true);
+  assert.equal(renewed.controller.controllerId, first.controller.controllerId);
+  assert.equal(renewed.controller.agentId, "agent-1");
+  assert.equal("requestContext" in renewed.controller, false);
+  assert.equal(renewed.controller.expiresAtMs, 3_500);
+  assert.equal(renewed.startsDesktopControl, false);
+  assert.deepEqual(overlayCalls, ["start"]);
+  await assert.rejects(
+    () => router.capture({ mode: "semantic", requestContext: { ...requestContext, sessionId: "session-2" } }),
+    { code: "controller.lease_mismatch" },
+  );
+  await router.close();
+});
+
 test("state observation projects opaque application tokens that acquire can use to restore a window", async () => {
   const { ComputerUseProviderRouter } = await import("../src/computer-use-provider-router.mjs");
   const calls = [];
