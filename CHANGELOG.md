@@ -2,6 +2,12 @@
 
 All notable changes to `agent-computer-use-mcp` are tracked here.
 
+## 0.0.11
+
+- Keep bounded OCR baseline and changed-region routing metadata valid under the strict MCP output schema.
+- Let one Host session safely reuse or retarget its active controller without requiring the Agent to repeat an identity field.
+- Preserve fail-closed controller isolation across owners, agents, projects, and sessions.
+
 ## 0.0.10
 
 - Retry a missing full-window OCR baseline once when the first screenshot arrived before the local sidecar was ready.
