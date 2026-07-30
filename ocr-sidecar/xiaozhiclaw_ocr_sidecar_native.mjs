@@ -249,9 +249,6 @@ function createDaemon() {
         noCache: Boolean(request.noCache),
       });
       const totalMs = performance.now() - started;
-      if (ocr.results.length === 0) {
-        throw new Error(`${health.executionProvider} returned no OCR results`);
-      }
 
       const response = {
         status: "ok",

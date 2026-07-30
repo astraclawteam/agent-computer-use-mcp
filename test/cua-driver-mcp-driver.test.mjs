@@ -647,6 +647,7 @@ test("CuaDriverMcpDriver lists launchable apps and restores one through its priv
   let windowPolls = 0;
   const driver = new CuaDriverMcpDriver({
     session: "application-restore-session",
+    processApplicationProbe: async () => [],
     client: {
       async start() {},
       async callTool(name, args) {
@@ -697,6 +698,118 @@ test("CuaDriverMcpDriver lists launchable apps and restores one through its priv
       start_minimized: false,
     },
   });
+});
+
+test("CuaDriverMcpDriver projects a restorable token source for tray-only processes", async () => {
+  const driver = new CuaDriverMcpDriver({
+    session: "tray-process-discovery-session",
+    processApplicationProbe: async () => [{
+      name: "Tray App",
+      kind: "desktop",
+      running: true,
+      active: false,
+      pid: 505,
+      lastUsed: null,
+      launchPath: "C:\\Program Files\\Tray App\\tray-app.exe",
+    }],
+    client: {
+      async start() {},
+      async callTool(name) {
+        if (name === "list_apps") {
+          return {
+            apps: [],
+            processes: [],
+          };
+        }
+        return { status: "ok" };
+      },
+    },
+  });
+
+  assert.deepEqual(await driver.listApps(), [{
+    name: "Tray App",
+    kind: "desktop",
+    running: true,
+    active: false,
+    pid: 505,
+    lastUsed: null,
+    launchPath: "C:\\Program Files\\Tray App\\tray-app.exe",
+  }]);
+});
+
+test("CuaDriverMcpDriver merges native process evidence into an installed app", async () => {
+  const driver = new CuaDriverMcpDriver({
+    session: "running-installed-app-session",
+    processApplicationProbe: async () => [{
+      name: "Installed App",
+      kind: "desktop",
+      running: true,
+      active: false,
+      pid: 606,
+      lastUsed: null,
+      launchPath: "C:\\Program Files\\Installed\\installed.exe",
+    }],
+    client: {
+      async start() {},
+      async callTool(name) {
+        if (name === "list_apps") {
+          return {
+            apps: [{
+              name: "Installed App",
+              launch_path: "C:\\Program Files\\Installed\\installed.exe",
+              running: false,
+              pid: 0,
+            }],
+            processes: [],
+          };
+        }
+        return { status: "ok" };
+      },
+    },
+  });
+
+  const applications = await driver.listApps();
+  assert.equal(applications.length, 1);
+  assert.equal(applications[0].running, true);
+  assert.equal(applications[0].pid, 606);
+});
+
+test("CuaDriverMcpDriver keeps distinct unquoted executable paths containing spaces", async () => {
+  const driver = new CuaDriverMcpDriver({
+    session: "spaced-process-path-session",
+    processApplicationProbe: async () => [
+      {
+        name: "First App",
+        kind: "desktop",
+        running: true,
+        active: false,
+        pid: 701,
+        lastUsed: null,
+        launchPath: "C:\\Program Files\\First App\\first.exe",
+      },
+      {
+        name: "Second App",
+        kind: "desktop",
+        running: true,
+        active: false,
+        pid: 702,
+        lastUsed: null,
+        launchPath: "C:\\Program Files\\Second App\\second.exe",
+      },
+    ],
+    client: {
+      async start() {},
+      async callTool(name) {
+        if (name === "list_apps") return { apps: [], processes: [] };
+        return { status: "ok" };
+      },
+    },
+  });
+
+  assert.deepEqual((await driver.listApps()).map(({ name }) => name), [
+    "First App",
+    "Second App",
+  ]);
 });
 
 test("CuaDriverMcpDriver discovers the foreground window from the native foreground handle", async () => {

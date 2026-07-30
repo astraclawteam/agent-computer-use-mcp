@@ -143,6 +143,7 @@ export async function callTool(router, name, args, requestContext) {
     };
   }
   structuredContent = withResultContract(compactComputerUseResult(projected.structuredContent));
+  const visualUnderstandingEligible = structuredContent?.perceptionRouting?.visualUnderstandingEligible !== false;
   return {
     content: [
       {
@@ -158,7 +159,8 @@ export async function callTool(router, name, args, requestContext) {
           sameTransaction: true,
           requestField: "visualQuestion",
         },
-        ...(typeof args?.visualQuestion === "string"
+        ...(visualUnderstandingEligible
+          && typeof args?.visualQuestion === "string"
           && args.visualQuestion.trim() ? {
         "xiaozhiclaw/visual-understanding": {
           mode: "auto",
@@ -267,6 +269,11 @@ export function compactComputerUseResult(value) {
 
   const compacted = {};
   for (const [key, entry] of Object.entries(value)) {
+    if (key === "applications" && Array.isArray(entry)) {
+      compacted.applications = entry.map(compactApplication);
+      compacted.applicationCount = entry.length;
+      continue;
+    }
     if (key === "elements" && Array.isArray(entry)) {
       compacted.elements = entry.map(compactPerceptionElement);
       compacted.elementCount = entry.length;
@@ -280,6 +287,17 @@ export function compactComputerUseResult(value) {
     if (compacted.text === repeatedText) delete compacted.text;
   }
   return compacted;
+}
+
+function compactApplication(application) {
+  if (!application || typeof application !== "object") return application;
+  return {
+    applicationToken: application.applicationToken,
+    name: application.name,
+    state: application.state ?? (
+      application.active ? "active" : application.running ? "recoverable" : "installed"
+    ),
+  };
 }
 
 function compactPerceptionElement(element) {

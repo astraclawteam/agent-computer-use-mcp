@@ -361,6 +361,11 @@ function createHubManifest() {
     launch: { kind: "artifact", args: [], env: {}, inputs: [] },
     declaredPermissions: ["desktop.control", "filesystem.write", "screen.capture"],
     requires: [],
+    branding: {
+      iconUrl: "https://xiaozhi.qlogicagent.com/assets/skills/mcp-computer-use.svg",
+      color: "#4F46E5",
+      vendor: "AstraClaw",
+    },
   };
 }
 
