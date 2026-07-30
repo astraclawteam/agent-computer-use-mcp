@@ -824,7 +824,7 @@ const observeTool = {
       properties: {
         selectedMode: {
           type: "string",
-          enum: ["semantic", "window-ocr", "changed-region-ocr", "unchanged-frame"],
+          enum: ["semantic", "window-ocr", "window-ocr-baseline-retry", "changed-region-ocr", "unchanged-frame"],
         },
         avoidedVision: { type: "boolean" },
         sufficient: { type: "boolean" },
@@ -839,6 +839,9 @@ const observeTool = {
         ocrRegion: { anyOf: [ANY_OBJECT, { type: "null" }] },
         localElementCount: { type: "number", minimum: 0 },
         visualUnderstandingEligible: { type: "boolean" },
+        baselineOcrRequired: { type: "boolean" },
+        baselineOcrRetry: { type: "boolean" },
+        baselineOcrAttempts: { type: "number", minimum: 0 },
         reason: { type: "string" },
         ocrError: ANY_OBJECT,
       },
