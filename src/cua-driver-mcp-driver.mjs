@@ -261,7 +261,11 @@ export class CuaDriverMcpDriver {
         session: this.session,
       });
       this.assertWorkTicket(ticket);
-      return normalizeCuaObservation(result.structuredContent ?? result, {
+      const rawObservation = result.structuredContent ?? result;
+      return normalizeCuaObservation({
+        ...rawObservation,
+        window: reconcileReportedWindow(window, rawObservation.window),
+      }, {
         mode: mode === "semantic" ? "som" : mode,
         maxElements: 500,
         maxDepth: 20,
@@ -283,7 +287,8 @@ export class CuaDriverMcpDriver {
       });
       this.assertWorkTicket(ticket);
       const resultWindow = result.window ?? {};
-      const reportedBounds = normalizeBounds(resultWindow.bounds) ?? window.bounds;
+      const reconciledWindow = reconcileReportedWindow(window, resultWindow);
+      const reportedBounds = reconciledWindow.bounds;
       const screenshot = await readPngArtifact(outputPath);
       this.assertWorkTicket(ticket);
       const bounds = reportedBounds && screenshot
@@ -297,10 +302,10 @@ export class CuaDriverMcpDriver {
         status: "ok",
         provider: "cua-driver",
         source: "cua-driver-window-state",
-        title: resultWindow.title ?? window.title,
+        title: reconciledWindow.title,
         path: outputPath,
         method: "cua-driver-get_window_state",
-        hwnd: resultWindow.id ?? resultWindow.window_id ?? window.windowId,
+        hwnd: reconciledWindow.id,
         x: bounds?.x,
         y: bounds?.y,
         width: bounds?.width,
@@ -311,9 +316,9 @@ export class CuaDriverMcpDriver {
           nativeWindowBounds: reportedBounds,
         }),
         window: {
-          id: resultWindow.id ?? resultWindow.window_id ?? window.windowId,
-          title: resultWindow.title ?? window.title,
-          pid: resultWindow.pid ?? window.pid,
+          id: reconciledWindow.id,
+          title: reconciledWindow.title,
+          pid: reconciledWindow.pid,
           bounds,
         },
       };
@@ -817,6 +822,26 @@ function normalizeBounds(bounds) {
     y: bounds.y,
     width: bounds.width ?? bounds.w,
     height: bounds.height ?? bounds.h,
+  };
+}
+
+function reconcileReportedWindow(requestedWindow, reportedWindow) {
+  const requestedId = requestedWindow?.windowId ?? requestedWindow?.id;
+  const reportedId = reportedWindow?.window_id ?? reportedWindow?.windowId ?? reportedWindow?.id;
+  const identityMatches = reportedId !== undefined
+    && reportedId !== null
+    && sameNativeWindowId(reportedId, requestedId);
+  return {
+    id: requestedId,
+    title: identityMatches
+      ? (reportedWindow.title ?? requestedWindow?.title)
+      : requestedWindow?.title,
+    pid: identityMatches
+      ? (reportedWindow.pid ?? requestedWindow?.pid)
+      : requestedWindow?.pid,
+    bounds: identityMatches
+      ? (normalizeBounds(reportedWindow.bounds) ?? requestedWindow?.bounds)
+      : requestedWindow?.bounds,
   };
 }
 

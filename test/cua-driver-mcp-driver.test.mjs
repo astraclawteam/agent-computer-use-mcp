@@ -592,6 +592,67 @@ test("CuaDriverMcpDriver reports the PNG pixel bounds rather than the outer wind
   assert.equal(Object.keys(capture).includes("artifactBytes"), false);
 });
 
+test("CuaDriverMcpDriver keeps the acquired identity when the provider reports an auxiliary window", async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), "cua-driver-window-identity-"));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const outputPath = join(directory, "window.png");
+  const requestedWindow = {
+    windowId: 42,
+    title: "Primary window",
+    pid: 1234,
+    bounds: { x: 463, y: 123, width: 954, height: 704 },
+  };
+  const driver = new CuaDriverMcpDriver({
+    session: "window-identity-session",
+    client: {
+      async start() {},
+      async callTool(name, args) {
+        if (name !== "get_window_state") return { status: "ok" };
+        if (args.include_screenshot) {
+          const header = Buffer.alloc(24);
+          Buffer.from("89504e470d0a1a0a", "hex").copy(header, 0);
+          header.write("IHDR", 12, "ascii");
+          header.writeUInt32BE(952, 16);
+          header.writeUInt32BE(702, 20);
+          await writeFile(args.screenshot_out_file, header);
+        }
+        return {
+          window: {
+            id: 99,
+            title: "Auxiliary window",
+            pid: 1234,
+            bounds: { x: -31993, y: -31993, width: 146, height: 21 },
+          },
+          elements: [],
+        };
+      },
+    },
+  });
+
+  const semantic = await driver.capture({ window: requestedWindow, mode: "semantic" });
+  assert.deepEqual(semantic.window, {
+    id: 42,
+    title: "Primary window",
+    pid: 1234,
+    bounds: { x: 463, y: 123, width: 954, height: 704 },
+  });
+
+  const screenshot = await driver.captureScreenshot({ window: requestedWindow, outputPath });
+  assert.equal(screenshot.hwnd, 42);
+  assert.deepEqual(screenshot.nativeWindowBounds, {
+    x: 463,
+    y: 123,
+    width: 954,
+    height: 704,
+  });
+  assert.deepEqual(screenshot.window, {
+    id: 42,
+    title: "Primary window",
+    pid: 1234,
+    bounds: { x: 463, y: 123, width: 952, height: 702 },
+  });
+});
+
 test("CuaDriverMcpDriver waits for a bounded delayed screenshot handoff", async (t) => {
   const directory = await mkdtemp(join(tmpdir(), "cua-driver-delayed-png-"));
   t.after(() => rm(directory, { recursive: true, force: true }));
