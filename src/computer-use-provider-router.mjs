@@ -521,7 +521,7 @@ export class ComputerUseProviderRouter {
       });
     }
     const tier = args.tier ?? "full";
-    const agentId = args.agentId ?? "unknown";
+    const agentId = args.requestContext?.agentId ?? args.agentId ?? "unknown";
     const selectors = [
       args.target === "foreground",
       args.windowId !== undefined,
@@ -610,7 +610,7 @@ export class ComputerUseProviderRouter {
       this.assertControlGrant(grant);
       this.enforcePolicyDecision(this.policy.evaluateAccessRequest({ tier, window }));
       if (this.activeController) {
-        const requestedAgentId = args.requestContext?.agentId ?? args.agentId ?? "unknown";
+        const requestedAgentId = agentId;
         if (
           this.activeController.agentId !== requestedAgentId
           || !sameRequestContext(this.activeControllerRequestContext, args.requestContext)
@@ -698,7 +698,7 @@ export class ComputerUseProviderRouter {
       const leaseTtlMs = Math.max(1, args.leaseTtlMs ?? 300000);
       return await this.awaitExternal(ticket, () => this.grantAccessController({
         tier,
-        agentId: args.requestContext?.agentId ?? agentId,
+        agentId,
         requestContext: args.requestContext,
         window,
         leaseTtlMs,

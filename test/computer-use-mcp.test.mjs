@@ -1186,7 +1186,7 @@ test("provider router renews an identical controller request instead of failing 
   const requestContext = { schemaVersion: 1, ownerId: "owner-1", agentId: "agent-1", projectId: "project-1", sessionId: "session-1" };
   const first = await router.requestAccess({ target: "foreground", tier: "observe", agentId: "spoofed-agent", leaseTtlMs: 1_000, requestContext });
   now = 1_500;
-  const renewed = await router.requestAccess({ target: "foreground", tier: "observe", agentId: "agent-1", leaseTtlMs: 2_000, requestContext });
+  const renewed = await router.requestAccess({ target: "foreground", tier: "observe", leaseTtlMs: 2_000, requestContext });
 
   assert.equal(renewed.status, "reused");
   assert.equal(renewed.reused, true);
