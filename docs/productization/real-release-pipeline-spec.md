@@ -1,60 +1,62 @@
-# Real Release Pipeline Specification
+# GitHub Release Pipeline Specification
 
-## Current Boundary
+## Current boundary
 
-Public npm is the primary package channel. The tag workflow is artifact-only:
-it has no npm, GitHub Release, or Gitee write credentials and performs no
-publication or repository push. GitHub/Gitee release distribution is outside
-the current workflow.
+The public release channel is an immutable Windows x64 executable artifact
+attached to a GitHub Release. The workflow has GitHub `contents: write`
+permission only. It has no npm credential, Gitee credential, signing secret, or
+permission to update source branches.
 
-## Trigger
-
-`.github/workflows/release.yml` runs only for `v*` tags. The tag version must
-equal `package.json`, the commit must be reachable from `main`, and
-`CHANGELOG.md` must contain the version heading.
-
-## CI Output
-
-A Windows runner builds the protected core and immutable Windows x64 staging
-packages, runs the existing release smoke and inventory checks, and uploads
-only these two tarballs:
+The released archive is the same SEA artifact shape consumed by the XiaozhiClaw
+Hub publisher:
 
 ```text
-agent-computer-use-mcp-X.Y.Z.tgz
-agent-computer-use-win32-x64-X.Y.Z.tgz
+agent-computer-use-mcp-X.Y.Z-win32-x64.tar.gz
+hub-publisher-input.json
+SHA256SUMS.txt
 ```
 
-The workflow may assemble additional local verification material while running
-the existing production build, but it does not upload or publish that material.
+## Trigger and identity
 
-## Manual npm Publication
+`.github/workflows/release.yml` runs only for a pushed `v*` tag. Before any
+release is created, the workflow requires:
 
-Publication is one package at a time and always starts with the read-only form:
+- `vX.Y.Z` equals `package.json` version `X.Y.Z`;
+- the tagged commit is an ancestor of `origin/main`;
+- `CHANGELOG.md` contains an exact `## X.Y.Z` heading;
+- the full test suite and MCP SDK phases 1.6, 1.7, and 1.8 pass.
 
-```powershell
-npm run release:npm:package -- --package <tarball>
-npm run release:npm:package -- --package <tarball> --publish
-```
+The build records the exact tag commit in the artifact manifest and SBOM.
 
-The maintainer must use the clean source checkout for the exact package
-version. The command requires the canonical tarball filename, rebuilds the
-corresponding protected package through the existing staging/inventory path,
-and requires an exact SHA-512 match before registry lookup or publication.
-Publish the Windows platform package before the core package.
+## Windows artifact
 
-The command does not bump, commit, tag, push, publish a second package, create a
-GitHub Release, or mutate Gitee. A renamed, stale, or content-drifted tarball
-fails closed before `npm publish` is reachable.
+A Windows runner downloads only hash-locked upstream assets, builds the native
+overlay, prunes every non-Windows-x64 ONNX target, bundles the protected MCP and
+OCR runtimes, and creates a Node SEA executable.
 
-## Credentials and Recovery
+Before archiving, CI verifies the complete payload inventory, entrypoint,
+checksums, target, version, and source identity. The resulting archive remains
+below the enforced size limit and starts without npm, network access,
+elevation, or self-update.
 
-Tag CI has read-only repository permissions and no registry credential. npm
-authentication belongs only to the maintainer environment that runs the
-explicit `--publish` command.
+## Publication
 
-- Build, smoke, inventory, or artifact upload failure publishes nothing.
-- A package preflight failure publishes nothing; correct the source or selected
-  tarball and rerun the read-only command.
-- If the platform package succeeds and the core package fails, inspect the
-  registry and retry only the exact verified core tarball.
-- GitHub/Gitee release publication and repair are not claims of this workflow.
+After verification, the workflow writes a SHA-256 checksum file and runs
+`gh release create` with `--verify-tag` and `--latest`. Publication is atomic at
+the release boundary: a failed test, build, inventory check, or checksum step
+creates no GitHub Release.
+
+The workflow never:
+
+- publishes npm packages;
+- writes to Gitee;
+- changes a branch, tag, or version;
+- rebuilds an existing release tag;
+- uploads local operator-built bytes.
+
+## Recovery
+
+Fix the source on a new commit and publish a new version. Never delete and reuse
+a public tag to replace its bytes. If GitHub Release creation fails after the
+artifact build, rerun the unchanged tag workflow only after confirming that no
+release exists for that tag.

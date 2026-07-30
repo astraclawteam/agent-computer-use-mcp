@@ -1,108 +1,146 @@
-# Contributing
+# Contributing to Computer Use MCP
 
-Thanks for contributing to `agent-computer-use-mcp`. This project is designed for a large mixed human/AI maintenance team, so process discipline matters as much as code.
+Thank you for helping make desktop agents faster, safer, and less surprising.
+The best contributions are grounded in a real interface, a reproducible failure,
+and evidence that the final state is correct.
 
-## Required Workflow
+## Ways to contribute
 
-1. Create a branch from `main`.
-2. Make focused changes with tests.
+- Report a Windows application or control that cannot be observed reliably.
+- Add a safe real-application smoke covering focus, scaling, tray restore,
+  multilingual text, custom-drawn UI, or cleanup.
+- Improve MCP interoperability, Host projection, diagnostics, or release safety.
+- Reduce latency without weakening observation provenance or verification.
+- Clarify setup, architecture, examples, or failure messages.
+
+For security-sensitive behavior, use
+[private vulnerability reporting](https://github.com/astraclawteam/agent-computer-use-mcp/security/advisories/new)
+instead of a public issue.
+
+## Before opening code
+
+1. Search existing issues and pull requests.
+2. For a bug, capture the smallest safe reproduction: application version,
+   observation mode, expected state, actual structured error, and whether the
+   final state changed.
+3. Avoid screenshots or logs containing private user data. A synthetic fixture
+   is strongly preferred.
+4. For a larger contract or architecture change, open an issue before investing
+   in the implementation.
+
+## Design principles
+
+- **Natural-language capability routing.** Tool selection is driven by semantic
+  descriptions and model reasoning, never application-name keywords or regexes.
+- **Compact public surface.** Improve the four Agent tools before proposing a
+  new tool. Host-only diagnostics belong in the connector settings surface.
+- **Evidence before mutation.** Semantic elements, focus receipts, or a fresh
+  observation must ground actions.
+- **No guessed coordinates.** Pixel actions stay bound to observation identity,
+  bounds, scale, confidence, and expiry.
+- **Fail closed.** Uncertain targeting, policy violations, corrupt artifacts,
+  and session mismatches do not degrade into an unsafe fallback.
+- **Cleanup is part of correctness.** Success, failure, cancellation, timeout,
+  disconnect, and shutdown must all release visible and native resources.
+- **No private payloads in evidence.** Screenshots, OCR text, paths, secrets,
+  and user documents do not enter committed or uploaded test artifacts.
+
+## Development workflow
+
+1. Branch from an up-to-date `main`.
+2. Keep the change focused and add tests at the owning contract boundary.
 3. Run the relevant verification commands.
-4. Open a pull request.
-5. Wait for CI and reviewer approval.
-6. Merge only after required checks and reviews pass.
+4. Open a pull request using the repository template.
+5. Resolve review feedback and wait for required CI.
+6. Merge only after checks and approval pass.
 
-Direct pushes to `main` are prohibited for non-admin users. Repository administrators may direct-push for bootstrap, governance repair, or emergency recovery.
-
-## Branch Names
-
-Use:
+Recommended branch names:
 
 - `feat/<short-topic>`
 - `fix/<short-topic>`
 - `docs/<short-topic>`
 - `test/<short-topic>`
 - `chore/<short-topic>`
+- `release/<version>`
 
-## Commit Messages
+Use concise conventional commits such as `fix: preserve focus metadata` or
+`docs: clarify Host media bridge`.
 
-Use concise conventional-style commits:
+## Verification
 
-- `feat: add OCR region cache`
-- `fix: preserve overlay exclusion in capture`
-- `docs: add MCP client setup`
-- `test: cover driver health fallback`
+Every code change runs:
 
-## Test Matrix
-
-Always run:
-
-```sh
+```powershell
+npm ci
 npm test
 ```
 
-Run these for MCP protocol, install config, or SDK changes:
+MCP protocol, Host projection, installation, or SDK changes also run:
 
-```sh
+```powershell
 npm run phase:1.6
 npm run phase:1.7
 npm run phase:1.8
 ```
 
-Run this for real desktop action, overlay, cursor, or `cua-driver mcp` changes:
+Desktop action, cursor, overlay, focus, input, or driver changes also run:
 
-```sh
+```powershell
 npm run phase:1.4
 ```
 
-## Dependency Policy
+Packaging or release changes also run:
+
+```powershell
+npm run artifact:windows:build -- --allow-network
+npm run artifact:windows:smoke
+```
+
+If a required real application or driver is unavailable, say exactly what was
+not verified. Do not replace real evidence with a mock and report it as complete.
+
+## Public contract changes
+
+The public contract includes tool names, descriptions, arguments, structured
+results, lifecycle metadata, environment variables, installation templates,
+and released artifact shape.
+
+A contract-changing pull request must:
+
+- identify producers and consumers;
+- update strict schemas and the public contract review;
+- include backward-compatibility or migration notes;
+- prove the standard MCP client and server gates;
+- keep Agent and Host-only tool visibility explicit.
+
+## Dependencies and generated files
 
 - Prefer platform APIs and existing dependencies.
-- New runtime dependencies require a PR explanation covering size, license, offline behavior, and platform support.
-- Do not commit model packs, binaries, caches, or generated build output.
+- Explain runtime size, license, offline behavior, and platform support for every
+  new dependency.
+- Do not commit model packs, native binaries, caches, credentials, screenshots,
+  user data, or generated release directories.
+- Project-bound design assets are allowed when intentionally referenced by docs
+  and reviewed for licensing and privacy.
 
-## Public Contract Policy
+## Release contributions
 
-The public API is the MCP tool surface and structured result shape. Any change to tool names, arguments, result fields, environment variables, or installation config must be called out as a contract change in the PR.
+The source checkout is not an npm publication root. A release PR updates the
+version, changelog, documentation, and release contract. After it lands, an
+annotated `vX.Y.Z` tag triggers the Windows artifact workflow.
 
-Compatibility aliases such as `XIAOZHICLAW_*` may remain, but new documentation and examples must use `AGENT_COMPUTER_USE_*`.
+The workflow verifies the tag and source, builds the immutable SEA artifact,
+generates checksums, and creates a GitHub Release. It has no npm or Gitee
+credentials. Never bypass a failed release run by uploading locally rebuilt
+bytes to the same tag.
 
-## npm Release Packaging
+## Review checklist
 
-The repository root is a non-publishable maintainer workspace. Never run a real `npm publish` from the source checkout. Build and verify the release-only staging package with:
+Reviewers will ask:
 
-```sh
-npm run release:npm:build
-npm run release:npm:smoke
-npm run release:npm:pack
-npm run phase:0.14
-```
-
-Tag CI uploads the verified npm tarballs but does not publish them. Maintainers
-must preview and then explicitly publish one downloaded tarball at a time:
-
-```sh
-npm run release:npm:package -- --package <tarball>
-npm run release:npm:package -- --package <tarball> --publish
-```
-
-Publish the platform tarball before the core tarball. This command never bumps,
-commits, tags, or pushes source changes.
-
-The generated tarball must contain only protected `dist` runtime files and approved metadata. Source trees, tests, C#/Python source, and Source Maps block release.
-
-## Windows Candidate Assembly
-
-Changes to release assets, installer behavior, protected runtime, OCR model packaging, or offline delivery must run:
-
-```sh
-npm run release:windows:assets
-npm run release:windows:assemble
-npm run phase:0.15
-```
-
-Generated candidates stay ignored under `artifacts/windows-release/<version>/`.
-They are `blocked_unsigned` CI evidence and must never be uploaded or published.
-The current tag workflow uploads only the two verified npm tarballs as a CI
-artifact; it does not publish Windows candidates or create a GitHub Release. Any
-future signing or GitHub Release workflow requires a separately approved and
-documented release policy.
+- Is the behavior grounded in a real user scenario?
+- Does the change preserve the four-tool Agent surface?
+- Are focus, scale, truncation, execution path, and fallback evidence honest?
+- Are policy and cleanup paths tested?
+- Are released bytes reproducible from the tagged source?
+- Does the documentation describe current behavior rather than aspiration?

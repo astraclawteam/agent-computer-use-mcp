@@ -1,127 +1,183 @@
-# agent-computer-use-mcp
+<div align="center">
 
-`agent-computer-use-mcp` is a local standard MCP server for Gateway-managed computer use. It combines semantic desktop control through `cua-driver`, local PP-OCRv6 perception, and a user-only native overlay without restricting computer-use capabilities owned by third-party agents.
+<img src="docs/assets/computer-use-hero.png" alt="Computer Use observes a protected desktop surface and turns grounded observations into safe actions" width="100%" />
+
+# Computer Use MCP
+
+### See the desktop. Understand the interface. Act with evidence.
+
+[![Release](https://img.shields.io/github/v/release/astraclawteam/agent-computer-use-mcp?display_name=tag&sort=semver)](https://github.com/astraclawteam/agent-computer-use-mcp/releases/latest)
+[![CI](https://github.com/astraclawteam/agent-computer-use-mcp/actions/workflows/ci.yml/badge.svg)](https://github.com/astraclawteam/agent-computer-use-mcp/actions/workflows/ci.yml)
+[![MCP](https://img.shields.io/badge/MCP-standard-5b5bd6)](https://modelcontextprotocol.io/)
+[![Windows](https://img.shields.io/badge/Windows-x64-1674ea)](https://github.com/astraclawteam/agent-computer-use-mcp/releases/latest)
+[![License](https://img.shields.io/github/license/astraclawteam/agent-computer-use-mcp)](LICENSE)
+
+`agent-computer-use-mcp` gives an MCP Host a compact, observable way to operate
+local Windows applications. It combines semantic accessibility, secure
+screenshot delivery, local PP-OCRv6, reliable Unicode input, and explicit
+action verification behind a session-bound control lease.
+
+[Download the latest release](https://github.com/astraclawteam/agent-computer-use-mcp/releases/latest)
+· [Read the changelog](CHANGELOG.md)
+· [Contribute](CONTRIBUTING.md)
+
+</div>
+
+> **Preview:** `0.x` targets Windows x64 and is evolving quickly. Actions remain
+> Host-approved, application-visible, and fail closed when evidence is
+> insufficient.
+
+## From intent to verified action
+
+```text
+Natural-language task
+        ↓
+Host selects Computer Use from its semantic capability description
+        ↓
+Acquire a session-bound desktop control lease
+        ↓
+Observe: accessibility first → OCR → secure image understanding when needed
+        ↓
+Act through a semantic element, focus receipt, or observation-bound coordinate
+        ↓
+Verify the outcome and release control on success, failure, or cancellation
+```
+
+The Agent sees four focused tools:
+
+| Tool | Purpose |
+| --- | --- |
+| `computer.acquire` | Select a foreground, visible, or restorable application and obtain a bounded lease. |
+| `computer.observe` | Read semantic state, OCR, screenshots, focused controls, truncation, and coordinate metadata. |
+| `computer.act` | Activate, click, enter Unicode text, set values, or press keys with execution-path evidence. |
+| `computer.release` | End control and clean up the cursor, overlay, focus receipts, and session state. |
+
+Four additional management tools—health, doctor, installation, and repair—stay
+with the Host and are not projected into the Agent's normal tool inventory.
+
+## Why this implementation
+
+- **Semantic first, pixels when necessary.** Accessible controls are faster and
+  more reliable than guessed coordinates. OCR handles low-latency text; image
+  understanding is reserved for layouts, icons, and complex scenes.
+- **Coordinates carry provenance.** Screenshot dimensions, native-window scale,
+  truncation, focus, observation identity, and expiry travel with the result.
+- **Actions explain themselves.** Every successful mutation reports the target
+  path, provider path, delivery mode, and any fallback reason.
+- **Chinese input is a first-class path.** Coordinate-grounded Unicode entry
+  uses verified native delivery, while semantic fields remain on the driver
+  path.
+- **Screenshots are assets, not file paths.** The Host receives controlled MCP
+  image content; the Agent never needs access to a temporary local file.
+- **Control has a lifecycle.** Leases are bound to the requesting Host session
+  and are revoked on completion, cancellation, timeout, disconnect, or process
+  shutdown.
+- **No hidden self-update.** Startup is offline. Installation, upgrade,
+  downgrade, and rollback are explicit Host or operator actions.
 
 ## Install
 
-Windows x64 is the first published target. Users install one package name:
+### XiaozhiClaw
 
-```powershell
-npm install agent-computer-use-mcp@X.Y.Z
-npx -y agent-computer-use-mcp@X.Y.Z
+Open **Plugins → Connectors**, install **Computer Use**, review the requested
+desktop permissions, and enable it. Health, diagnostics, installation details,
+and repair planning are available from the connector's settings panel.
+
+### Any standard MCP Host
+
+Download `agent-computer-use-mcp-<version>-win32-x64.tar.gz` from the
+[latest GitHub Release](https://github.com/astraclawteam/agent-computer-use-mcp/releases/latest),
+verify it against `SHA256SUMS.txt`, and extract it. The executable is:
+
+```text
+artifact/bin/agent-computer-use-mcp.exe
 ```
 
-npm automatically selects the exact matching `@xiaozhiclaw/agent-computer-use-win32-x64@X.Y.Z` optional dependency. The protected core package contains the MCP runtime; the platform package contains cua-driver, the native overlay, ONNX Runtime, and PP-OCRv6 small models. Missing, linked, mismatched, incomplete, or corrupt platform packages fail before MCP startup.
-
-Example host configuration:
+Example MCP configuration:
 
 ```json
 {
   "mcpServers": {
     "computer-use": {
-      "command": "npx",
-      "args": ["-y", "agent-computer-use-mcp@X.Y.Z"]
+      "command": "C:\\Tools\\agent-computer-use-mcp\\artifact\\bin\\agent-computer-use-mcp.exe",
+      "args": []
     }
   }
 }
 ```
 
-Upgrade and rollback are normal npm version operations. The MCP server never downloads native assets, runs npm, or updates itself. `computer.repair` may report this exact command but remains read-only:
+The release contains the exact Windows x64 driver, native overlay, ONNX runtime,
+PP-OCRv6 model pack, inventory, checksums, licenses, and SBOM used by CI. It
+requires no npm install and performs no network access at startup.
+
+## Safety model
+
+Computer Use is intentionally visible and bounded:
+
+- the Host owns approval, process lifecycle, installation, and media assets;
+- the Agent cannot acquire another Host session's lease;
+- password, payment, credential, private, and denied-window policies fail closed;
+- the branded frame and cursor are excluded from screenshots, OCR, observations,
+  traces, and benchmark artifacts;
+- uncertain mutations are never blindly replayed—they require a fresh observation;
+- repair reports a plan and never downloads or installs implicitly.
+
+## Develop
+
+Requirements: Windows x64, Node.js 24, npm 11, and .NET 10 SDK.
 
 ```powershell
-npm install agent-computer-use-mcp@X.Y.Z
-```
-
-## Offline ZIP
-
-The release assembly can produce a complete Windows x64 ZIP with the same protected core and byte-identical platform payload used by npm:
-
-```powershell
-node .\agent-computer-use-mcp-X.Y.Z-windows-x64\bin\agent-computer-use-mcp.mjs
-```
-
-The ZIP requires Node.js 24.x. It requires no npm install, network access,
-elevation, or setup program. The current tag workflow does not upload or publish
-this ZIP; GitHub/Gitee release distribution requires a separate operator flow.
-
-## Development
-
-```powershell
+git clone https://github.com/astraclawteam/agent-computer-use-mcp.git
+cd agent-computer-use-mcp
 npm ci
 npm test
 npm run mcp
 ```
 
-Release-focused commands:
+Protocol and packaging gates:
 
-- `npm run release:npm:build:core`: build the protected core package with no first-party source maps.
-- `npm run release:npm:build:win32-x64`: build the immutable platform package from locked native assets.
-- `npm run release:npm:package -- --package <tarball>`: run the read-only registry preflight for one protected package; add `--publish` only for an intentional maintainer publish.
-- `npm run phase:0.14`: verify protected npm package integrity and standard MCP compatibility.
-- `npm run phase:0.15`: assemble both npm tarballs and the complete ZIP, compare platform inventories, and run the offline MCP smoke.
-- `npm run phase:7.8`: verify exact platform resolution and read-only repair guidance.
-- `npm run release:windows:size-report`: enforce the 310 MiB complete ZIP limit.
-- `npm run soak:pr`: run the exact 900,000 ms pull-request soak and seal commercial runtime evidence.
-- `npm run evidence:verify -- <evidence-directory>`: recompute evidence identities, inventory, and SHA-256 checksums.
-- `npm run perception:quick`: run the released offline OCR plus calibrated SOM/OCR proposal fusion against the deterministic quick corpus.
-- `npm run phase:9.0 -- --evidence <sealed-run> ...`: evaluate sealed evidence without running tests, downloading assets, or starting desktop control.
+```powershell
+npm run phase:1.6
+npm run phase:1.7
+npm run phase:1.8
+npm run artifact:windows:build -- --allow-network
+```
 
-The pull-request soak uses real official-SDK stdio clients, fault/reconnect cycles,
-Windows process-tree sampling, and a post-cleanup probe. It enforces at most
-128 MiB RSS net growth, 128 handles net growth, a tool-call failure rate below
-0.1%, and zero orphan processes, residual ports, overlay leaks, and cursor
-leaks. Its sealed directory contains `run-manifest.json`, `events.jsonl`,
-`report.json`, and `checksums.txt`. Complete screenshots and user documents are
-forbidden from commercial runtime evidence.
+Real desktop action gate:
 
-## Commercial 1.0 Eligibility
+```powershell
+npm run phase:1.4
+```
 
-Preview releases remain publishable with `commercialEligible: false`. A stable
-`1.x` release fails closed unless Phase 9.0 verifies one candidate identity
-across all of the following:
-
-- exact 900,000 ms pull-request, 7,200,000 ms nightly, and 28,800,000 ms release-candidate soak evidence;
-- passing Tier A and installed Browser, Electron, Office, Complex Canvas,
-  CAD-like, and Timeline evidence with successful cleanup;
-- at least 97% OCR character accuracy, 95% critical-label recall, 98% proposal
-  precision, 90% proposal recall, and zero guessed actions;
-- matching Git commit, core/platform package, driver, overlay, OCR model pack,
-  release version, and `v*` tag identities.
-
-Failed evidence remains part of the decision even when a later retry passes.
-The deterministic quick corpus currently validates the mechanism; it does not
-replace the separately locked full corpus or long-run/app-lab evidence.
-
-The repository root is private to npm publication. Only generated release staging packages are publishable. They contain protected runtime code, exact manifests, licenses, checksums, and SBOM data without first-party source or source maps. Obfuscation is defense in depth, not a secrecy boundary.
-
-## Runtime State
-
-Writable state is limited to user data under `%LOCALAPPDATA%\AgentComputerUse\` (`logs`, `traces`, `artifacts`, `sessions`, and disposable `cache`). It contains no authoritative program version or active native asset selection.
-
-The native overlay and branded cursor are visible only while Gateway-managed computer use is active. They are excluded from screenshots, OCR, observations, traces, and benchmark artifacts.
+The full test suite is deliberately serial. It covers MCP interoperability,
+leases, policy, perception, Unicode delivery, cleanup races, overlay exclusion,
+and immutable Windows artifact assembly.
 
 ## Release
 
-A verified `v*` tag validates the source, builds and smokes the protected core and
-Windows x64 packages, and uploads the two npm tarballs as a CI artifact. The
-workflow has no npm credentials and never writes to the npm registry.
+A `vX.Y.Z` tag must match `package.json`, point to a commit reachable from
+`main`, and have a matching `CHANGELOG.md` section. The release workflow then:
 
-A maintainer downloads the verified tarballs and handles each package explicitly.
-Use the clean checkout for the exact tag, run the command without `--publish`
-first, then publish the platform package before the core package:
+1. runs the full test and official MCP SDK gates;
+2. assembles and verifies the Windows x64 SEA artifact;
+3. writes `SHA256SUMS.txt`;
+4. creates the GitHub Release and marks it Latest.
 
-```powershell
-npm run release:npm:package -- --package <tarball>
-npm run release:npm:package -- --package <tarball> --publish
-```
+The workflow has no npm or Gitee credentials and publishes only verified GitHub
+Release assets. See the
+[release pipeline specification](docs/productization/real-release-pipeline-spec.md)
+and [release gates](docs/productization/release-gates.md).
 
-The command accepts only the canonical filename and current source version. It
-rebuilds the corresponding protected staging package and requires an exact
-SHA-512 match before registry access. It publishes exactly the named tarball and
-does not change versions, commit, tag, push, publish a second package, create a
-GitHub Release, or mutate Gitee.
+## Contributing
 
-See the [current release pipeline policy](docs/productization/real-release-pipeline-spec.md)
-and [release gates](docs/productization/release-gates.md). The earlier
-[automatic distribution design](docs/superpowers/specs/2026-07-11-npm-platform-distribution-design.md)
-is a superseded historical record, not the current release contract.
+Real application edge cases are especially valuable: custom-drawn controls,
+tray restoration, high-DPI scaling, multilingual input, focus transitions, and
+post-action verification. Start with [CONTRIBUTING.md](CONTRIBUTING.md), or open
+an [app smoke report](https://github.com/astraclawteam/agent-computer-use-mcp/issues/new?template=app_smoke.yml).
+
+Security-sensitive findings should use
+[GitHub private vulnerability reporting](https://github.com/astraclawteam/agent-computer-use-mcp/security/advisories/new).
+
+## License
+
+[MIT](LICENSE)
