@@ -2,6 +2,12 @@
 
 All notable changes to `agent-computer-use-mcp` are tracked here.
 
+## 0.0.18
+
+- Prefer an opaque application token over a redundant title hint left from an earlier window lookup.
+- Keep target and explicit window selectors mutually exclusive with application restoration.
+- Prevent recoverable tray workflows from terminating on harmless Agent argument carry-over.
+
 ## 0.0.17
 
 - Enrich running-process application identities from exact Windows Start Menu shortcut targets.

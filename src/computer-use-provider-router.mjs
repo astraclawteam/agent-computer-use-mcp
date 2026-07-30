@@ -103,7 +103,7 @@ export class ComputerUseProviderRouter {
     const result = {
       status: "ready",
       module: "agent-computer-use-mcp",
-      version: "0.0.17",
+      version: "0.0.18",
       phases: {
         "0.9": "contract-freeze",
         "0.10": "release-metadata-changelog",
@@ -522,11 +522,13 @@ export class ComputerUseProviderRouter {
     }
     const tier = args.tier ?? "full";
     const agentId = args.requestContext?.agentId ?? args.agentId ?? "unknown";
+    const hasApplicationToken = typeof args.applicationToken === "string"
+      && args.applicationToken.trim() !== "";
     const selectors = [
       args.target === "foreground",
       args.windowId !== undefined,
-      typeof args.titlePart === "string" && args.titlePart.trim() !== "",
-      typeof args.applicationToken === "string" && args.applicationToken.trim() !== "",
+      !hasApplicationToken && typeof args.titlePart === "string" && args.titlePart.trim() !== "",
+      hasApplicationToken,
     ].filter(Boolean).length;
     if (selectors !== 1) {
       fail(
@@ -538,7 +540,7 @@ export class ComputerUseProviderRouter {
         },
       );
     }
-    if (args.applicationToken) {
+    if (hasApplicationToken) {
       if (!this.driver?.launchApp) {
         fail("provider.unavailable", "Application activation is not available.", {
           provider: "cua-driver",
@@ -562,7 +564,7 @@ export class ComputerUseProviderRouter {
     try {
       let window;
       try {
-        if (args.applicationToken) {
+        if (hasApplicationToken) {
           const application = this.applicationCatalog.get(args.applicationToken);
           if (!application) {
             fail("application.token_invalid", "The application token is missing or stale.", {

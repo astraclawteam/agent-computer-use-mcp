@@ -1315,6 +1315,7 @@ test("state observation projects opaque application tokens that acquire can use 
 
   const access = await router.requestAccess({
     applicationToken: state.applications[0].applicationToken,
+    titlePart: "redundant stale title hint",
     tier: "observe",
   });
   assert.equal(access.status, "granted");

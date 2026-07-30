@@ -300,7 +300,7 @@ const LEGACY_COMPUTER_USE_MCP_TOOLS = [
         applicationToken: {
           type: "string",
           minLength: 1,
-          description: "Opaque application token returned by computer.observe mode=\"state\". Use it to restore or launch an application that currently has no controllable window, then acquire the resulting window.",
+          description: "Opaque application token returned by computer.observe mode=\"state\". Use it to restore or launch an application that currently has no controllable window, then acquire the resulting window. This exact token takes precedence over a redundant titlePart left from an earlier window lookup; target and windowId remain conflicting selectors.",
         },
         tier: { type: "string", enum: ["observe", "full", "admin"] },
         agentId: { type: "string" },
