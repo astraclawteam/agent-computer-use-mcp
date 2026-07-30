@@ -843,6 +843,15 @@ test("screenshot geometry outranks stale minimized-window bounds", async (t) => 
         "replace-all": "Atomically focus the grounded editable point, select all existing content, and enter the exact value.",
       },
       coordinateRule: "copy-grounded-editable-interior-point",
+      pointSelection: "derive the full editable surface from the screenshot, then use a safe point near its visual center",
+      excludedTargets: [
+        "action-button row",
+        "toolbar icon",
+        "label or placeholder glyph",
+        "border or resize affordance",
+        "dialog, sheet, or other occluding overlay",
+      ],
+      occlusionRule: "If a dialog, sheet, or overlay covers the intended editable surface, do not type through it. Resolve or dismiss the occlusion, then capture a fresh screenshot.",
       acceptsOcrTextPoint: false,
       requiresVisualGrounding: false,
       verification: "fresh-observation",
@@ -1306,6 +1315,13 @@ test("possibly-applied text requires a fresh observation before any replay or co
   assert.equal(typed.result.effect, "possibly_applied");
   assert.equal(typed.result.replaySafe, false);
   assert.equal(typed.result.escalation, undefined);
+  assert.deepEqual(typed.result.recovery, {
+    requiresFreshObservation: true,
+    sameActionReplayAllowed: false,
+    requiredGrounding: "non-occluded-editable-interior",
+    pointSelection: "derive-full-editable-surface-then-use-safe-interior-center",
+    forbiddenInference: "adjacent-action-button-or-toolbar-icon",
+  });
   await assert.rejects(
     router.act({
       action: {

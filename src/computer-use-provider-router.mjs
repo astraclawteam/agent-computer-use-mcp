@@ -2129,6 +2129,15 @@ export class ComputerUseProviderRouter {
           coordinateRule: ocrTextGeometry
             ? "fresh-screenshot-editable-interior-required"
             : "copy-grounded-editable-interior-point",
+          pointSelection: "derive the full editable surface from the screenshot, then use a safe point near its visual center",
+          excludedTargets: [
+            "action-button row",
+            "toolbar icon",
+            "label or placeholder glyph",
+            "border or resize affordance",
+            "dialog, sheet, or other occluding overlay",
+          ],
+          occlusionRule: "If a dialog, sheet, or overlay covers the intended editable surface, do not type through it. Resolve or dismiss the occlusion, then capture a fresh screenshot.",
           acceptsOcrTextPoint: false,
           requiresVisualGrounding: ocrTextGeometry,
           verification: "fresh-observation",
@@ -2601,7 +2610,14 @@ function describePossiblyAppliedTextMutation(result) {
     verified: false,
     replaySafe: false,
     verificationRequired: "fresh_observation",
-    nextAction: "Call computer.observe and inspect the fresh target state. Retry type_text only if that observation proves the intended text is absent.",
+    nextAction: "Call computer.observe and inspect the fresh target state. Retry type_text only if the intended text is absent and the fresh screenshot proves a non-occluded editable surface. Derive the full surface and choose a safe interior point near its visual center; never infer the point from an adjacent action button or toolbar icon.",
+    recovery: {
+      requiresFreshObservation: true,
+      sameActionReplayAllowed: false,
+      requiredGrounding: "non-occluded-editable-interior",
+      pointSelection: "derive-full-editable-surface-then-use-safe-interior-center",
+      forbiddenInference: "adjacent-action-button-or-toolbar-icon",
+    },
   };
 }
 
