@@ -8,6 +8,7 @@ import { DEFAULT_AGENT_CURSOR_STYLE } from "./overlay-theme-cursor-tokens.mjs";
 import { sendWindowsUnicodeText } from "./windows-unicode-input.mjs";
 import { activateWindowsForeground } from "./windows-foreground-activation.mjs";
 import { queryWindowsForegroundWindowId } from "./windows-foreground-probe.mjs";
+import { queryWindowsProcessApplications } from "./windows-process-application-probe.mjs";
 
 const DEFAULT_DRIVER_PATH = `${process.env.LOCALAPPDATA}\\Programs\\Cua\\cua-driver\\bin\\cua-driver.exe`;
 
@@ -20,6 +21,7 @@ export class CuaDriverMcpDriver {
     this.unicodeInput = options.unicodeInput ?? sendWindowsUnicodeText;
     this.foregroundWindowActivator = options.foregroundWindowActivator ?? activateWindowsForeground;
     this.foregroundWindowProbe = options.foregroundWindowProbe ?? queryWindowsForegroundWindowId;
+    this.processApplicationProbe = options.processApplicationProbe ?? queryWindowsProcessApplications;
     this.clientStarted = false;
     this.clientStartAttempted = false;
     this.sessionStarted = false;
@@ -87,14 +89,17 @@ export class CuaDriverMcpDriver {
   listApps() {
     return this.runWork(async (ticket) => {
       await this.ensureStartedResources(ticket);
-      const result = await this.client.callTool("list_apps", {});
+      const [result, processApplications] = await Promise.all([
+        this.client.callTool("list_apps", {}),
+        this.processApplicationProbe(),
+      ]);
       this.assertWorkTicket(ticket);
       const payload = result.structuredContent ?? result;
       const processes = new Map((payload.processes ?? []).map((process) => [
         String(process.name ?? "").toLowerCase(),
         process,
       ]));
-      return (payload.apps ?? [])
+      const applications = (payload.apps ?? [])
         .filter((app) => typeof app.launch_path === "string" && app.launch_path.trim() !== "")
         .map((app) => {
           const process = processes.get(executableNameFromLaunchPath(app.launch_path));
@@ -107,7 +112,23 @@ export class CuaDriverMcpDriver {
             lastUsed: app.last_used ?? null,
             launchPath: app.launch_path,
           };
-        })
+        });
+      const byExecutable = new Map(applications.map((application) => [
+        executableNameFromLaunchPath(application.launchPath),
+        application,
+      ]));
+      for (const processApplication of processApplications) {
+        const key = executableNameFromLaunchPath(processApplication.launchPath);
+        const existing = byExecutable.get(key);
+        if (existing) {
+          existing.running = true;
+          existing.pid ||= processApplication.pid;
+          continue;
+        }
+        applications.push(processApplication);
+        byExecutable.set(key, processApplication);
+      }
+      return applications
         .sort(compareApplications)
         .slice(0, 64);
     });
@@ -880,7 +901,9 @@ function normalizeWindow(window, index) {
 function executableNameFromLaunchPath(launchPath) {
   const trimmed = String(launchPath).trim();
   let executable;
-  if (trimmed.startsWith("\"")) {
+  if (trimmed.toLowerCase().endsWith(".exe")) {
+    executable = trimmed;
+  } else if (trimmed.startsWith("\"")) {
     const closingQuote = trimmed.indexOf("\"", 1);
     executable = closingQuote > 1 ? trimmed.slice(1, closingQuote) : trimmed.slice(1);
   } else {
