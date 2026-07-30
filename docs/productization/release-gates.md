@@ -1,11 +1,12 @@
 # Release Gates
 
-## Package Contract
+## Artifact contract
 
-- Core package is `agent-computer-use-mcp@X.Y.Z`.
-- Windows package is `@xiaozhiclaw/agent-computer-use-win32-x64@X.Y.Z` with exact version, `os: ["win32"]`, and `cpu: ["x64"]`.
-- Core contains no native payload; platform contains no first-party source or source maps.
-- npm dry-run inventories, licenses, CycloneDX SBOM, and SHA-256 manifests pass.
+- Public asset is `agent-computer-use-mcp-X.Y.Z-win32-x64.tar.gz`.
+- The archive contains one `artifact/` root with the Windows x64 SEA executable,
+  driver, overlay, OCR runtime/models, licenses, inventory, checksums, and SBOM.
+- Target, version, source commit, complete inventory, links, traversal, duplicate
+  paths, and Windows case-fold uniqueness are verified before publication.
 
 ## Runtime Contract
 
@@ -16,30 +17,19 @@
 
 ## Offline Contract
 
-- `agent-computer-use-mcp-X.Y.Z-windows-x64.zip` contains protected core, platform payload, production JavaScript dependencies, licenses, checksums, manifest, and SBOM.
-- The extracted ZIP starts with Node.js 20+ and no npm, network, elevation, or setup software.
+- The extracted archive starts through `artifact/bin/agent-computer-use-mcp.exe`
+  with no system Node, npm, network, elevation, or setup software.
 - Official MCP SDK smoke lists tools and calls health/doctor without desktop control.
-- ZIP platform inventory is byte-identical to the npm platform package and compressed size is at most 310 MiB.
+- The compressed artifact remains below its enforced size limit.
 
 ## Release Contract
 
 - Only a verified `v*` tag on main can produce release artifacts.
-- Tag CI has read-only repository permissions, no registry credentials, uploads
-  only the two npm tarballs, and performs no npm, Git, GitHub Release, or Gitee
-  mutation.
-- A maintainer uses the exact clean source checkout and runs the one-package
-  command without `--publish` before explicitly adding that flag.
-- The command accepts only the canonical filename and current package version,
-  rebuilds through the protected staging/inventory path, and requires an exact
-  SHA-512 match.
-- Verified bytes are copied once into an exclusive private snapshot. Registry
-  lookup and the single `npm publish` use only that snapshot; it is rechecked
-  before publication and removed in `finally`.
-- Platform npm publishes before core npm. The command never bumps, commits,
-  tags, pushes, publishes a second package, creates a GitHub Release, or mutates
-  Gitee.
-- GitHub/Gitee release publication is outside the current release workflow and
-  requires a separately authorized operator design and validation.
+- Tag CI has only GitHub contents permission and no npm or Gitee credentials.
+- CI publishes the verified SEA archive, Hub publisher input, and SHA-256 file
+  to one immutable GitHub Release and marks it Latest.
+- The workflow never bumps, commits, moves tags, writes branches, publishes npm,
+  or mutates Gitee.
 
 ## Product Safety
 

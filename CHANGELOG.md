@@ -2,6 +2,15 @@
 
 All notable changes to `agent-computer-use-mcp` are tracked here.
 
+## 0.0.7
+
+- Add a versioned capability handshake so the Host can inspect lifecycle, observation, action, delivery, and security support without expanding the Agent tool surface.
+- Report focused controls, observation truncation, native-to-image scaling, action execution paths, delivery modes, and explicit fallback reasons.
+- Bind desktop-control leases to the requesting Host session while allowing safe renewal by the same session.
+- Keep the public Agent surface at four tools and preserve Host-only health, diagnostics, installation, and repair settings.
+- Add a tag-verified Windows x64 GitHub Release workflow with immutable SEA artifacts, SHA-256 checksums, and Latest release promotion.
+- Refresh the project story, installation guide, contribution workflow, and visual identity.
+
 ## 0.0.6
 
 - Deliver owned screenshots as secure MCP image content and compact Markdown without exposing temporary local paths.

@@ -33,12 +33,12 @@ claims.
 - UIA/SOM-first observation, local PP-OCRv6 ONNX sidecar, region/diff scheduling, template matching, and local SOM proposals.
 - Native layered overlay and branded cursor with observation exclusion.
 - Daemon lifecycle, disconnect cleanup, concurrency gates, and bounded runtime soak.
-- Protected core npm package with no first-party source maps.
-- Exact Windows x64 optional platform package with immutable SHA-256 inventory.
-- Complete offline ZIP assembled from the same platform stage.
-- 310 MiB compressed ZIP gate and official MCP SDK offline smoke.
-- Tag-only artifact workflow that uploads two verified npm tarballs without registry, GitHub Release, Gitee, or Git writes.
-- Explicit one-package npm publication with clean-source rebuild and exact tarball identity verification.
+- Self-contained Windows x64 SEA artifact with immutable SHA-256 inventory,
+  licenses, checksums, and SBOM.
+- Official MCP SDK offline smoke with no system Node, npm, startup network,
+  elevation, or self-update.
+- Tag-only GitHub Release workflow that verifies version, main ancestry,
+  changelog, tests, packaging, and exact source identity before publishing.
 - Real 900,000 ms pull-request soak with official MCP clients, fault injection,
   Windows resource probes, immutable JSON/JSONL evidence, and fail-closed
   checksum verification.
@@ -59,8 +59,9 @@ claims.
   evidence on prepared Windows runners; the PR6B mechanism is implemented but
   implementation tests do not substitute for those long runs.
 - Run clean-runner release rehearsals and retain failed evidence beside passing retries.
-- Publish Windows x64 preview versions through the explicit source-bound command and retain clean install evidence.
-- Define and validate any future GitHub/Gitee release publication as a separate, explicitly authorized operator workflow.
+- Retain clean install evidence for every published Windows x64 preview.
+- Evaluate additional mirrors only as separately authorized transports of the
+  exact GitHub Release bytes.
 - Continue OCR screenshot regression and warm region latency tracking.
 - Publish and lock the external full corpus (at least 400 OCR and 200 visual
   samples), then retain passing full-corpus results from the app-lab runner.
@@ -70,7 +71,9 @@ claims.
 
 ## Future Platforms
 
-macOS and Linux platform packages remain unpublished. Each platform needs real driver, overlay, OCR runtime, permission, packaging, offline ZIP, and app-matrix validation before it is added to core `optionalDependencies`.
+macOS and Linux artifacts remain unpublished. Each platform needs a real
+driver, overlay, OCR runtime, permission model, packaging, offline execution,
+and app-matrix validation before release.
 ## Preview Browser Boundary
 
 - The public MCP remains OS-only and contains no built-in browser/CDP kernel.

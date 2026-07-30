@@ -1,13 +1,13 @@
-name: Productization phase
-description: Track a commercial-readiness phase or release gate.
-title: "[Productization]: "
+name: Capability or release proposal
+description: Propose a bounded capability, interoperability improvement, or release-safety change.
+title: "[Proposal]: "
 labels: ["productization"]
 body:
   - type: textarea
     id: goal
     attributes:
       label: Goal
-      description: What commercial-readiness capability does this issue deliver?
+      description: Which real user outcome or maintenance risk does this improve?
     validations:
       required: true
   - type: dropdown
@@ -23,13 +23,15 @@ body:
         - MCP compatibility
         - Real software matrix
         - Install experience
+        - Documentation and adoption
+        - Release automation
     validations:
       required: true
   - type: textarea
     id: acceptance
     attributes:
       label: Acceptance criteria
-      description: List exact commands, scripts, or evidence required to close this.
+      description: List observable behavior, exact commands, and evidence required to close this.
       placeholder: |
         - npm test passes
         - phase script returns status=passed
@@ -40,7 +42,6 @@ body:
     id: risks
     attributes:
       label: Risks and constraints
-      description: Note platform, dependency, model size, offline, security, or UX risks.
+      description: Note platform, dependency, model size, offline, privacy, security, compatibility, or UX risks.
     validations:
       required: true
-

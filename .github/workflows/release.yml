@@ -1,0 +1,99 @@
+name: release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  windows-artifact:
+    name: verify and publish Windows artifact
+    runs-on: windows-latest
+    steps:
+      - name: Checkout tagged source
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: "24.13.0"
+          cache: npm
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: "10.0.302"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Validate tag and source identity
+        id: release
+        shell: pwsh
+        run: |
+          $version = node -p "require('./package.json').version"
+          if ($env:GITHUB_REF_NAME -ne "v$version") {
+            throw "release.tag_version_mismatch: $env:GITHUB_REF_NAME != v$version"
+          }
+          git fetch origin main
+          git merge-base --is-ancestor $env:GITHUB_SHA origin/main
+          if ($LASTEXITCODE -ne 0) {
+            throw "release.commit_not_on_main: $env:GITHUB_SHA"
+          }
+          $escapedVersion = [Regex]::Escape($version)
+          if (-not (Select-String -Path CHANGELOG.md -Pattern "^##\s+$escapedVersion(?:\s|$)")) {
+            throw "release.changelog_missing: $version"
+          }
+          "version=$version" >> $env:GITHUB_OUTPUT
+
+      - name: Run full test suite
+        run: npm test
+
+      - name: Verify standard MCP install contract
+        run: npm run phase:1.6
+
+      - name: Verify official MCP SDK client
+        run: npm run phase:1.7
+
+      - name: Verify official MCP SDK server transport
+        run: npm run phase:1.8
+
+      - name: Build immutable Windows x64 artifact
+        run: npm run artifact:windows:build -- --allow-network --source-commit $env:GITHUB_SHA
+
+      - name: Write release checksums
+        shell: pwsh
+        env:
+          VERSION: ${{ steps.release.outputs.version }}
+        run: |
+          $root = "artifacts/mcp-executable/$env:VERSION/win32-x64"
+          $archive = "$root/agent-computer-use-mcp-$env:VERSION-win32-x64.tar.gz"
+          $hash = (Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$hash  agent-computer-use-mcp-$env:VERSION-win32-x64.tar.gz" |
+            Set-Content -LiteralPath "$root/SHA256SUMS.txt" -Encoding utf8NoBOM
+
+      - name: Create immutable GitHub Release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.release.outputs.version }}
+        run: |
+          $root = "artifacts/mcp-executable/$env:VERSION/win32-x64"
+          gh release create $env:GITHUB_REF_NAME `
+            "$root/agent-computer-use-mcp-$env:VERSION-win32-x64.tar.gz" `
+            "$root/hub-publisher-input.json" `
+            "$root/SHA256SUMS.txt" `
+            --repo $env:GITHUB_REPOSITORY `
+            --verify-tag `
+            --latest `
+            --title "Computer Use $env:VERSION" `
+            --generate-notes
