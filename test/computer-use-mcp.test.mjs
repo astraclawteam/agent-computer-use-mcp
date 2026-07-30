@@ -1251,7 +1251,11 @@ test("state observation projects opaque application tokens that acquire can use 
   });
   assert.equal(access.status, "granted");
   assert.equal(access.controller.window.windowId, "restored-window");
-  assert.deepEqual(calls, [{ launchPath: "C:\\private\\restorable.exe" }]);
+  assert.deepEqual(calls, [{
+    launchPath: "C:\\private\\restorable.exe",
+    pid: 101,
+    running: true,
+  }]);
 });
 
 test("same-Agent acquire retries reuse or retarget the lease and active observations renew its idle timeout", async () => {
