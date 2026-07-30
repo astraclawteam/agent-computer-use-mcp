@@ -30,6 +30,11 @@ test("CuaDriverMcpDriver maps request/capture/action to cua-driver MCP tools", a
         if (name === "get_window_state") {
           return {
             window: { id: 42, title: "Agent Computer Use Native Lab", pid: 1234 },
+            focused_element_index: 0,
+            truncation: {
+              truncated: true,
+              depth_limit_reached: true,
+            },
             elements: [
               { element_index: 0, role: "Edit", label: "Name", bounds: { x: 10, y: 20, w: 120, h: 24 } },
               { element_index: 1, role: "Button", label: "Save" },
@@ -71,6 +76,21 @@ test("CuaDriverMcpDriver maps request/capture/action to cua-driver MCP tools", a
   ]);
   assert.deepEqual(observation.elements[0].bounds, { x: 10, y: 20, width: 120, height: 24 });
   assert.deepEqual(observation.elements.map(({ actions }) => actions), [["set_value"], ["click"], ["type_text"]]);
+  assert.deepEqual(observation.focusedElement, {
+    elementToken: "1",
+    elementIndex: 0,
+    role: "edit",
+    name: "Name",
+    source: "cua-driver",
+  });
+  assert.deepEqual(observation.truncation, {
+    truncated: true,
+    elementLimitReached: false,
+    depthLimitReached: true,
+    returnedElements: 3,
+    maxElements: 500,
+    maxDepth: 20,
+  });
 
   await driver.setValue({ window, elementIndex: 0, elementToken: "name", value: "agent-computer-use" });
   await driver.typeText({ window, elementIndex: 2, elementToken: "document", value: "Notepad text" });
@@ -494,6 +514,16 @@ test("CuaDriverMcpDriver captures the exact screenshot coordinate source used by
     y: 144,
     width: 954,
     height: 704,
+    nativeWindowBounds: { x: 447, y: 144, width: 954, height: 704 },
+    coordinateScale: {
+      schemaVersion: 1,
+      sourceSpace: "window-local",
+      actionSpace: "window-local",
+      actionTransform: { scaleX: 1, scaleY: 1, offsetX: 0, offsetY: 0 },
+      observationPixels: { width: 954, height: 704 },
+      nativeWindowUnits: { width: 954, height: 704 },
+      nativeToObservation: { scaleX: 1, scaleY: 1 },
+    },
     window: {
       id: 42,
       title: "微信",
@@ -547,6 +577,16 @@ test("CuaDriverMcpDriver reports the PNG pixel bounds rather than the outer wind
   assert.equal(capture.width, 952);
   assert.equal(capture.height, 702);
   assert.deepEqual(capture.window.bounds, { x: 447, y: 144, width: 952, height: 702 });
+  assert.deepEqual(capture.nativeWindowBounds, { x: 447, y: 144, width: 954, height: 704 });
+  assert.deepEqual(capture.coordinateScale, {
+    schemaVersion: 1,
+    sourceSpace: "screenshot-pixel",
+    actionSpace: "window-local",
+    actionTransform: { scaleX: 1, scaleY: 1, offsetX: 0, offsetY: 0 },
+    observationPixels: { width: 952, height: 702 },
+    nativeWindowUnits: { width: 954, height: 704 },
+    nativeToObservation: { scaleX: 952 / 954, scaleY: 702 / 704 },
+  });
   assert.equal(Buffer.isBuffer(capture.artifactBytes), true);
   assert.equal(capture.artifactBytes.byteLength, 24);
   assert.equal(Object.keys(capture).includes("artifactBytes"), false);

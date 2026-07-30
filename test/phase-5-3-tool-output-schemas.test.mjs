@@ -11,7 +11,7 @@ test("all public MCP tools declare strict output schemas", () => {
     assert.equal(tool.outputSchema?.type, "object", `${tool.name} outputSchema must be an object`);
     assert.equal(tool.outputSchema?.additionalProperties, false, `${tool.name} outputSchema must reject unknown fields`);
     assert.equal(tool.outputSchema.properties?.includeUserOverlay?.const, false, `${tool.name} must lock overlay exclusion`);
-    assert.equal(tool.outputSchema.properties?.resultSchemaVersion?.const, "5.3", `${tool.name} must expose a versioned result contract`);
+    assert.equal(tool.outputSchema.properties?.resultSchemaVersion?.const, "5.4", `${tool.name} must expose a versioned result contract`);
     assert.equal(tool.outputSchema.required.includes("includeUserOverlay"), true, `${tool.name} must require includeUserOverlay`);
     assert.equal(tool.outputSchema.required.includes("resultSchemaVersion"), true, `${tool.name} must require resultSchemaVersion`);
   }

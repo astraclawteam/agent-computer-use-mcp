@@ -239,6 +239,8 @@ export class CuaDriverMcpDriver {
       this.assertWorkTicket(ticket);
       return normalizeCuaObservation(result.structuredContent ?? result, {
         mode: mode === "semantic" ? "som" : mode,
+        maxElements: 500,
+        maxDepth: 20,
       });
     });
   }
@@ -279,6 +281,11 @@ export class CuaDriverMcpDriver {
         y: bounds?.y,
         width: bounds?.width,
         height: bounds?.height,
+        nativeWindowBounds: reportedBounds,
+        coordinateScale: createCoordinateScaleMetadata({
+          screenshot,
+          nativeWindowBounds: reportedBounds,
+        }),
         window: {
           id: resultWindow.id ?? resultWindow.window_id ?? window.windowId,
           title: resultWindow.title ?? window.title,
@@ -787,6 +794,45 @@ function normalizeBounds(bounds) {
     width: bounds.width ?? bounds.w,
     height: bounds.height ?? bounds.h,
   };
+}
+
+function createCoordinateScaleMetadata({ screenshot, nativeWindowBounds }) {
+  const observationWidth = screenshot?.width ?? nativeWindowBounds?.width;
+  const observationHeight = screenshot?.height ?? nativeWindowBounds?.height;
+  const nativeWidth = nativeWindowBounds?.width ?? observationWidth;
+  const nativeHeight = nativeWindowBounds?.height ?? observationHeight;
+  const scaleX = positiveRatio(observationWidth, nativeWidth);
+  const scaleY = positiveRatio(observationHeight, nativeHeight);
+  return {
+    schemaVersion: 1,
+    sourceSpace: screenshot ? "screenshot-pixel" : "window-local",
+    actionSpace: "window-local",
+    actionTransform: {
+      scaleX: 1,
+      scaleY: 1,
+      offsetX: 0,
+      offsetY: 0,
+    },
+    observationPixels: {
+      width: observationWidth,
+      height: observationHeight,
+    },
+    nativeWindowUnits: {
+      width: nativeWidth,
+      height: nativeHeight,
+    },
+    nativeToObservation: {
+      scaleX,
+      scaleY,
+    },
+  };
+}
+
+function positiveRatio(numerator, denominator) {
+  return Number.isFinite(numerator) && numerator > 0
+    && Number.isFinite(denominator) && denominator > 0
+    ? numerator / denominator
+    : 1;
 }
 
 async function readPngArtifact(filePath) {

@@ -19,6 +19,8 @@ import { captureWindowPngByTitle } from "./real-window-capture.mjs";
 import { createComputerUsePolicy } from "./computer-use-policy.mjs";
 import { createRepairProgressPlan } from "./repair-progress-plan.mjs";
 import { cleanupRuntimeState } from "./runtime-cleanup.mjs";
+import { createComputerUseCapabilityHandshake } from "./computer-use-capability-handshake.mjs";
+import { MCP_RESULT_SCHEMA_VERSION } from "./computer-use-mcp-tools.mjs";
 
 const ACTION_OBSERVATION_TTL_MS = 30_000;
 const VISUAL_GROUNDING_OBSERVATION_TTL_MS = 120_000;
@@ -181,6 +183,13 @@ export class ComputerUseProviderRouter {
       }
     }
 
+    result.capabilityHandshake = createComputerUseCapabilityHandshake({
+      moduleVersion: result.version,
+      resultSchemaVersion: MCP_RESULT_SCHEMA_VERSION,
+      fast: options.fast === true,
+      driver: result.driver,
+      ocr: result.ocr,
+    });
     return result;
   }
 
@@ -1032,6 +1041,13 @@ export class ComputerUseProviderRouter {
       pixelLimitedAction: admission.pixelLimitedAction,
       outcome,
       effectiveDeliveryMode,
+      execution: describeActionExecution({
+        action,
+        element,
+        focusReceipt,
+        result,
+        effectiveDeliveryMode,
+      }),
       includeUserOverlay: false,
     };
     if (this.activeFocusReceipt) actionResult.focusReceipt = serializeFocusReceipt(this.activeFocusReceipt);
@@ -1923,6 +1939,9 @@ export class ComputerUseProviderRouter {
           height: observedBounds.height,
         }
       : undefined;
+    const coordinateScale = observation.coordinateScale
+      ?? observation.capture?.coordinateScale
+      ?? createIdentityCoordinateScale(coordinateBounds);
     return {
       ...observation,
       observationId: observation.observationId ?? `observation-${now}`,
@@ -1930,6 +1949,7 @@ export class ComputerUseProviderRouter {
       ...(coordinateBounds ? {
         coordinateBounds,
         coordinateTransform: "identity",
+        coordinateScale,
       } : {}),
       interactionContract: {
         textEntry: {
@@ -2552,6 +2572,76 @@ function describeActionTarget(action, element, driverTarget) {
   const bounds = element?.sourceRegion ?? element?.bounds;
   if (bounds) target.bounds = { ...bounds };
   return target;
+}
+
+function describeActionExecution({
+  action,
+  element,
+  focusReceipt,
+  result,
+  effectiveDeliveryMode,
+}) {
+  const resultPath = typeof result?.path === "string" && result.path.trim()
+    ? result.path.trim()
+    : null;
+  const nativeActivationFallback = result?.driverActivation
+    && typeof result.driverActivation === "object";
+  const declaredFallbackReason = typeof result?.fallbackReason === "string"
+    && result.fallbackReason.trim()
+    ? result.fallbackReason.trim()
+    : null;
+  const fallbackReason = declaredFallbackReason
+    ?? (nativeActivationFallback ? "cua-driver-foreground-not-confirmed" : null);
+  const providerPath = nativeActivationFallback
+    ? "windows-foreground-bridge"
+    : (resultPath ?? "cua-driver-mcp");
+
+  let targetPath = "controller-window";
+  if (focusReceipt) targetPath = "focus-receipt";
+  else if (element) targetPath = "semantic-element";
+  else if (Number.isFinite(action.x) && Number.isFinite(action.y)) {
+    targetPath = "observation-coordinate";
+  }
+
+  return {
+    schemaVersion: 1,
+    targetPath,
+    providerPath,
+    deliveryMode: effectiveDeliveryMode,
+    selectionReason: providerPath.includes("windows_unicode")
+      ? "unicode-coordinate-input"
+      : null,
+    fallback: {
+      used: fallbackReason !== null,
+      reason: fallbackReason,
+    },
+  };
+}
+
+function createIdentityCoordinateScale(bounds) {
+  return {
+    schemaVersion: 1,
+    sourceSpace: "window-local",
+    actionSpace: "window-local",
+    actionTransform: {
+      scaleX: 1,
+      scaleY: 1,
+      offsetX: 0,
+      offsetY: 0,
+    },
+    observationPixels: {
+      width: bounds.width,
+      height: bounds.height,
+    },
+    nativeWindowUnits: {
+      width: bounds.width,
+      height: bounds.height,
+    },
+    nativeToObservation: {
+      scaleX: 1,
+      scaleY: 1,
+    },
+  };
 }
 
 function serializeFocusReceipt(receipt) {
