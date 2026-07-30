@@ -6,8 +6,32 @@ const MAX_OUTPUT_BYTES = 256 * 1024;
 
 const WINDOWS_PROCESS_APPLICATION_PROBE_SCRIPT = String.raw`
 $ErrorActionPreference = "Stop"
+[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
 $currentSessionId = (Get-Process -Id $PID).SessionId
 $windowsRoot = [System.IO.Path]::GetFullPath($env:SystemRoot).TrimEnd('\') + '\'
+$shortcutNames = @{}
+try {
+  $shortcutShell = New-Object -ComObject WScript.Shell
+  $startMenuRoots = @(
+    [Environment]::GetFolderPath('StartMenu'),
+    [Environment]::GetFolderPath('CommonStartMenu')
+  ) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
+  Get-ChildItem -LiteralPath $startMenuRoots -Recurse -Filter '*.lnk' -ErrorAction SilentlyContinue | ForEach-Object {
+    try {
+      $shortcut = $shortcutShell.CreateShortcut($_.FullName)
+      if (-not [string]::IsNullOrWhiteSpace($shortcut.TargetPath)) {
+        $shortcutTarget = [System.IO.Path]::GetFullPath($shortcut.TargetPath)
+        if (-not $shortcutNames.ContainsKey($shortcutTarget)) {
+          $shortcutNames[$shortcutTarget] = $_.BaseName
+        }
+      }
+    } catch {
+      # Broken and non-filesystem shortcuts are intentionally omitted.
+    }
+  }
+} catch {
+  # Start Menu identity enrichment is best-effort; process discovery remains available.
+}
 $applications = Get-CimInstance Win32_Process -Filter "SessionId = $currentSessionId" | ForEach-Object {
   try {
     $path = $_.ExecutablePath
@@ -16,7 +40,11 @@ $applications = Get-CimInstance Win32_Process -Filter "SessionId = $currentSessi
     if ($fullPath.StartsWith($windowsRoot, [System.StringComparison]::OrdinalIgnoreCase)) { return }
     if (-not $fullPath.EndsWith('.exe', [System.StringComparison]::OrdinalIgnoreCase)) { return }
     [pscustomobject]@{
-      name = [System.IO.Path]::GetFileNameWithoutExtension($fullPath)
+      name = if ($shortcutNames.ContainsKey($fullPath)) {
+        $shortcutNames[$fullPath]
+      } else {
+        [System.IO.Path]::GetFileNameWithoutExtension($fullPath)
+      }
       pid = $_.ProcessId
       launchPath = $fullPath
     }

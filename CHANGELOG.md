@@ -2,6 +2,12 @@
 
 All notable changes to `agent-computer-use-mcp` are tracked here.
 
+## 0.0.17
+
+- Enrich running-process application identities from exact Windows Start Menu shortcut targets.
+- Preserve non-ASCII display identities with explicit UTF-8 probe output.
+- Let tray restoration match localized system identities without fuzzy matching or application-specific rules.
+
 ## 0.0.16
 
 - Restore an already-running tray application through its exact system accessibility identity before launching an executable.
