@@ -1,7 +1,7 @@
 import { spawn } from "node:child_process";
 import { join } from "node:path";
 
-const DEFAULT_TIMEOUT_MS = 3_000;
+const DEFAULT_TIMEOUT_MS = 6_000;
 const MAX_OUTPUT_BYTES = 16 * 1024;
 
 const WINDOWS_TRAY_ACTIVATION_SCRIPT = String.raw`
@@ -11,16 +11,22 @@ Add-Type -AssemblyName UIAutomationTypes
 $identity = $env:AGENT_COMPUTER_USE_TRAY_IDENTITY
 if ([string]::IsNullOrWhiteSpace($identity)) { throw "tray identity is required" }
 $root = [System.Windows.Automation.AutomationElement]::RootElement
-$condition = New-Object System.Windows.Automation.PropertyCondition(
+$controlTypeCondition = New-Object System.Windows.Automation.PropertyCondition(
   [System.Windows.Automation.AutomationElement]::ControlTypeProperty,
   [System.Windows.Automation.ControlType]::Button
+)
+$automationIdCondition = New-Object System.Windows.Automation.PropertyCondition(
+  [System.Windows.Automation.AutomationElement]::AutomationIdProperty,
+  "NotifyItemIcon"
+)
+$condition = [System.Windows.Automation.AndCondition]::new(
+  [System.Windows.Automation.Condition[]]@($controlTypeCondition, $automationIdCondition)
 )
 $buttons = $root.FindAll([System.Windows.Automation.TreeScope]::Descendants, $condition)
 $match = $null
 for ($index = 0; $index -lt $buttons.Count; $index += 1) {
   $candidate = $buttons.Item($index)
   if (
-    $candidate.Current.AutomationId -eq "NotifyItemIcon" -and
     $candidate.Current.Name.Trim().Equals($identity.Trim(), [System.StringComparison]::OrdinalIgnoreCase)
   ) {
     $match = $candidate
