@@ -9,6 +9,7 @@ import { sendWindowsUnicodeText } from "./windows-unicode-input.mjs";
 import { activateWindowsForeground } from "./windows-foreground-activation.mjs";
 import { queryWindowsForegroundWindowId } from "./windows-foreground-probe.mjs";
 import { queryWindowsProcessApplications } from "./windows-process-application-probe.mjs";
+import { activateWindowsTrayApplication } from "./windows-tray-application-activation.mjs";
 
 const DEFAULT_DRIVER_PATH = `${process.env.LOCALAPPDATA}\\Programs\\Cua\\cua-driver\\bin\\cua-driver.exe`;
 
@@ -22,6 +23,7 @@ export class CuaDriverMcpDriver {
     this.foregroundWindowActivator = options.foregroundWindowActivator ?? activateWindowsForeground;
     this.foregroundWindowProbe = options.foregroundWindowProbe ?? queryWindowsForegroundWindowId;
     this.processApplicationProbe = options.processApplicationProbe ?? queryWindowsProcessApplications;
+    this.trayApplicationActivator = options.trayApplicationActivator ?? activateWindowsTrayApplication;
     this.clientStarted = false;
     this.clientStartAttempted = false;
     this.sessionStarted = false;
@@ -134,7 +136,7 @@ export class CuaDriverMcpDriver {
     });
   }
 
-  launchApp({ launchPath, pid, running = false }) {
+  launchApp({ launchPath, name, pid, running = false }) {
     return this.runWork(async (ticket) => {
       await this.ensureStartedResources(ticket);
       if (running === true && Number.isSafeInteger(pid) && pid > 0) {
@@ -155,6 +157,30 @@ export class CuaDriverMcpDriver {
                 activation.foregroundWindow,
                 ...existingWindows.filter((window) => window.windowId !== existingWindow.windowId),
               ],
+            };
+          }
+        }
+        const trayActivation = await this.trayApplicationActivator({ name });
+        this.assertWorkTicket(ticket);
+        if (trayActivation?.status === "invoked") {
+          let restoredWindows = [];
+          for (let attempt = 0; restoredWindows.length === 0 && attempt < 8; attempt += 1) {
+            await new Promise((resolve) => setTimeout(resolve, 250));
+            this.assertWorkTicket(ticket);
+            restoredWindows = (await this.listWindowsResources(ticket, {
+              onScreenOnly: false,
+              includeForeground: false,
+            }))
+              .filter((window) => window.pid === pid)
+              .sort(compareWindowControllability);
+          }
+          if (restoredWindows.length > 0) {
+            return {
+              status: "restored",
+              method: "tray-accessibility-invoke",
+              pid,
+              name,
+              windows: restoredWindows,
             };
           }
         }
