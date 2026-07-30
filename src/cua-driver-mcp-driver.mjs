@@ -1,9 +1,13 @@
 import { randomUUID } from "node:crypto";
+import { readFile } from "node:fs/promises";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { normalizeCuaObservation } from "./computer-observation.mjs";
 import { checkCuaDriverHealth, resolveCuaDriverCandidate } from "./driver-health.mjs";
 import { DEFAULT_AGENT_CURSOR_STYLE } from "./overlay-theme-cursor-tokens.mjs";
+import { sendWindowsUnicodeText } from "./windows-unicode-input.mjs";
+import { activateWindowsForeground } from "./windows-foreground-activation.mjs";
+import { queryWindowsForegroundWindowId } from "./windows-foreground-probe.mjs";
 
 const DEFAULT_DRIVER_PATH = `${process.env.LOCALAPPDATA}\\Programs\\Cua\\cua-driver\\bin\\cua-driver.exe`;
 
@@ -13,6 +17,9 @@ export class CuaDriverMcpDriver {
     this.client = options.client ?? new CuaDriverMcpClient({
       driverPath: options.driverPath,
     });
+    this.unicodeInput = options.unicodeInput ?? sendWindowsUnicodeText;
+    this.foregroundWindowActivator = options.foregroundWindowActivator ?? activateWindowsForeground;
+    this.foregroundWindowProbe = options.foregroundWindowProbe ?? queryWindowsForegroundWindowId;
     this.clientStarted = false;
     this.clientStartAttempted = false;
     this.sessionStarted = false;
@@ -77,11 +84,72 @@ export class CuaDriverMcpDriver {
     return this.runWork((ticket) => this.listWindowsResources(ticket, { onScreenOnly }));
   }
 
-  async listWindowsResources(ticket, { onScreenOnly }) {
+  listApps() {
+    return this.runWork(async (ticket) => {
+      await this.ensureStartedResources(ticket);
+      const result = await this.client.callTool("list_apps", {});
+      this.assertWorkTicket(ticket);
+      const payload = result.structuredContent ?? result;
+      const processes = new Map((payload.processes ?? []).map((process) => [
+        String(process.name ?? "").toLowerCase(),
+        process,
+      ]));
+      return (payload.apps ?? [])
+        .filter((app) => typeof app.launch_path === "string" && app.launch_path.trim() !== "")
+        .map((app) => {
+          const process = processes.get(executableNameFromLaunchPath(app.launch_path));
+          return {
+            name: app.name,
+            kind: app.kind ?? "desktop",
+            running: app.running === true || Boolean(process),
+            active: app.active === true,
+            pid: Number.isInteger(app.pid) && app.pid > 0 ? app.pid : (process?.pid ?? 0),
+            lastUsed: app.last_used ?? null,
+            launchPath: app.launch_path,
+          };
+        })
+        .sort(compareApplications)
+        .slice(0, 64);
+    });
+  }
+
+  launchApp({ launchPath }) {
+    return this.runWork(async (ticket) => {
+      await this.ensureStartedResources(ticket);
+      const result = await this.client.callTool("launch_app", {
+        launch_path: launchPath,
+        start_minimized: false,
+      });
+      this.assertWorkTicket(ticket);
+      const payload = result.structuredContent ?? result;
+      let windows = (payload.windows ?? []).map(normalizeWindow);
+      for (let attempt = 0; windows.length === 0 && attempt < 8; attempt += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 250));
+        this.assertWorkTicket(ticket);
+        windows = (await this.listWindowsResources(ticket, {
+          onScreenOnly: false,
+          includeForeground: false,
+        }))
+          .filter((window) => !payload.pid || window.pid === payload.pid);
+      }
+      return {
+        status: "launched",
+        pid: payload.pid ?? windows[0]?.pid ?? 0,
+        name: payload.name ?? null,
+        windows,
+      };
+    });
+  }
+
+  async listWindowsResources(ticket, { onScreenOnly, includeForeground = true }) {
     await this.ensureStartedResources(ticket);
     const result = await this.client.callTool("list_windows", {
       on_screen_only: onScreenOnly,
     });
+    this.assertWorkTicket(ticket);
+    const foregroundWindowId = includeForeground
+      ? await this.foregroundWindowProbe()
+      : null;
     this.assertWorkTicket(ticket);
     const windows = result.windows ?? result.structuredContent?.windows ?? [];
     const normalized = windows
@@ -92,9 +160,9 @@ export class CuaDriverMcpDriver {
         && !isComputerUseOverlayWindow(window)
       ));
     normalized.sort(compareWindowZOrder);
-    return normalized.map((window, index) => ({
+    return normalized.map((window) => ({
       ...window,
-      isForeground: index === 0,
+      isForeground: sameNativeWindowId(window.windowId, foregroundWindowId),
     }));
   }
 
@@ -103,6 +171,7 @@ export class CuaDriverMcpDriver {
       const selectsForeground = target === "foreground" || titlePart?.trim() === "*";
       const windows = await this.listWindowsResources(ticket, {
         onScreenOnly: selectsForeground,
+        includeForeground: selectsForeground,
       });
       let window;
       if (selectsForeground) {
@@ -174,6 +243,133 @@ export class CuaDriverMcpDriver {
     });
   }
 
+  captureScreenshot({ window, outputPath }) {
+    return this.runWork(async (ticket) => {
+      await this.ensureStartedResources(ticket);
+      const result = await this.client.callTool("get_window_state", {
+        pid: window.pid,
+        window_id: window.windowId,
+        include_screenshot: true,
+        screenshot_out_file: outputPath,
+        max_elements: 500,
+        max_depth: 20,
+        session: this.session,
+      });
+      this.assertWorkTicket(ticket);
+      const resultWindow = result.window ?? {};
+      const reportedBounds = normalizeBounds(resultWindow.bounds) ?? window.bounds;
+      const screenshot = await readPngArtifact(outputPath);
+      this.assertWorkTicket(ticket);
+      const bounds = reportedBounds && screenshot
+        ? {
+            ...reportedBounds,
+            width: screenshot.width,
+            height: screenshot.height,
+          }
+        : reportedBounds;
+      const capture = {
+        status: "ok",
+        provider: "cua-driver",
+        source: "cua-driver-window-state",
+        title: resultWindow.title ?? window.title,
+        path: outputPath,
+        method: "cua-driver-get_window_state",
+        hwnd: resultWindow.id ?? resultWindow.window_id ?? window.windowId,
+        x: bounds?.x,
+        y: bounds?.y,
+        width: bounds?.width,
+        height: bounds?.height,
+        window: {
+          id: resultWindow.id ?? resultWindow.window_id ?? window.windowId,
+          title: resultWindow.title ?? window.title,
+          pid: resultWindow.pid ?? window.pid,
+          bounds,
+        },
+      };
+      if (screenshot?.bytes) {
+        Object.defineProperty(capture, "artifactBytes", {
+          configurable: false,
+          enumerable: false,
+          value: screenshot.bytes,
+          writable: false,
+        });
+      }
+      return capture;
+    });
+  }
+
+  activateWindow({ window }) {
+    return this.runWork(async (ticket) => {
+      await this.ensureStartedResources(ticket);
+      let activation = null;
+      for (let attempt = 0; attempt < 3; attempt += 1) {
+        activation = await this.client.callTool("bring_to_front", {
+          pid: window.pid,
+          window_id: window.windowId,
+        });
+        this.assertWorkTicket(ticket);
+        const driverConfirmed = activation?.landed_on_target === true
+          || (
+            activation?.landed_on_target !== false
+            && sameNativeWindowId(activation?.now_fg_hwnd, window.windowId)
+          );
+        if (driverConfirmed) {
+          return {
+            status: "ok",
+            effect: "applied",
+            verified: true,
+            activation,
+            foregroundWindow: {
+              ...window,
+              isForeground: true,
+            },
+          };
+        }
+        if (attempt < 2) await new Promise((resolve) => setTimeout(resolve, 75));
+      }
+      let fallbackActivation = null;
+      let fallbackError = null;
+      try {
+        fallbackActivation = await this.foregroundWindowActivator({
+          windowId: window.windowId,
+          processId: window.pid,
+        });
+        this.assertWorkTicket(ticket);
+      } catch (error) {
+        this.assertWorkTicket(ticket);
+        fallbackError = {
+          code: error?.code ?? "foreground_activation.failed",
+          message: error instanceof Error ? error.message : String(error),
+        };
+      }
+      if (fallbackActivation?.landed_on_target === true
+        && sameNativeWindowId(fallbackActivation?.now_fg_hwnd, window.windowId)) {
+        return {
+          status: "ok",
+          effect: "applied",
+          verified: true,
+          activation: fallbackActivation,
+          driverActivation: activation,
+          foregroundWindow: {
+            ...window,
+            isForeground: true,
+          },
+        };
+      }
+      return {
+        status: "indeterminate",
+        effect: "possibly_applied",
+        verified: false,
+        replaySafe: true,
+        activation: fallbackActivation ?? activation,
+        driverActivation: activation,
+        ...(fallbackError ? { fallbackError } : {}),
+        foregroundWindow: null,
+        nextAction: "Call computer.observe mode=\"state\" and verify foregroundWindow before interacting.",
+      };
+    });
+  }
+
   setValue({ window, elementToken, elementIndex, value }) {
     return this.runWork(async (ticket) => {
       await this.ensureStartedResources(ticket);
@@ -190,14 +386,70 @@ export class CuaDriverMcpDriver {
     });
   }
 
-  typeText({ window, elementToken, elementIndex, value, deliveryMode = "background" }) {
+  typeText({
+    window,
+    elementToken,
+    elementIndex,
+    x,
+    y,
+    value,
+    textMode = "insert",
+    inputBehavior = "incremental",
+    deliveryMode = "background",
+  }) {
     return this.runWork(async (ticket) => {
       await this.ensureStartedResources(ticket);
+      if (shouldUseWindowsUnicodeInput({
+        elementToken,
+        elementIndex,
+        x,
+        y,
+        value,
+        deliveryMode,
+      })) {
+        await this.client.callTool("bring_to_front", {
+          pid: window.pid,
+          window_id: window.windowId,
+        });
+        this.assertWorkTicket(ticket);
+        await this.client.callTool("click", {
+          pid: window.pid,
+          window_id: window.windowId,
+          x,
+          y,
+          delivery_mode: "foreground",
+          session: this.session,
+        });
+        this.assertWorkTicket(ticket);
+        const unicodeResult = await this.unicodeInput({
+          windowId: window.windowId,
+          processId: window.pid,
+          text: value,
+          replaceAll: textMode === "replace-all",
+          inputBehavior,
+        });
+        this.assertWorkTicket(ticket);
+        return {
+          status: unicodeResult.status ?? "ok",
+          path: unicodeResult.deliveryPath ?? "windows_unicode_send_input",
+          characters: [...value].length,
+          utf16CodeUnits: unicodeResult.utf16CodeUnits,
+          ...(typeof unicodeResult.clipboardRestored === "boolean"
+            ? { clipboardRestored: unicodeResult.clipboardRestored }
+            : {}),
+          ...(typeof unicodeResult.changeSignalDelivered === "boolean"
+            ? { changeSignalDelivered: unicodeResult.changeSignalDelivered }
+            : {}),
+          textMode,
+          inputBehavior,
+          effect: "possibly_applied",
+          verified: false,
+        };
+      }
       const result = await this.client.callTool("type_text", {
         pid: window.pid,
         window_id: window.windowId,
-        element_index: elementIndex,
-        element_token: elementToken,
+        ...actionAddress({ elementToken, elementIndex, x, y }),
         text: value,
         delivery_mode: deliveryMode,
         session: this.session,
@@ -207,14 +459,30 @@ export class CuaDriverMcpDriver {
     });
   }
 
-  click({ window, elementToken, elementIndex, deliveryMode = "background" }) {
+  click({ window, elementToken, elementIndex, x, y, deliveryMode = "background" }) {
     return this.runWork(async (ticket) => {
       await this.ensureStartedResources(ticket);
       const result = await this.client.callTool("click", {
         pid: window.pid,
         window_id: window.windowId,
-        element_index: elementIndex,
-        element_token: elementToken,
+        ...actionAddress({ elementToken, elementIndex, x, y }),
+        delivery_mode: deliveryMode,
+        session: this.session,
+      });
+      this.assertWorkTicket(ticket);
+      return result;
+    });
+  }
+
+  pressKey({ window, elementToken, elementIndex, x, y, key, modifiers, deliveryMode = "background" }) {
+    return this.runWork(async (ticket) => {
+      await this.ensureStartedResources(ticket);
+      const result = await this.client.callTool("press_key", {
+        pid: window.pid,
+        window_id: window.windowId,
+        ...actionAddress({ elementToken, elementIndex, x, y }),
+        key,
+        ...(Array.isArray(modifiers) ? { modifiers } : {}),
         delivery_mode: deliveryMode,
         session: this.session,
       });
@@ -312,6 +580,47 @@ export class CuaDriverMcpDriver {
     if (this.lifecycleState !== "open" || ticket.generation !== this.lifecycleGeneration) {
       throw lifecycleClosedError();
     }
+  }
+}
+
+function actionAddress({ elementToken, elementIndex, x, y }) {
+  if (Number.isFinite(x) && Number.isFinite(y)) return { x, y };
+  const address = {};
+  if (elementToken !== undefined) address.element_token = elementToken;
+  if (elementIndex !== undefined) address.element_index = elementIndex;
+  return address;
+}
+
+function shouldUseWindowsUnicodeInput({
+  elementToken,
+  elementIndex,
+  x,
+  y,
+  value,
+  deliveryMode,
+}) {
+  return deliveryMode === "foreground"
+    && elementToken === undefined
+    && elementIndex === undefined
+    && Number.isFinite(x)
+    && Number.isFinite(y)
+    && containsNonAsciiCodeUnit(value);
+}
+
+function containsNonAsciiCodeUnit(value) {
+  if (typeof value !== "string") return false;
+  for (let index = 0; index < value.length; index += 1) {
+    if (value.charCodeAt(index) > 0x7f) return true;
+  }
+  return false;
+}
+
+function sameNativeWindowId(left, right) {
+  try {
+    if (left === null || left === undefined || right === null || right === undefined) return false;
+    return BigInt(left).toString() === BigInt(right).toString();
+  } catch {
+    return String(left) === String(right);
   }
 }
 
@@ -480,6 +789,30 @@ function normalizeBounds(bounds) {
   };
 }
 
+async function readPngArtifact(filePath) {
+  for (let attempt = 0; attempt < 8; attempt += 1) {
+    try {
+      const bytes = await readFile(filePath);
+      if (bytes.byteLength < 24
+        || bytes.toString("hex", 0, 8) !== "89504e470d0a1a0a"
+        || bytes.toString("ascii", 12, 16) !== "IHDR") {
+        return undefined;
+      }
+      const width = bytes.readUInt32BE(16);
+      const height = bytes.readUInt32BE(20);
+      if (!Number.isSafeInteger(width) || width <= 0
+        || !Number.isSafeInteger(height) || height <= 0) {
+        return undefined;
+      }
+      return { width, height, bytes };
+    } catch {
+      if (attempt === 7) return undefined;
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+  }
+  return undefined;
+}
+
 function normalizeWindow(window, index) {
   const zIndex = Number.isFinite(window.z_index)
     ? window.z_index
@@ -496,6 +829,25 @@ function normalizeWindow(window, index) {
     isForeground: false,
     bounds: normalizeBounds(window.bounds),
   };
+}
+
+function executableNameFromLaunchPath(launchPath) {
+  const trimmed = String(launchPath).trim();
+  let executable;
+  if (trimmed.startsWith("\"")) {
+    const closingQuote = trimmed.indexOf("\"", 1);
+    executable = closingQuote > 1 ? trimmed.slice(1, closingQuote) : trimmed.slice(1);
+  } else {
+    const firstSpace = trimmed.indexOf(" ");
+    executable = firstSpace === -1 ? trimmed : trimmed.slice(0, firstSpace);
+  }
+  return executable.replaceAll("/", "\\").split("\\").at(-1).toLowerCase();
+}
+
+function compareApplications(left, right) {
+  if (left.running !== right.running) return left.running ? -1 : 1;
+  if (left.active !== right.active) return left.active ? -1 : 1;
+  return String(right.lastUsed ?? "").localeCompare(String(left.lastUsed ?? ""));
 }
 
 function compareWindowZOrder(left, right) {

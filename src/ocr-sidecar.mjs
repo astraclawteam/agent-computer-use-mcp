@@ -91,9 +91,13 @@ export function selectOcrRuntime(availableProviders = []) {
 }
 
 export function normalizeOcrSidecarResponse(response, options = {}) {
+  const modelIdentity = pickOcrModelIdentity(response);
   const elements = (response.items ?? []).map((item, index) => {
     const rawText = String(item.text ?? "");
     const text = normalizeRecognizedUiText(rawText, { languageClass: options.languageClass ?? "mixed" });
+    const bounds = normalizeBounds(item.bounds);
+    const confidence = Number(item.confidence ?? 0);
+    const proposalId = `ocr-proposal-${index + 1}`;
     return {
       elementToken: `ocr-${index + 1}`,
       elementIndex: index,
@@ -103,9 +107,22 @@ export function normalizeOcrSidecarResponse(response, options = {}) {
       rawTextSha256: createHash("sha256").update(rawText, "utf8").digest("hex"),
       state: {},
       actions: ["click"],
-      bounds: normalizeBounds(item.bounds),
-      confidence: Number(item.confidence ?? 0),
+      bounds,
+      sourceRegion: bounds,
+      interactionPoint: {
+        x: bounds.x + (bounds.width / 2),
+        y: bounds.y + (bounds.height / 2),
+      },
+      geometryKind: "recognized-text",
+      interactionPointSemantics: "recognized-text-center",
+      controlBoundsKnown: false,
+      editableInteriorKnown: false,
+      confidence,
       source: "ocr",
+      proposalId,
+      modelIdentity,
+      support: [{ provider: "ocr", confidence, proposalId }],
+      guessedAction: false,
       pixelLimitedAction: true,
     };
   });
@@ -128,6 +145,16 @@ export function normalizeOcrSidecarResponse(response, options = {}) {
     timings: response.timings,
     includeUserOverlay: false,
   };
+}
+
+function pickOcrModelIdentity(response) {
+  const identity = { provider: "xiaozhiclaw-ocr-sidecar" };
+  for (const key of ["model", "modelPack", "modelFormat", "runtime", "executionProvider"]) {
+    if (typeof response?.[key] === "string" && response[key].trim() !== "") {
+      identity[key] = response[key];
+    }
+  }
+  return identity;
 }
 
 export class OcrSidecarClient {

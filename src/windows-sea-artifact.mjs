@@ -216,6 +216,24 @@ async function copyRuntimePackages(runtimeRoot) {
       recursive: true,
       filter: (path) => shouldCopyRuntimePackagePath(source, path, packageName),
     });
+    if (packageName === "onnxruntime-node") {
+      await pruneOnnxRuntimeNativeTargets(destination);
+    }
+  }
+}
+
+export async function pruneOnnxRuntimeNativeTargets(packageRoot) {
+  const nativeRoot = join(packageRoot, "bin", "napi-v6");
+  for (const entry of await readdir(nativeRoot, { withFileTypes: true })) {
+    if (entry.name !== "win32") {
+      await rm(join(nativeRoot, entry.name), { recursive: true, force: true });
+    }
+  }
+  const windowsRoot = join(nativeRoot, "win32");
+  for (const entry of await readdir(windowsRoot, { withFileTypes: true })) {
+    if (entry.name !== "x64") {
+      await rm(join(windowsRoot, entry.name), { recursive: true, force: true });
+    }
   }
 }
 

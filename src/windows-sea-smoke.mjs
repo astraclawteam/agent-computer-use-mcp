@@ -78,7 +78,7 @@ export async function runWindowsSeaSmoke(options = {}) {
         deliveryMode: "background",
         captureAfter: true,
       },
-    });
+    }, { allowToolError: true });
     await wait(300);
     const savedText = await readFile(outputFile, "utf8");
     const cancel = await connection.call("computer.release", { reason: "layer-a-complete" });
@@ -87,6 +87,9 @@ export async function runWindowsSeaSmoke(options = {}) {
       access.status !== "granted"
       || capture.includeUserOverlay !== false
       || click.includeUserOverlay !== false
+      || click.status !== "ok"
+      || click.outcome !== "applied"
+      || click.result?.verified !== true
       || savedText !== "windows-sea-layer-a"
       || cancel.status !== "cancelled"
       || state.status !== "idle"
@@ -95,6 +98,8 @@ export async function runWindowsSeaSmoke(options = {}) {
         access: access.status,
         captureOverlay: capture.includeUserOverlay,
         clickOverlay: click.includeUserOverlay,
+        clickStatus: click.status,
+        clickOutcome: click.outcome,
         savedText,
         cancel: cancel.status,
         state: state.status,
@@ -152,13 +157,15 @@ function createMcpConnection(executablePath, cwd, environment = {}) {
   return {
     connect: () => client.connect(transport),
     listTools: async () => (await client.listTools()).tools.map(({ name }) => name),
-    call: async (name, args) => {
+    call: async (name, args, { allowToolError = false } = {}) => {
       const result = await client.callTool({ name, arguments: args });
-      if (result.isError) throw smokeError("sea_smoke.tool_failed", `${name}: ${JSON.stringify(result.structuredContent)}`);
+      if (result.isError && !allowToolError) {
+        throw smokeError("sea_smoke.tool_failed", `${name}: ${JSON.stringify(result.structuredContent)}`);
+      }
       return result.structuredContent ?? result;
     },
     close: async () => {
-      await client.callTool({ name: "computer.revoke", arguments: { reason: "layer-a-client-close" } }).catch(() => {});
+      await client.callTool({ name: "computer.release", arguments: { reason: "layer-a-client-close" } }).catch(() => {});
       await client.close().catch((error) => {
         throw smokeError("sea_smoke.close_failed", `${error.message}; stderr=${stderr}`);
       });

@@ -1,5 +1,5 @@
-export const DEFAULT_ALLOWED_ACTION_KINDS = ["set_value", "type_text", "click"];
-export const DEFAULT_DELIVERY_MODES = ["background"];
+export const DEFAULT_ALLOWED_ACTION_KINDS = ["activate_window", "set_value", "type_text", "click", "press_key"];
+export const DEFAULT_DELIVERY_MODES = ["background", "foreground"];
 export const DEFAULT_PERMISSION_TIERS = ["observe", "full", "admin"];
 export const DEFAULT_DENIED_WINDOW_CATEGORIES = [
   "credential-manager",
@@ -94,12 +94,39 @@ export function createComputerUsePolicy(options = {}) {
         return deny("permission.denied", { tier, requiredTier: "full" });
       }
 
+      const activatesControllerWindow = action.kind === "activate_window";
       const hasElementRef = action.elementToken !== undefined || action.elementIndex !== undefined;
-      if (!hasElementRef) {
-        return deny("action.element_required");
+      const hasPixelRef = Number.isFinite(action.x) && Number.isFinite(action.y);
+      const isGlobalKeyboardAction = action.kind === "press_key" || action.kind === "type_text";
+      if (!activatesControllerWindow && !hasElementRef && !hasPixelRef) {
+        if (!isGlobalKeyboardAction) return deny("action.element_required");
+        if (typeof action.focusReceiptId !== "string" || action.focusReceiptId.trim() === "") {
+          return deny("focus.receipt_required");
+        }
+      }
+      if (hasPixelRef && (typeof action.observationId !== "string" || action.observationId.trim() === "")) {
+        return deny("action.observation_required");
       }
       if ((action.kind === "set_value" || action.kind === "type_text") && typeof action.value !== "string") {
         return deny("action.value_required");
+      }
+      if (action.kind === "type_text" && !["insert", "replace-all"].includes(action.textMode)) {
+        return deny("action.text_mode_required", {
+          allowedTextModes: ["insert", "replace-all"],
+        });
+      }
+      if (action.kind === "type_text"
+        && action.inputBehavior !== undefined
+        && !["incremental", "commit"].includes(action.inputBehavior)) {
+        return deny("action.input_behavior_unsupported", {
+          allowedInputBehaviors: ["incremental", "commit"],
+        });
+      }
+      if (action.kind === "type_text" && action.textMode === "replace-all" && !hasPixelRef) {
+        return deny("action.replace_all_requires_pixel_target");
+      }
+      if (action.kind === "press_key" && (typeof action.key !== "string" || action.key.trim() === "")) {
+        return deny("action.key_required");
       }
 
       const deliveryMode = action.deliveryMode ?? "background";
