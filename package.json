@@ -1,6 +1,6 @@
 {
   "name": "agent-computer-use-mcp",
-  "version": "0.0.7",
+  "version": "0.0.8",
   "description": "Evidence-driven Windows Computer Use for MCP Hosts: semantic observation, local OCR, secure screenshots, Unicode actions, and verified cleanup.",
   "private": true,
   "license": "MIT",
@@ -12,7 +12,7 @@
   "bugs": {
     "url": "https://github.com/astraclawteam/agent-computer-use-mcp/issues"
   },
-  "homepage": "https://github.com/astraclawteam/agent-computer-use-mcp#readme",
+  "homepage": "https://xiaozhi.qlogicagent.com/",
   "keywords": [
     "mcp",
     "computer-use",
