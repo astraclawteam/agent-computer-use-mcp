@@ -4,9 +4,14 @@ All notable changes to `agent-computer-use-mcp` are tracked here.
 
 ## 0.0.26
 
-- Emit a reversible native edit boundary after incremental Unicode input so custom-drawn search, filtering, validation, and autocomplete models refresh.
-- Preserve the exact requested text while making the incremental path's `changeSignalDelivered` receipt truthful.
-- Share the same change-boundary behavior across incremental and paste-style Unicode delivery.
+- Restore tray-resident applications without falling through to a duplicate launcher, prefer materially restored primary surfaces, and select enabled owned modal windows when they block a disabled owner.
+- Keep auxiliary, backdrop, compact launcher, and stale editable surfaces from stealing focus or action targeting in multi-window applications.
+- Emit a reversible native edit boundary after incremental Unicode input so custom-drawn search, filtering, validation, and autocomplete models refresh while preserving the exact requested text.
+- Attach a bounded semantic observation to successful acquisition and a target-local observation to actions, so the Agent can verify effects without redundant full-window captures.
+- Make OCR geometry observation-only, reject repeated unconfirmed mutations, and execute screenshot-grounded clicks at the verified target center.
+- Prefer changed-region and local-crop OCR, suppress repeated visual understanding for materially unchanged frames, and keep explicit visual crops bounded to the requested scene.
+- Compact application state, semantic elements, OCR rows, lifecycle receipts, and routing metadata on the model-facing channel while retaining complete Host-verifiable structured results.
+- Keep the Agent-facing contract at four tools and preserve Host-only health, diagnostics, installation, and repair operations.
 
 ## 0.0.25
 

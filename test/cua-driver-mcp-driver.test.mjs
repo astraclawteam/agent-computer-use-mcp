@@ -210,7 +210,7 @@ test("CuaDriverMcpDriver maps request/capture/action to cua-driver MCP tools", a
   ]);
 });
 
-test("CuaDriverMcpDriver uses verified Windows Unicode input for coordinate-grounded foreground text", async () => {
+test("CuaDriverMcpDriver distinguishes foreground-window verification from editable focus", async () => {
   const calls = [];
   const unicodeCalls = [];
   const driver = new CuaDriverMcpDriver({
@@ -286,7 +286,7 @@ test("CuaDriverMcpDriver uses verified Windows Unicode input for coordinate-grou
     inputBehavior: "incremental",
     effect: "possibly_applied",
     verified: false,
-    focusVerified: true,
+    focusVerified: false,
     foregroundWindow: {
       windowId: 42,
       pid: 1234,
@@ -541,8 +541,8 @@ test("CuaDriverMcpDriver captures the exact screenshot coordinate source used by
         window_id: 42,
         include_screenshot: true,
         screenshot_out_file: "C:\\controlled\\window.png",
-        max_elements: 500,
-        max_depth: 20,
+        max_elements: 1,
+        max_depth: 1,
         session: "screenshot-coordinate-session",
       },
     },
@@ -1032,6 +1032,155 @@ test("CuaDriverMcpDriver ignores an open auxiliary window until tray restoration
   assert.equal(calls.some(({ name }) => name === "launch_app"), false);
 });
 
+test("CuaDriverMcpDriver selects an enabled owned modal before its disabled application window", async () => {
+  const calls = [];
+  let foregroundWindowId = "999";
+  let trayInvoked = false;
+  const driver = new CuaDriverMcpDriver({
+    session: "blocking-owned-modal-session",
+    foregroundWindowProbe: async () => foregroundWindowId,
+    windowRelationshipProbe: async ({ windowIds }) => {
+      assert.deepEqual(windowIds, [92, 93]);
+      return [
+        { windowId: "92", ownerWindowId: null, enabled: false },
+        { windowId: "93", ownerWindowId: "92", enabled: true },
+      ];
+    },
+    trayApplicationActivator: async () => {
+      trayInvoked = true;
+      return { status: "invoked" };
+    },
+    client: {
+      async start() {},
+      async callTool(name, args) {
+        calls.push({ name, args });
+        if (name === "list_windows") {
+          return {
+            windows: [
+              {
+                window_id: 93,
+                title: "Account notice",
+                app_name: "target-app.exe",
+                pid: 505,
+                is_on_screen: true,
+                bounds: { x: 790, y: 390, width: 330, height: 219 },
+                z_index: 2,
+              },
+              {
+                window_id: 92,
+                title: "Target App",
+                app_name: "target-app.exe",
+                pid: 505,
+                is_on_screen: true,
+                bounds: { x: 811, y: 325, width: 296, height: 388 },
+                z_index: 1,
+              },
+            ],
+          };
+        }
+        if (name === "bring_to_front") {
+          foregroundWindowId = String(args.window_id);
+          return {
+            landed_on_target: true,
+            now_fg_hwnd: String(args.window_id),
+          };
+        }
+        if (name === "launch_app") throw new Error("must not launch while a blocking modal exists");
+        return { status: "ok" };
+      },
+    },
+  });
+
+  const result = await driver.launchApp({
+    launchPath: "C:\\Program Files\\Target App\\target-app.exe",
+    name: "Target App",
+    pid: 505,
+    running: true,
+  });
+
+  assert.equal(result.status, "restored");
+  assert.equal(result.method, "blocking-owned-window");
+  assert.equal(result.windows[0].windowId, 93);
+  assert.equal(trayInvoked, false);
+  assert.deepEqual(calls.filter(({ name }) => name === "bring_to_front"), [{
+    name: "bring_to_front",
+    args: { pid: 505, window_id: 93 },
+  }]);
+});
+
+test("CuaDriverMcpDriver restores the primary window before accepting a same-title compact launcher", async () => {
+  const calls = [];
+  let trayInvoked = false;
+  let windowPollsAfterTray = 0;
+  const driver = new CuaDriverMcpDriver({
+    session: "tray-compact-launcher-session",
+    trayApplicationActivator: async ({ name }) => {
+      assert.equal(name, "Target App");
+      trayInvoked = true;
+      return { status: "invoked" };
+    },
+    client: {
+      async start() {},
+      async callTool(name, args) {
+        calls.push({ name, args });
+        if (name === "list_windows") {
+          if (trayInvoked) windowPollsAfterTray += 1;
+          return {
+            windows: [
+              {
+                window_id: 92,
+                title: "Target App",
+                app_name: "target-app.exe",
+                pid: 505,
+                is_on_screen: true,
+                bounds: { x: 811, y: 325, width: 296, height: 388 },
+                z_index: 2,
+              },
+              {
+                window_id: 93,
+                title: "Transfer",
+                app_name: "target-app.exe",
+                pid: 505,
+                is_on_screen: true,
+                bounds: { x: 790, y: 390, width: 330, height: 219 },
+                z_index: 1,
+              },
+              ...(trayInvoked && windowPollsAfterTray >= 2 ? [{
+                window_id: 94,
+                title: "Target App",
+                app_name: "target-app.exe",
+                pid: 505,
+                is_on_screen: true,
+                bounds: { x: 180, y: 90, width: 952, height: 722 },
+                z_index: 3,
+              }] : []),
+            ],
+          };
+        }
+        if (name === "bring_to_front") {
+          throw new Error("must not activate a compact launcher while a primary window is restorable");
+        }
+        if (name === "launch_app") throw new Error("must not launch a restored tray process");
+        return { status: "ok" };
+      },
+    },
+  });
+
+  const result = await driver.launchApp({
+    launchPath: "C:\\Program Files\\Target App\\target-app.exe",
+    name: "Target App",
+    pid: 505,
+    running: true,
+  });
+
+  assert.equal(result.status, "restored");
+  assert.equal(result.method, "tray-accessibility-invoke");
+  assert.equal(result.windows[0].windowId, 94);
+  assert.equal(windowPollsAfterTray, 2);
+  assert.equal(calls.some(({ name }) => name === "bring_to_front"), false);
+  assert.equal(calls.some(({ name }) => name === "launch_app"), false);
+});
+
 test("CuaDriverMcpDriver projects a restorable token source for tray-only processes", async () => {
   const driver = new CuaDriverMcpDriver({
     session: "tray-process-discovery-session",
@@ -1310,6 +1459,54 @@ test("CuaDriverMcpDriver selects the controllable primary window over a same-tit
     pid: 900,
     bounds: { x: 100, y: 100, width: 952, height: 702 },
   });
+});
+
+test("CuaDriverMcpDriver omits a non-foreground process backdrop when an interactive sibling exists", async () => {
+  const driver = new CuaDriverMcpDriver({
+    session: "process-backdrop-filter",
+    foregroundWindowProbe: async () => "999",
+    client: {
+      async start() {},
+      async callTool(name) {
+        if (name === "list_windows") {
+          return {
+            windows: [
+              {
+                window_id: 201,
+                title: "Sample",
+                app_name: "Sample.exe",
+                pid: 901,
+                z_index: 10,
+                is_on_screen: true,
+                bounds: { x: 0, y: 0, width: 2720, height: 1080 },
+              },
+              {
+                window_id: 202,
+                title: "Preferences",
+                app_name: "Sample.exe",
+                pid: 901,
+                z_index: 9,
+                is_on_screen: true,
+                bounds: { x: 600, y: 180, width: 642, height: 561 },
+              },
+            ],
+          };
+        }
+        return { status: "ok" };
+      },
+    },
+  });
+
+  assert.deepEqual(await driver.listWindows({ onScreenOnly: false }), [{
+    windowId: 202,
+    title: "Preferences",
+    appName: "Sample.exe",
+    pid: 901,
+    zIndex: 9,
+    isOnScreen: true,
+    isForeground: false,
+    bounds: { x: 600, y: 180, width: 642, height: 561 },
+  }]);
 });
 
 test("CuaDriverMcpDriver leaves the cursor disabled when styling fails and still closes its session", async () => {

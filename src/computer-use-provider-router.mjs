@@ -39,6 +39,12 @@ const ACTION_OBSERVATION_TTL_MS = 30_000;
 const VISUAL_GROUNDING_OBSERVATION_TTL_MS = 120_000;
 const FOCUS_RECEIPT_TTL_MS = 30_000;
 const LOCAL_OCR_LATENCY_BUDGET_MS = 5_000;
+const SCREENSHOT_LATENCY_BUDGET_MS = 8_000;
+const POST_ACTION_UI_SETTLE_MS = 220;
+const STABLE_FRAME_OBSERVATION_LIMIT = 6;
+const PUBLIC_OBSERVATION_LIMIT = 7;
+const VISUAL_ATTEMPT_WINDOW_MS = 30_000;
+const VISUAL_REGION_HINT_TTL_MS = 120_000;
 const STABLE_SEMANTIC_SOURCES = new Set(["cua-driver", "uia", "uia-som", "semantic"]);
 
 export class ComputerUseProviderRouter {
@@ -73,7 +79,12 @@ export class ComputerUseProviderRouter {
     this.lastCapture = null;
     this.lastScreenshot = null;
     this.lastVisualUnderstanding = null;
+    this.lastActionVisualCrop = null;
+    this.lastFocusedObservationCrop = null;
+    this.consecutivePublicObservations = 0;
+    this.interactionStep = 0;
     this.pendingUnverifiedMutation = null;
+    this.unconfirmedMutationHistory = [];
     this.lastDesktopState = null;
     this.surfaceGeneration = 0;
     this.consumedSurfaceReceiptId = null;
@@ -828,11 +839,29 @@ export class ComputerUseProviderRouter {
   }
 
   capture(args = {}) {
-    return this.runOperation((ticket) => this.captureOperation(args, ticket));
+    return this.runOperation((ticket) => this.captureOperation({
+      ...args,
+      publicObservation: true,
+    }, ticket));
   }
 
   async captureOperation(args = {}, ticket) {
     await this.awaitExternal(ticket, () => this.requireActiveController(ticket, args.requestContext));
+    if (args.publicObservation === true) {
+      if (this.consecutivePublicObservations >= PUBLIC_OBSERVATION_LIMIT) {
+        fail(
+          "observation.step_budget_exhausted",
+          "The current interaction step has already consumed its observation budget. Perform a grounded action from existing evidence or release control and report the blocker.",
+          {
+            retryable: false,
+            allowedNextTools: ["computer.act", "computer.release"],
+            observationCount: this.consecutivePublicObservations,
+            observationLimit: PUBLIC_OBSERVATION_LIMIT,
+          },
+        );
+      }
+      this.consecutivePublicObservations += 1;
+    }
     await this.assertDesktopInteractive(ticket, "observe");
     const mode = args.mode ?? "semantic";
     let observation;
@@ -843,6 +872,31 @@ export class ComputerUseProviderRouter {
         mode,
         controllerId: this.activeController.controllerId,
       }));
+      const semanticAssessment = assessSemanticActionability(observation);
+      if (!semanticAssessment.sufficient && this.canReuseLatestScreenshotObservation()) {
+        const preserved = {
+          ...this.lastCapture,
+          semanticProbe: {
+            status: "insufficient",
+            actionableElementCount: semanticAssessment.actionableElementCount,
+            namedActionableRatio: semanticAssessment.namedActionableRatio,
+            preservedObservationId: this.lastCapture.observationId,
+          },
+          perceptionRouting: {
+            selectedMode: "semantic-fallback-existing-screenshot",
+            avoidedVision: true,
+            sufficient: false,
+            actionableElementCount: semanticAssessment.actionableElementCount,
+            namedActionableRatio: semanticAssessment.namedActionableRatio,
+            reason: "empty-semantic-probe-preserved-fresh-screenshot",
+          },
+        };
+        this.recordAudit("computer.capture.semantic_insufficient", {
+          controllerId: this.activeController.controllerId,
+          preservedObservationId: this.lastCapture.observationId,
+        });
+        return preserved;
+      }
     } else if (mode === "ocr-region") {
       observation = (await this.awaitExternal(ticket, () => this.ocrRegionOperation({
         titlePart: this.activeController.window.title,
@@ -876,7 +930,10 @@ export class ComputerUseProviderRouter {
       } else {
         const screenshot = await this.awaitExternal(ticket, () => this.captureWindowOperation({
           titlePart: this.activeController.window.title,
-          timeoutMs: args.timeoutMs,
+          timeoutMs: Math.min(
+            positiveTimeout(args.timeoutMs, SCREENSHOT_LATENCY_BUDGET_MS),
+            SCREENSHOT_LATENCY_BUDGET_MS,
+          ),
         }, ticket));
         observation = await this.prioritizeLocalScreenshotPerception(screenshot, args, ticket);
       }
@@ -897,6 +954,17 @@ export class ComputerUseProviderRouter {
       observationId: this.lastCapture.observationId,
     });
     return this.lastCapture;
+  }
+
+  canReuseLatestScreenshotObservation() {
+    const latest = this.lastCapture;
+    if (!latest || !isImageBearingObservation(latest)) return false;
+    const receipt = latest.surfaceReceipt;
+    if (!receipt?.id || receipt.id === this.consumedSurfaceReceiptId) return false;
+    if (receipt.controllerId !== this.activeController?.controllerId) return false;
+    if (receipt.windowId !== controllerWindowId(this.activeController?.window)) return false;
+    const expiresAtMs = Number(latest.expiresAt);
+    return Number.isFinite(expiresAtMs) && expiresAtMs > this.clock.now();
   }
 
   async prioritizeLocalScreenshotPerception(screenshot, args, ticket) {
@@ -920,7 +988,42 @@ export class ComputerUseProviderRouter {
         : Number.isFinite(screenshot.window?.bounds?.width) && Number.isFinite(screenshot.window?.bounds?.height)
           ? { x: 0, y: 0, width: screenshot.window.bounds.width, height: screenshot.window.bounds.height }
           : null;
-    const requestedCrop = normalizeObservationCrop(args.crop, visualBounds);
+    const explicitVisualQuestion = typeof args.visualQuestion === "string"
+      ? args.visualQuestion.trim()
+      : "";
+    const hintedActionCrop = args.crop == null
+      && this.lastActionVisualCrop?.windowId === windowId
+      && this.lastActionVisualCrop.expiresAtMs >= this.clock.now()
+      ? this.lastActionVisualCrop.crop
+      : null;
+    const hintedObservationCrop = args.crop == null
+      && hintedActionCrop == null
+      && this.lastFocusedObservationCrop?.windowId === windowId
+      && this.lastFocusedObservationCrop.expiresAtMs >= this.clock.now()
+      ? this.lastFocusedObservationCrop.crop
+      : null;
+    const suggestedVisualRegion = hintedActionCrop ?? hintedObservationCrop;
+    // A previous action target is only a locality hint, not authority to crop a
+    // later question. The next ambiguity may concern the containing context,
+    // and silently inheriting the old crop can make a truthful vision model
+    // report that the rest of the UI is absent. The caller must opt into a
+    // bounded crop explicitly; changed-region OCR remains automatic.
+    const requestedCrop = normalizeObservationCrop(
+      args.crop,
+      visualBounds,
+    );
+    const cropAdjustment = describeObservationCropAdjustment(args.crop, requestedCrop, visualBounds);
+    const observationSignature = JSON.stringify({
+      crop: requestedCrop,
+      visualQuestion: explicitVisualQuestion,
+    });
+    if (args.crop != null && requestedCrop) {
+      this.lastFocusedObservationCrop = {
+        windowId,
+        crop: requestedCrop,
+        expiresAtMs: this.clock.now() + VISUAL_REGION_HINT_TTL_MS,
+      };
+    }
     let dirtyRegion = null;
     let unchanged = false;
     if (previous?.path) {
@@ -936,16 +1039,25 @@ export class ComputerUseProviderRouter {
       }
     }
 
-    const explicitVisualQuestion = typeof args.visualQuestion === "string"
-      ? args.visualQuestion.trim()
-      : "";
     const baselineOcrAttempts = previous?.baselineOcrAttempts ?? 0;
     const retryBaselineOcr = unchanged
       && previous?.ocrBaselineReady !== true
       && baselineOcrAttempts < 2;
-    const shouldRunLocalOcr = !unchanged || retryBaselineOcr;
+    const stableFrameObservations = unchanged
+      ? (previous?.stableFrameObservations ?? 0) + 1
+      : 0;
+    const stableFrameObservationBlocked = stableFrameObservations >= STABLE_FRAME_OBSERVATION_LIMIT
+      && !retryBaselineOcr;
+    const shouldRunLocalOcr = !stableFrameObservationBlocked && (
+      !unchanged
+      || retryBaselineOcr
+      || Boolean(requestedCrop && args.effectHintRegion)
+    );
     let localObservation = null;
+    let primaryOcrElements = [];
+    let secondaryOcrElements = [];
     let ocrRegion = null;
+    let secondaryOcrRegion = null;
     let ocrError = null;
 
     if (shouldRunLocalOcr) {
@@ -966,6 +1078,42 @@ export class ComputerUseProviderRouter {
           coordinateTransform: screenshot.coordinateTransform,
           coordinateScale: screenshot.coordinateScale,
         };
+        primaryOcrElements = Array.isArray(localObservation.elements)
+          ? localObservation.elements
+          : [];
+        if (args.includeChangedRegionAlongsideCrop === true && requestedCrop) {
+          // A declared selection effect is more useful than the global dirty
+          // bounding box: sparse animation or live content can stretch that box
+          // across the whole frame and make it materially overlap the clicked
+          // item crop. Prefer the geometry-derived sibling/effect region, then
+          // fall back to the changed pixels when no effect region was planned.
+          const changedRegionCandidate = selectSecondaryOcrRegion({
+            effectHintRegion: args.effectHintRegion,
+            dirtyRegion,
+            visualBounds,
+          });
+          if (
+            changedRegionCandidate
+            && !regionsMateriallyOverlap(requestedCrop, changedRegionCandidate)
+          ) {
+            secondaryOcrRegion = changedRegionCandidate;
+            const secondaryOcr = await this.awaitExternal(ticket, () => this.ocrRegionOperation({
+              imagePath,
+              crop: secondaryOcrRegion,
+              timeoutMs: Math.min(
+                positiveTimeout(args.timeoutMs, LOCAL_OCR_LATENCY_BUDGET_MS),
+                LOCAL_OCR_LATENCY_BUDGET_MS,
+              ),
+            }, ticket));
+            secondaryOcrElements = Array.isArray(secondaryOcr.observation?.elements)
+              ? secondaryOcr.observation.elements
+              : [];
+            localObservation = mergeLocalOcrObservations(
+              localObservation,
+              secondaryOcr.observation,
+            );
+          }
+        }
       } catch (error) {
         this.assertOperationTicket(ticket);
         ocrError = serializeToolError(error);
@@ -991,21 +1139,54 @@ export class ComputerUseProviderRouter {
       previousElements: previousOcrElements,
       currentElements: currentOcrElements,
     });
+    const visualRegion = explicitVisualQuestion && requestedCrop
+      ? expandVisualContextRegion(requestedCrop, visualBounds)
+      : requestedCrop;
+    const dirtyRegionOutsideVisualRegion = isCoordinateBox(dirtyRegion)
+      && isCoordinateBox(visualRegion)
+      && !boxesIntersect(dirtyRegion, visualRegion);
     const visualSceneStable = unchanged
       || isVisuallyImmaterialDirtyRegion(dirtyRegion, visualBounds)
-      || nonSemanticSparseChange;
+      || nonSemanticSparseChange
+      || dirtyRegionOutsideVisualRegion;
+    // Changed pixels are a low-latency OCR hint, not authority to crop an
+    // explicit layout/icon question. Animations and live content can dominate
+    // a diff while being unrelated to the requested ambiguity. Only a crop
+    // explicitly supplied by the caller constrains Host vision.
+    const sameVisualInteraction = this.lastVisualUnderstanding?.interactionStep === this.interactionStep;
+    const sameVisualRegion = regionsMateriallyOverlap(
+      this.lastVisualUnderstanding?.region,
+      visualRegion,
+    );
+    const repeatedStableVisualRegion = Boolean(
+      sameVisualInteraction
+      && sameVisualRegion
+      && visualSceneStable,
+    );
     const repeatedVisualFrame = Boolean(
       explicitVisualQuestion
-      && visualSceneStable
       && this.lastVisualUnderstanding?.windowId === windowId
-      && this.lastVisualUnderstanding?.question === explicitVisualQuestion,
+      && (
+        this.lastVisualUnderstanding?.observedAtMs + VISUAL_ATTEMPT_WINDOW_MS >= this.clock.now()
+        || repeatedStableVisualRegion
+      ),
     );
-    const visualUnderstandingEligible = Boolean(explicitVisualQuestion) && !repeatedVisualFrame;
-    if (visualUnderstandingEligible || repeatedVisualFrame) {
+    const visualUnderstandingEligible = Boolean(explicitVisualQuestion)
+      && !repeatedVisualFrame
+      && !stableFrameObservationBlocked;
+    const unchangedObservationStreak = unchanged
+      && previous?.observationSignature === observationSignature
+      ? (previous.unchangedObservationStreak ?? 0) + 1
+      : 0;
+    const repeatedUnchangedObservation = unchangedObservationStreak >= 2 && !retryBaselineOcr;
+    if (visualUnderstandingEligible) {
       this.lastVisualUnderstanding = {
         digest: currentDigest,
         question: explicitVisualQuestion,
         windowId,
+        interactionStep: this.interactionStep,
+        region: visualRegion,
+        observedAtMs: this.clock.now(),
       };
     }
     this.lastScreenshot = {
@@ -1014,14 +1195,52 @@ export class ComputerUseProviderRouter {
       windowId,
       ocrBaselineReady,
       baselineOcrAttempts: nextBaselineOcrAttempts,
+      observationSignature,
+      unchangedObservationStreak,
+      stableFrameObservations,
       ocrElements: shouldRunLocalOcr
-        ? mergeOcrElementSnapshots(previousOcrElements, currentOcrElements, ocrRegion)
+        ? mergePostActionOcrElementSnapshots({
+            previousElements: previousOcrElements,
+            primaryElements: primaryOcrElements.length > 0 ? primaryOcrElements : currentOcrElements,
+            primaryRegion: ocrRegion,
+            secondaryElements: secondaryOcrElements,
+            secondaryRegion: secondaryOcrRegion,
+          })
         : previousOcrElements,
     };
+
+    const noProgress = repeatedUnchangedObservation || stableFrameObservationBlocked || repeatedVisualFrame
+      ? {
+          status: "blocked",
+          unchangedObservations: unchangedObservationStreak,
+          stableFrameObservations,
+          nextAction: stableFrameObservationBlocked
+            ? "Do not call computer.observe again on this unchanged frame. Act from existing evidence or release control and report the blocker."
+            : repeatedUnchangedObservation
+              ? "Do not call computer.observe again for this unchanged region. Act from the existing evidence, inspect a different bounded region, or release control and report the blocker."
+              : "Do not call visual again in this bounded interaction window. Use the completed visual grounding plus current OCR evidence; perform the next distinct action, release control, or report the remaining blocker.",
+        }
+      : null;
 
     return {
       ...screenshot,
       ...(localObservation ? { localObservation } : {}),
+      ...(noProgress
+        ? {
+            executionControl: {
+              status: "blocked",
+              scope: "turn",
+              retryable: false,
+              allowedNextTools: ["computer.release"],
+              reason: stableFrameObservationBlocked
+                ? "stable-frame-observation-budget-exhausted"
+                : repeatedUnchangedObservation
+                  ? "repeated-unchanged-observation-blocked"
+                  : "visual-attempt-budget-exhausted",
+              nextAction: noProgress.nextAction,
+            },
+          }
+        : {}),
       perceptionRouting: {
         selectedMode: retryBaselineOcr
           ? "window-ocr-baseline-retry"
@@ -1039,12 +1258,28 @@ export class ComputerUseProviderRouter {
         visualSceneChanged: !visualSceneStable,
         dirtyRegion,
         ocrRegion,
-        visualRegion: requestedCrop,
+        secondaryOcrRegion,
+        visualRegion,
+        suggestedVisualRegion,
+        cropAdjustment,
+        stableFrameObservations,
         localElementCount: localElements,
         visualUnderstandingEligible,
         avoidedVision: !visualUnderstandingEligible,
-        reason: repeatedVisualFrame
-          ? "unchanged-frame-visual-already-requested"
+        ...(unchanged
+          ? {
+              unchangedInterpretation: {
+                evidence: "pixel-equivalence-only",
+                actionSemantics: "An unchanged frame does not prove the preceding action failed. If existing evidence already established the requested context or selection, treat the action as idempotent and proceed to the next distinct task step instead of clicking again.",
+              },
+            }
+          : {}),
+        reason: stableFrameObservationBlocked
+          ? "stable-frame-observation-budget-exhausted"
+          : repeatedUnchangedObservation
+          ? "repeated-unchanged-observation-blocked"
+          : repeatedVisualFrame
+          ? "visual-attempt-budget-exhausted"
           : explicitVisualQuestion
             ? "explicit-complex-visual-question"
             : localElements > 0
@@ -1052,6 +1287,7 @@ export class ComputerUseProviderRouter {
               : ocrError
                 ? "local-ocr-unavailable"
                 : "no-explicit-visual-ambiguity",
+        ...(noProgress ? { noProgress } : {}),
         ...(ocrError ? { ocrError } : {}),
       },
     };
@@ -1073,6 +1309,7 @@ export class ComputerUseProviderRouter {
       this.lastCapture,
       this.activeController?.window,
     );
+    this.assertNoRepeatedUnconfirmedMutation(action);
     if (this.pendingUnverifiedMutation) {
       fail(
         "action.observation_required_after_unverified_mutation",
@@ -1109,6 +1346,12 @@ export class ComputerUseProviderRouter {
       );
     }
     const { admission, driverTarget, element, focusReceipt } = this.validateAction(action);
+    // A newly admitted action starts a distinct perception step. Permit one
+    // fresh layout escalation for its resulting scene and bound the number of
+    // observations made before the next action.
+    this.consecutivePublicObservations = 0;
+    this.lastVisualUnderstanding = null;
+    this.interactionStep += 1;
     const effectiveDeliveryMode = resolveEffectiveDeliveryMode(action, admission, focusReceipt);
     if (action.kind === "activate_window" || action.kind === "click" || action.kind === "set_value"
       || ((action.kind === "type_text" || action.kind === "press_key") && !focusReceipt)) {
@@ -1278,11 +1521,6 @@ export class ComputerUseProviderRouter {
       throw error;
     }
 
-    // Any delivered mutation invalidates the no-change visual cache. The next
-    // visual question must be allowed to inspect a potentially small but
-    // meaningful state change such as a selected icon or a newly sent message.
-    this.lastVisualUnderstanding = null;
-
     if (outcome === "unverified" && action.kind !== "activate_window") {
       const independentlyVerifiedTextFocus = action.kind === "type_text" && hasVerifiedFocus(result);
       if (!independentlyVerifiedTextFocus) this.activeFocusReceipt = null;
@@ -1292,8 +1530,13 @@ export class ComputerUseProviderRouter {
         windowId: controllerWindowId(this.activeController.window),
         observationId: this.lastCapture?.observationId,
         value: action.kind === "type_text" ? action.value : undefined,
+        preexistingTextOccurrences: action.kind === "type_text"
+          ? collectObservedTextOccurrences(actionObservation, action.value)
+          : [],
         target: describeActionTarget(action, element, driverTarget),
       };
+    } else {
+      this.unconfirmedMutationHistory = [];
     }
     const actionResult = {
       status: outcome === "unverified" ? "indeterminate" : (result.status ?? "ok"),
@@ -1324,23 +1567,88 @@ export class ComputerUseProviderRouter {
       && admission.pixelLimitedAction === true
       && (action.kind === "click" || action.kind === "type_text")
       && typeof this.driver?.captureScreenshot === "function"
-      && this.ocrSession;
+      && this.ocr;
+    const postActionVerificationCrop = automaticLocalPostActionObservation
+      ? planPostActionObservationCrop(action, actionObservation)
+      : null;
+    const postActionEffectHintRegion = automaticLocalPostActionObservation
+      ? planPostActionEffectRegion(action, actionObservation)
+      : null;
+    if (postActionVerificationCrop) {
+      this.lastActionVisualCrop = {
+        windowId: controllerWindowId(this.activeController.window),
+        crop: postActionVerificationCrop,
+        expiresAtMs: this.clock.now() + VISUAL_REGION_HINT_TTL_MS,
+      };
+    }
     if (action.captureAfter || automaticLocalPostActionObservation) {
+      if (automaticLocalPostActionObservation) {
+        await this.awaitExternal(
+          ticket,
+          () => new Promise((resolve) => setTimeout(resolve, POST_ACTION_UI_SETTLE_MS)),
+        );
+      }
       actionResult.capture = await this.awaitExternal(
         ticket,
         () => this.captureOperation({
           mode: automaticLocalPostActionObservation ? "screenshot" : "semantic",
+          ...(postActionVerificationCrop ? { crop: postActionVerificationCrop } : {}),
+          ...(automaticLocalPostActionObservation && action.kind === "click"
+            ? {
+                includeChangedRegionAlongsideCrop: true,
+                ...(postActionEffectHintRegion
+                  ? { effectHintRegion: postActionEffectHintRegion }
+                  : {}),
+              }
+            : {}),
           requestContext: args.requestContext,
         }, ticket),
       );
       if (automaticLocalPostActionObservation) {
+        const effectRegion = actionResult.capture?.perceptionRouting?.secondaryOcrRegion;
+        if (effectRegion && action.kind === "click") {
+          this.lastActionVisualCrop = {
+            windowId: controllerWindowId(this.activeController.window),
+            crop: effectRegion,
+            expiresAtMs: this.clock.now() + VISUAL_REGION_HINT_TTL_MS,
+          };
+        }
         actionResult.postActionObservation = {
           source: "host-local-ocr",
           automatic: true,
           visionRequested: false,
+          ...(postActionVerificationCrop
+            ? {
+                regionSource: "action-target",
+                verificationRegion: postActionVerificationCrop,
+              }
+            : {}),
+          ...(effectRegion
+            ? {
+                effectRegionSource: "changed-region",
+                effectRegion,
+              }
+            : {}),
           freshSurfaceReceiptId: actionResult.capture?.surfaceReceipt?.id ?? null,
           nextAction: "Use this fresh local post-action observation before requesting another screenshot. Request Host vision only if OCR and change metadata leave a concrete layout, icon, or complex-scene ambiguity.",
         };
+        if (action.kind === "type_text"
+          && actionResult.capture?.mutationVerification?.status === "confirmed") {
+          outcome = "completed";
+          actionResult.status = "ok";
+          actionResult.outcome = outcome;
+          actionResult.result = {
+            ...actionResult.result,
+            effect: "verified",
+            verified: true,
+            focusVerified: true,
+            verification: {
+              method: actionResult.capture.mutationVerification.method,
+              observationId: actionResult.capture.observationId,
+            },
+          };
+          actionResult.postActionObservation.nextAction = "Text entry is already confirmed by a fresh exact OCR value that was absent before the action. Do not observe or type it again; continue with the next distinct action using the issued focus receipt when needed.";
+        }
       }
       if (this.activeFocusReceipt) {
         actionResult.focusReceipt = serializeFocusReceipt(this.activeFocusReceipt);
@@ -1406,9 +1714,13 @@ export class ComputerUseProviderRouter {
     this.activeController = null;
     this.activeControllerRequestContext = null;
     this.pendingUnverifiedMutation = null;
+    this.unconfirmedMutationHistory = [];
     this.activeFocusReceipt = null;
     this.lastScreenshot = null;
     this.lastVisualUnderstanding = null;
+    this.lastActionVisualCrop = null;
+    this.lastFocusedObservationCrop = null;
+    this.consecutivePublicObservations = 0;
     this.semanticElementAliases.clear();
     this.currentSemanticElements.clear();
     await this.awaitExternal(ticket, () => this.stopControlVisuals(ticket));
@@ -1435,10 +1747,14 @@ export class ComputerUseProviderRouter {
     this.activeController = null;
     this.activeControllerRequestContext = null;
     this.pendingUnverifiedMutation = null;
+    this.unconfirmedMutationHistory = [];
     this.activeFocusReceipt = null;
     this.lastCapture = null;
     this.lastScreenshot = null;
     this.lastVisualUnderstanding = null;
+    this.lastActionVisualCrop = null;
+    this.lastFocusedObservationCrop = null;
+    this.consecutivePublicObservations = 0;
     this.semanticElementAliases.clear();
     this.currentSemanticElements.clear();
     this.pendingRepairApproval = null;
@@ -1467,11 +1783,11 @@ export class ComputerUseProviderRouter {
     return { status: "revoked", previousController: previous, previousApproval, includeUserOverlay: false };
   }
 
-  listState() {
-    return this.runOperation((ticket) => this.listStateOperation(ticket));
+  listState(options = {}) {
+    return this.runOperation((ticket) => this.listStateOperation(ticket, options));
   }
 
-  async listStateOperation(ticket) {
+  async listStateOperation(ticket, options = {}) {
     await this.awaitExternal(
       ticket,
       () => this.expireActiveController({ throwOnExpire: false }, ticket),
@@ -1549,7 +1865,11 @@ export class ComputerUseProviderRouter {
         const discovered = await this.awaitExternal(ticket, () => this.driver.listApps());
         this.applicationCatalog.clear();
         applications = discovered.map((application) => {
-          const applicationToken = `application-${randomUUID()}`;
+          // Application tokens are ephemeral selectors, not authorization
+          // secrets. Keep enough entropy to avoid collisions within one state
+          // inventory without repeating a 36-character UUID for every app in
+          // every model turn.
+          const applicationToken = `application-${randomUUID().replaceAll("-", "").slice(0, 16)}`;
           this.applicationCatalog.set(applicationToken, application);
           const visible = windows.some((window) => (
             Number.isSafeInteger(application.pid)
@@ -1572,13 +1892,21 @@ export class ComputerUseProviderRouter {
             ...(application.running ? { running: true } : {}),
           };
         });
+        const includeInstalled = options.includeInstalled === true;
+        const discoveredApplications = applications;
+        applications = includeInstalled
+          ? discoveredApplications
+          : discoveredApplications.filter((application) => application.state !== "installed");
         applicationDiscovery = {
           status: "ready",
           source: "cua-driver",
-          total: applications.length,
-          active: applications.filter((application) => application.state === "active").length,
-          visible: applications.filter((application) => application.state === "visible").length,
-          recoverable: applications.filter((application) => application.state === "recoverable").length,
+          total: discoveredApplications.length,
+          returned: applications.length,
+          omittedInstalled: discoveredApplications.length - applications.length,
+          includeInstalled,
+          active: discoveredApplications.filter((application) => application.state === "active").length,
+          visible: discoveredApplications.filter((application) => application.state === "visible").length,
+          recoverable: discoveredApplications.filter((application) => application.state === "recoverable").length,
         };
       } catch (error) {
         this.assertOperationTicket(ticket);
@@ -1620,6 +1948,10 @@ export class ComputerUseProviderRouter {
       ? await this.awaitExternal(ticket, () => this.driver.captureScreenshot({
           window: this.activeController.window,
           outputPath,
+          timeoutMs: Math.min(
+            positiveTimeout(args.timeoutMs, SCREENSHOT_LATENCY_BUDGET_MS),
+            SCREENSHOT_LATENCY_BUDGET_MS,
+          ),
         }))
       : await this.awaitExternal(ticket, () => captureWindowPngByTitle(args.titlePart, outputPath, {
           timeoutMs: args.timeoutMs,
@@ -1819,7 +2151,10 @@ export class ComputerUseProviderRouter {
       this.activeControllerRequestContext = null;
       this.lastCapture = null;
       this.pendingUnverifiedMutation = null;
+      this.unconfirmedMutationHistory = [];
       this.activeFocusReceipt = null;
+      this.lastActionVisualCrop = null;
+      this.lastFocusedObservationCrop = null;
       this.semanticElementAliases.clear();
       this.currentSemanticElements.clear();
       this.pendingRepairApproval = null;
@@ -2042,7 +2377,10 @@ export class ComputerUseProviderRouter {
       );
       this.lastCapture = null;
       this.pendingUnverifiedMutation = null;
+      this.unconfirmedMutationHistory = [];
       this.activeFocusReceipt = null;
+      this.lastActionVisualCrop = null;
+      this.lastFocusedObservationCrop = null;
       await this.awaitExternal(ticket, () => this.stopControlVisuals(ticket));
       this.recordAudit("computer.controller.expired", {
         controllerId: pending.controller.controllerId,
@@ -2058,7 +2396,10 @@ export class ComputerUseProviderRouter {
     this.activeControllerRequestContext = null;
     this.lastCapture = null;
     this.pendingUnverifiedMutation = null;
+    this.unconfirmedMutationHistory = [];
     this.activeFocusReceipt = null;
+    this.lastActionVisualCrop = null;
+    this.lastFocusedObservationCrop = null;
     this.semanticElementAliases.clear();
     this.currentSemanticElements.clear();
     await this.awaitExternal(ticket, () => this.stopControlVisuals(ticket));
@@ -2146,6 +2487,9 @@ export class ComputerUseProviderRouter {
     this.activeController = controller;
     this.activeControllerRequestContext = requestContext ?? null;
     this.activeFocusReceipt = null;
+    this.consecutivePublicObservations = 0;
+    this.lastVisualUnderstanding = null;
+    this.interactionStep = 0;
     this.recordAudit("computer.access.granted", {
       controllerId: controller.controllerId,
       title: window.title,
@@ -2286,8 +2630,10 @@ export class ComputerUseProviderRouter {
       observation,
       pending.value,
       pending.target,
+      pending.preexistingTextOccurrences,
     );
     if (!matchingElement) {
+      this.rememberUnconfirmedMutation(pending);
       observation.mutationVerification = {
         status: "not-confirmed",
         actionKind: "type_text",
@@ -2297,6 +2643,7 @@ export class ComputerUseProviderRouter {
       return null;
     }
 
+    this.unconfirmedMutationHistory = [];
     this.activeFocusReceipt = this.createFocusReceipt({
       action: { kind: "type_text" },
       element: matchingElement,
@@ -2313,6 +2660,47 @@ export class ComputerUseProviderRouter {
       matchedElementToken: matchingElement.elementToken,
     };
     return serializedReceipt;
+  }
+
+  rememberUnconfirmedMutation(pending) {
+    const cutoff = this.clock.now() - 30_000;
+    this.unconfirmedMutationHistory = [
+      ...this.unconfirmedMutationHistory.filter((entry) => entry.atMs >= cutoff),
+      { ...pending, atMs: this.clock.now() },
+    ].slice(-4);
+  }
+
+  assertNoRepeatedUnconfirmedMutation(action) {
+    if (action?.kind !== "type_text" && action?.kind !== "click") return;
+    const windowId = controllerWindowId(this.activeController?.window);
+    const candidate = {
+      actionKind: action.kind,
+      controllerId: this.activeController?.controllerId,
+      windowId,
+      value: action.kind === "type_text" ? action.value : undefined,
+      target: describeActionTarget(action, null, action),
+    };
+    const cutoff = this.clock.now() - 30_000;
+    const matches = this.unconfirmedMutationHistory.filter((entry) => (
+      entry.atMs >= cutoff
+      && entry.controllerId === candidate.controllerId
+      && entry.windowId === candidate.windowId
+      && entry.actionKind === candidate.actionKind
+      && entry.value === candidate.value
+      && actionTargetsOverlap(entry.target, candidate.target)
+    ));
+    if (matches.length < 2) return;
+    fail(
+      "action.repeated_no_effect",
+      "Two fresh observations could not confirm the same mutation in this target region. The Host stopped another coordinate retry because it would repeat an ineffective strategy.",
+      {
+        allowed: false,
+        pixelLimitedAction: false,
+        replaySafe: false,
+        priorUnconfirmedAttempts: matches.length,
+        nextAction: "Do not retry coordinates in this region. Use one target-local visual observation to identify a different interaction surface, switch to semantic targeting, or release control and report the blocker.",
+      },
+    );
   }
 
   createActionObservation(observation) {
@@ -2389,6 +2777,7 @@ export class ComputerUseProviderRouter {
     return {
       ...observation,
       observationId,
+      interactionStep: this.interactionStep,
       surfaceReceipt,
       coordinateSpace: "window-local",
       ...(coordinateBounds ? {
@@ -3018,17 +3407,30 @@ function isImageBearingObservation(observation = {}) {
 }
 
 function normalizeActionCoordinates(action = {}, observation, window) {
-  const hasX = Number.isFinite(action.x);
-  const hasY = Number.isFinite(action.y);
+  const boundsGroundedTextAction = action.kind === "type_text"
+    && isCoordinateBox(action.targetBounds)
+    && !Number.isFinite(action.x)
+    && !Number.isFinite(action.y);
+  const actionWithSafePoint = boundsGroundedTextAction
+    ? {
+        ...action,
+        x: action.targetBounds.x + (action.targetBounds.width / 2),
+        y: action.targetBounds.y + (action.targetBounds.height / 2),
+        derivedInteractionPoint: "target-bounds-center",
+      }
+    : action;
+  const hasX = Number.isFinite(actionWithSafePoint.x);
+  const hasY = Number.isFinite(actionWithSafePoint.y);
   if (!hasX && !hasY) return action;
   if (!hasX || !hasY) {
     fail(
       "action.coordinates_incomplete",
       "Coordinate actions require both x and y.",
-      { coordinateSpace: action.coordinateSpace ?? null },
+      { coordinateSpace: actionWithSafePoint.coordinateSpace ?? null },
     );
   }
-  if (action.coordinateSpace !== "window-local" && action.coordinateSpace !== "screen") {
+  if (actionWithSafePoint.coordinateSpace !== "window-local"
+    && actionWithSafePoint.coordinateSpace !== "screen") {
     fail(
       "action.coordinate_space_required",
       "Coordinate actions must explicitly declare coordinateSpace as window-local or screen.",
@@ -3038,7 +3440,7 @@ function normalizeActionCoordinates(action = {}, observation, window) {
       },
     );
   }
-  if (action.coordinateSpace === "window-local") return action;
+  if (actionWithSafePoint.coordinateSpace === "window-local") return actionWithSafePoint;
   const bounds = observation?.window?.bounds ?? window?.bounds;
   if (!Number.isFinite(bounds?.x) || !Number.isFinite(bounds?.y)) {
     fail(
@@ -3048,14 +3450,14 @@ function normalizeActionCoordinates(action = {}, observation, window) {
     );
   }
   return {
-    ...action,
-    x: action.x - bounds.x,
-    y: action.y - bounds.y,
-    ...(isCoordinateBox(action.targetBounds) ? {
+    ...actionWithSafePoint,
+    x: actionWithSafePoint.x - bounds.x,
+    y: actionWithSafePoint.y - bounds.y,
+    ...(isCoordinateBox(actionWithSafePoint.targetBounds) ? {
       targetBounds: {
-        ...action.targetBounds,
-        x: action.targetBounds.x - bounds.x,
-        y: action.targetBounds.y - bounds.y,
+        ...actionWithSafePoint.targetBounds,
+        x: actionWithSafePoint.targetBounds.x - bounds.x,
+        y: actionWithSafePoint.targetBounds.y - bounds.y,
       },
     } : {}),
     coordinateSpace: "window-local",
@@ -3108,6 +3510,61 @@ function mergeOcrElementSnapshots(previousElements, currentElements, replacedReg
   ];
 }
 
+function mergePostActionOcrElementSnapshots({
+  previousElements,
+  primaryElements,
+  primaryRegion,
+  secondaryElements,
+  secondaryRegion,
+}) {
+  const primaryMerged = mergeOcrElementSnapshots(
+    previousElements,
+    primaryElements,
+    primaryRegion,
+  );
+  return isCoordinateBox(secondaryRegion)
+    ? mergeOcrElementSnapshots(primaryMerged, secondaryElements, secondaryRegion)
+    : primaryMerged;
+}
+
+function mergeLocalOcrObservations(primary, secondary) {
+  const primaryElements = Array.isArray(primary?.elements) ? primary.elements : [];
+  const secondaryElements = Array.isArray(secondary?.elements) ? secondary.elements : [];
+  const text = [primary?.text, secondary?.text]
+    .filter((entry) => typeof entry === "string" && entry.trim() !== "")
+    .join("\n");
+  return {
+    ...primary,
+    elements: [...primaryElements, ...secondaryElements],
+    elementCount: primaryElements.length + secondaryElements.length,
+    ...(text ? { text } : {}),
+  };
+}
+
+function regionsMateriallyOverlap(left, right) {
+  if (!isCoordinateBox(left) || !isCoordinateBox(right)) return false;
+  const intersectionWidth = Math.max(
+    0,
+    Math.min(left.x + left.width, right.x + right.width) - Math.max(left.x, right.x),
+  );
+  const intersectionHeight = Math.max(
+    0,
+    Math.min(left.y + left.height, right.y + right.height) - Math.max(left.y, right.y),
+  );
+  const intersectionArea = intersectionWidth * intersectionHeight;
+  const smallerArea = Math.min(left.width * left.height, right.width * right.height);
+  return smallerArea > 0 && intersectionArea / smallerArea >= 0.6;
+}
+
+export function selectSecondaryOcrRegion({
+  effectHintRegion,
+  dirtyRegion,
+  visualBounds,
+}) {
+  return normalizeObservationCrop(effectHintRegion, visualBounds)
+    ?? (dirtyRegion ? expandRegionToBucket(dirtyRegion) : null);
+}
+
 function cloneOcrElementSnapshot(element) {
   if (!element || typeof element !== "object") return element;
   return {
@@ -3137,6 +3594,92 @@ function boxesIntersect(left, right) {
     && left.y + left.height > right.y;
 }
 
+/**
+ * Bind an indeterminate pixel action's automatic verification to the area that
+ * could have changed because of that action. A global changed-region detector
+ * can otherwise select an unrelated animation or incoming chat message and
+ * make the Agent believe a correctly delivered click missed its target.
+ */
+export function planPostActionObservationCrop(action, observation) {
+  const bounds = isCoordinateBox(observation?.coordinateBounds)
+    ? observation.coordinateBounds
+    : Number.isFinite(observation?.capture?.width) && Number.isFinite(observation?.capture?.height)
+      ? { x: 0, y: 0, width: observation.capture.width, height: observation.capture.height }
+      : null;
+  if (!bounds) return null;
+  const target = isCoordinateBox(action?.targetBounds)
+    ? action.targetBounds
+    : Number.isFinite(action?.x) && Number.isFinite(action?.y)
+      ? { x: action.x, y: action.y, width: 1, height: 1 }
+      : null;
+  if (!target) return null;
+
+  const isTextEntry = action?.kind === "type_text";
+  const width = Math.min(
+    bounds.width,
+    Math.max(
+      384,
+      Math.min(640, Math.ceil(target.width + (isTextEntry ? 96 : 320))),
+    ),
+  );
+  const height = Math.min(
+    bounds.height,
+    Math.max(
+      isTextEntry ? 192 : 360,
+      Math.min(isTextEntry ? 288 : 480, Math.ceil(target.height + (isTextEntry ? 160 : 320))),
+    ),
+  );
+  const centerX = target.x + (target.width / 2);
+  const centerY = target.y + (target.height / 2);
+  const x = Math.min(
+    bounds.x + bounds.width - width,
+    Math.max(bounds.x, Math.floor(centerX - (width / 2))),
+  );
+  const y = Math.min(
+    bounds.y + bounds.height - height,
+    Math.max(bounds.y, Math.floor(centerY - (height / 2))),
+  );
+  return { x, y, width, height };
+}
+
+/**
+ * A selection often updates a sibling pane rather than the pixels that were
+ * clicked. When no dirty region exists because the item was already selected,
+ * observe the largest complementary rectangle as a bounded effect hint. This
+ * uses only the declared interaction intent and screenshot geometry.
+ */
+export function planPostActionEffectRegion(action, observation) {
+  if (action?.interactionIntent !== "select-item") return null;
+  const bounds = isCoordinateBox(observation?.coordinateBounds)
+    ? observation.coordinateBounds
+    : Number.isFinite(observation?.capture?.width) && Number.isFinite(observation?.capture?.height)
+      ? { x: 0, y: 0, width: observation.capture.width, height: observation.capture.height }
+      : null;
+  const target = isCoordinateBox(action?.targetBounds)
+    ? action.targetBounds
+    : Number.isFinite(action?.x) && Number.isFinite(action?.y)
+      ? { x: action.x, y: action.y, width: 1, height: 1 }
+      : null;
+  if (!bounds || !target) return null;
+
+  const boundsRight = bounds.x + bounds.width;
+  const boundsBottom = bounds.y + bounds.height;
+  const targetRight = Math.min(boundsRight, Math.max(bounds.x, target.x + target.width));
+  const targetBottom = Math.min(boundsBottom, Math.max(bounds.y, target.y + target.height));
+  const targetLeft = Math.min(boundsRight, Math.max(bounds.x, target.x));
+  const targetTop = Math.min(boundsBottom, Math.max(bounds.y, target.y));
+  const candidates = [
+    { x: targetRight, y: bounds.y, width: boundsRight - targetRight, height: bounds.height },
+    { x: bounds.x, y: bounds.y, width: targetLeft - bounds.x, height: bounds.height },
+    { x: bounds.x, y: targetBottom, width: bounds.width, height: boundsBottom - targetBottom },
+    { x: bounds.x, y: bounds.y, width: bounds.width, height: targetTop - bounds.y },
+  ].filter((region) => region.width >= 192 && region.height >= 128);
+  candidates.sort((left, right) => (
+    (right.width * right.height) - (left.width * left.height)
+  ));
+  return candidates[0] ?? null;
+}
+
 function normalizeObservationCrop(crop, bounds) {
   if (crop === undefined || crop === null) return null;
   if (!isCoordinateBox(crop) || !isCoordinateBox(bounds)) {
@@ -3148,19 +3691,62 @@ function normalizeObservationCrop(crop, bounds) {
     width: Math.ceil(crop.width),
     height: Math.ceil(crop.height),
   };
+  const left = Math.max(bounds.x, normalized.x);
+  const top = Math.max(bounds.y, normalized.y);
+  const right = Math.min(bounds.x + bounds.width, normalized.x + normalized.width);
+  const bottom = Math.min(bounds.y + bounds.height, normalized.y + normalized.height);
+  if (right <= left || bottom <= top) return { ...bounds };
+  return {
+    x: left,
+    y: top,
+    width: right - left,
+    height: bottom - top,
+  };
+}
+
+function expandVisualContextRegion(region, bounds) {
+  if (!isCoordinateBox(region) || !isCoordinateBox(bounds)) return region;
+  const width = Math.min(bounds.width, Math.max(320, region.width));
+  const height = Math.min(bounds.height, Math.max(256, region.height));
+  const centerX = region.x + (region.width / 2);
+  const centerY = region.y + (region.height / 2);
+  return {
+    x: Math.min(
+      bounds.x + bounds.width - width,
+      Math.max(bounds.x, Math.floor(centerX - (width / 2))),
+    ),
+    y: Math.min(
+      bounds.y + bounds.height - height,
+      Math.max(bounds.y, Math.floor(centerY - (height / 2))),
+    ),
+    width,
+    height,
+  };
+}
+
+function describeObservationCropAdjustment(supplied, used, bounds) {
+  if (!isCoordinateBox(supplied) || !isCoordinateBox(used) || !isCoordinateBox(bounds)) return null;
   if (
-    normalized.x < bounds.x
-    || normalized.y < bounds.y
-    || normalized.x + normalized.width > bounds.x + bounds.width
-    || normalized.y + normalized.height > bounds.y + bounds.height
-  ) {
-    fail("capture.crop_out_of_bounds", "The observation crop must stay inside the latest window-local image bounds.", {
-      crop: normalized,
-      coordinateBounds: bounds,
-      retryable: true,
-    });
-  }
-  return normalized;
+    supplied.x === used.x
+    && supplied.y === used.y
+    && supplied.width === used.width
+    && supplied.height === used.height
+  ) return null;
+  const intersects = supplied.x < bounds.x + bounds.width
+    && supplied.x + supplied.width > bounds.x
+    && supplied.y < bounds.y + bounds.height
+    && supplied.y + supplied.height > bounds.y;
+  return {
+    status: intersects ? "clamped" : "fallback-full-window",
+    reason: "supplied-crop-exceeded-window-local-bounds",
+    supplied: {
+      x: Math.floor(supplied.x),
+      y: Math.floor(supplied.y),
+      width: Math.ceil(supplied.width),
+      height: Math.ceil(supplied.height),
+    },
+    used,
+  };
 }
 
 function resolveEffectiveDeliveryMode(action, admission, focusReceipt) {
@@ -3243,22 +3829,99 @@ function describeActionTarget(action, element, driverTarget) {
     target.x = driverTarget.x;
     target.y = driverTarget.y;
   }
-  const bounds = element?.sourceRegion ?? element?.bounds;
+  const bounds = action?.targetBounds ?? element?.sourceRegion ?? element?.bounds;
   if (bounds) target.bounds = { ...bounds };
   return target;
 }
 
-function findObservedTextAtTarget(observation, intendedValue, target) {
+function actionTargetsOverlap(left, right) {
+  if (left?.elementToken && right?.elementToken) {
+    return left.elementToken === right.elementToken;
+  }
+  const leftBounds = isCoordinateBox(left?.bounds) ? left.bounds : null;
+  const rightBounds = isCoordinateBox(right?.bounds) ? right.bounds : null;
+  if (leftBounds && rightBounds) {
+    const intersectionWidth = Math.max(
+      0,
+      Math.min(leftBounds.x + leftBounds.width, rightBounds.x + rightBounds.width)
+        - Math.max(leftBounds.x, rightBounds.x),
+    );
+    const intersectionHeight = Math.max(
+      0,
+      Math.min(leftBounds.y + leftBounds.height, rightBounds.y + rightBounds.height)
+        - Math.max(leftBounds.y, rightBounds.y),
+    );
+    const intersectionArea = intersectionWidth * intersectionHeight;
+    const smallerArea = Math.min(
+      leftBounds.width * leftBounds.height,
+      rightBounds.width * rightBounds.height,
+    );
+    if (smallerArea > 0 && intersectionArea / smallerArea >= 0.5) return true;
+  }
+  if (
+    Number.isFinite(left?.x)
+    && Number.isFinite(left?.y)
+    && Number.isFinite(right?.x)
+    && Number.isFinite(right?.y)
+  ) {
+    return Math.hypot(left.x - right.x, left.y - right.y) <= 64;
+  }
+  return false;
+}
+
+function findObservedTextAtTarget(
+  observation,
+  intendedValue,
+  target,
+  preexistingOccurrences = [],
+) {
   const intendedText = normalizeRecognizedUiText(intendedValue, { languageClass: "mixed" });
   if (!intendedText || !Number.isFinite(target?.x) || !Number.isFinite(target?.y)) return null;
   const elements = observation?.elements ?? observation?.observation?.elements ?? [];
   if (!Array.isArray(elements)) return null;
   const width = Number(observation?.coordinateBounds?.width ?? observation?.window?.bounds?.width);
   const height = Number(observation?.coordinateBounds?.height ?? observation?.window?.bounds?.height);
-  const horizontalTolerance = Number.isFinite(width) ? Math.max(96, width * 0.18) : 160;
-  const verticalTolerance = Number.isFinite(height) ? Math.max(32, height * 0.06) : 48;
+  const horizontalTolerance = Number.isFinite(width) ? Math.max(96, width * 0.22) : 176;
+  const verticalTolerance = Number.isFinite(height) ? Math.max(96, height * 0.16) : 112;
 
-  return elements.find((element) => {
+  return collectObservedTextElements(observation, intendedText)
+    .filter((element) => {
+      const bounds = observedElementBounds(element);
+      return !preexistingOccurrences.some((occurrence) => (
+        sameObservedTextOccurrence(bounds, occurrence)
+      ));
+    })
+    .map((element) => {
+      const bounds = observedElementBounds(element);
+      const nearestX = Math.max(bounds.x, Math.min(target.x, bounds.x + bounds.width));
+      const nearestY = Math.max(bounds.y, Math.min(target.y, bounds.y + bounds.height));
+      return {
+        element,
+        dx: Math.abs(target.x - nearestX),
+        dy: Math.abs(target.y - nearestY),
+      };
+    })
+    .filter((candidate) => (
+      candidate.dx <= horizontalTolerance
+      && candidate.dy <= verticalTolerance
+    ))
+    .sort((left, right) => (
+      Math.hypot(left.dx, left.dy) - Math.hypot(right.dx, right.dy)
+    ))[0]?.element ?? null;
+}
+
+function collectObservedTextOccurrences(observation, intendedValue) {
+  const intendedText = normalizeRecognizedUiText(intendedValue, { languageClass: "mixed" });
+  if (!intendedText) return [];
+  return collectObservedTextElements(observation, intendedText)
+    .map(observedElementBounds)
+    .filter(Boolean);
+}
+
+function collectObservedTextElements(observation, intendedText) {
+  const elements = observation?.elements ?? observation?.observation?.elements ?? [];
+  if (!Array.isArray(elements)) return [];
+  return elements.filter((element) => {
     const observedValue = typeof element?.value === "string"
       ? element.value
       : typeof element?.name === "string"
@@ -3267,16 +3930,29 @@ function findObservedTextAtTarget(observation, intendedValue, target) {
     if (normalizeRecognizedUiText(observedValue, { languageClass: "mixed" }) !== intendedText) {
       return false;
     }
-    const bounds = element?.sourceRegion ?? element?.bounds;
-    if (!Number.isFinite(bounds?.x) || !Number.isFinite(bounds?.y)
-      || !Number.isFinite(bounds?.width) || !Number.isFinite(bounds?.height)) {
-      return false;
-    }
-    const nearestX = Math.max(bounds.x, Math.min(target.x, bounds.x + bounds.width));
-    const nearestY = Math.max(bounds.y, Math.min(target.y, bounds.y + bounds.height));
-    return Math.abs(target.x - nearestX) <= horizontalTolerance
-      && Math.abs(target.y - nearestY) <= verticalTolerance;
-  }) ?? null;
+    return observedElementBounds(element) !== null;
+  });
+}
+
+function observedElementBounds(element) {
+  const bounds = element?.sourceRegion ?? element?.bounds;
+  if (!Number.isFinite(bounds?.x) || !Number.isFinite(bounds?.y)
+    || !Number.isFinite(bounds?.width) || !Number.isFinite(bounds?.height)) {
+    return null;
+  }
+  return bounds;
+}
+
+function sameObservedTextOccurrence(left, right) {
+  if (!left || !right) return false;
+  const leftCenterX = left.x + (left.width / 2);
+  const leftCenterY = left.y + (left.height / 2);
+  const rightCenterX = right.x + (right.width / 2);
+  const rightCenterY = right.y + (right.height / 2);
+  return Math.abs(leftCenterX - rightCenterX) <= 12
+    && Math.abs(leftCenterY - rightCenterY) <= 12
+    && Math.abs(left.width - right.width) <= 24
+    && Math.abs(left.height - right.height) <= 16;
 }
 
 function describeActionExecution({
