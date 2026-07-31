@@ -515,6 +515,15 @@ test("CuaDriverMcpDriver captures the exact screenshot coordinate source used by
     width: 954,
     height: 704,
     nativeWindowBounds: { x: 447, y: 144, width: 954, height: 704 },
+    surfaceProvenance: {
+      schemaVersion: 1,
+      requestedWindowId: "42",
+      reportedWindowId: "42",
+      requestedProcessId: 1234,
+      reportedProcessId: 1234,
+      identityVerified: true,
+      binding: "reported-window",
+    },
     coordinateScale: {
       schemaVersion: 1,
       sourceSpace: "window-local",
@@ -582,7 +591,7 @@ test("CuaDriverMcpDriver reports the PNG pixel bounds rather than the outer wind
     schemaVersion: 1,
     sourceSpace: "screenshot-pixel",
     actionSpace: "window-local",
-    actionTransform: { scaleX: 1, scaleY: 1, offsetX: 0, offsetY: 0 },
+    actionTransform: { scaleX: 954 / 952, scaleY: 704 / 702, offsetX: 0, offsetY: 0 },
     observationPixels: { width: 952, height: 702 },
     nativeWindowUnits: { width: 954, height: 704 },
     nativeToObservation: { scaleX: 952 / 954, scaleY: 702 / 704 },
@@ -592,7 +601,7 @@ test("CuaDriverMcpDriver reports the PNG pixel bounds rather than the outer wind
   assert.equal(Object.keys(capture).includes("artifactBytes"), false);
 });
 
-test("CuaDriverMcpDriver keeps the acquired identity when the provider reports an auxiliary window", async (t) => {
+test("CuaDriverMcpDriver rejects semantic and screenshot surfaces reported for an auxiliary window", async (t) => {
   const directory = await mkdtemp(join(tmpdir(), "cua-driver-window-identity-"));
   t.after(() => rm(directory, { recursive: true, force: true }));
   const outputPath = join(directory, "window.png");
@@ -629,28 +638,23 @@ test("CuaDriverMcpDriver keeps the acquired identity when the provider reports a
     },
   });
 
-  const semantic = await driver.capture({ window: requestedWindow, mode: "semantic" });
-  assert.deepEqual(semantic.window, {
-    id: 42,
-    title: "Primary window",
-    pid: 1234,
-    bounds: { x: 463, y: 123, width: 954, height: 704 },
-  });
+  await assert.rejects(
+    driver.capture({ window: requestedWindow, mode: "semantic" }),
+    (error) => (
+      error.code === "capture.surface_identity_mismatch"
+      && error.detail?.requestedWindowId === "42"
+      && error.detail?.reportedWindowId === "99"
+    ),
+  );
 
-  const screenshot = await driver.captureScreenshot({ window: requestedWindow, outputPath });
-  assert.equal(screenshot.hwnd, 42);
-  assert.deepEqual(screenshot.nativeWindowBounds, {
-    x: 463,
-    y: 123,
-    width: 954,
-    height: 704,
-  });
-  assert.deepEqual(screenshot.window, {
-    id: 42,
-    title: "Primary window",
-    pid: 1234,
-    bounds: { x: 463, y: 123, width: 952, height: 702 },
-  });
+  await assert.rejects(
+    driver.captureScreenshot({ window: requestedWindow, outputPath }),
+    (error) => (
+      error.code === "capture.surface_identity_mismatch"
+      && error.detail?.requestedWindowId === "42"
+      && error.detail?.reportedWindowId === "99"
+    ),
+  );
 });
 
 test("CuaDriverMcpDriver waits for a bounded delayed screenshot handoff", async (t) => {

@@ -70,11 +70,13 @@ export async function runWindowsSeaSmoke(options = {}) {
     await connection.call("computer.act", {
       action: { kind: "set_value", elementToken: name.elementToken, elementIndex: name.elementIndex, value: "windows-sea-layer-a" },
     });
+    const postValueCapture = await connection.call("computer.observe", { mode: "semantic" });
+    const postValueSave = findElement(postValueCapture, "Save");
     const click = await connection.call("computer.act", {
       action: {
         kind: "click",
-        elementToken: save.elementToken,
-        elementIndex: save.elementIndex,
+        elementToken: postValueSave.elementToken,
+        elementIndex: postValueSave.elementIndex,
         deliveryMode: "background",
         captureAfter: true,
       },
@@ -83,13 +85,20 @@ export async function runWindowsSeaSmoke(options = {}) {
     const savedText = await readFile(outputFile, "utf8");
     const cancel = await connection.call("computer.release", { reason: "layer-a-complete" });
     const state = await connection.call("computer.observe", { mode: "state" });
+    const clickOutcomeVerified = (
+      click.status === "ok"
+      && click.outcome === "applied"
+      && click.result?.verified === true
+    ) || (
+      click.status === "ok"
+      && click.outcome === "delivered"
+      && savedText === "windows-sea-layer-a"
+    );
     if (
       access.status !== "granted"
       || capture.includeUserOverlay !== false
       || click.includeUserOverlay !== false
-      || click.status !== "ok"
-      || click.outcome !== "applied"
-      || click.result?.verified !== true
+      || !clickOutcomeVerified
       || savedText !== "windows-sea-layer-a"
       || cancel.status !== "cancelled"
       || state.status !== "idle"
