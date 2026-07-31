@@ -604,6 +604,13 @@ export class CuaDriverMcpDriver {
   click({ window, elementToken, elementIndex, x, y, deliveryMode = "background" }) {
     return this.runWork(async (ticket) => {
       await this.ensureStartedResources(ticket);
+      if (Number.isFinite(x) && Number.isFinite(y) && deliveryMode === "foreground") {
+        await this.client.callTool("bring_to_front", {
+          pid: window.pid,
+          window_id: window.windowId,
+        });
+        this.assertWorkTicket(ticket);
+      }
       const result = await this.client.callTool("click", {
         pid: window.pid,
         window_id: window.windowId,

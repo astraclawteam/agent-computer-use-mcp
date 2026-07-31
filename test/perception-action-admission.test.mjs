@@ -127,6 +127,33 @@ test("window-local coordinates require the exact fresh observation and stay insi
   }).code, "observation.insufficient");
 });
 
+test("editable pixel clicks are safely redirected to atomic text entry", () => {
+  const decision = admitPerceptionAction({
+    observation: observation({
+      observationId: "editable-surface-1",
+      source: "window-capture",
+      capture: { width: 960, height: 720 },
+    }),
+    action: action({
+      kind: "click",
+      observationId: "editable-surface-1",
+      coordinateSpace: "window-local",
+      x: 160,
+      y: 50,
+      targetBounds: { x: 60, y: 35, width: 200, height: 40 },
+      interactionIntent: "activate-control",
+      targetRole: "editable",
+    }),
+    now: 100,
+  });
+
+  assert.equal(decision.allowed, false);
+  assert.equal(decision.code, "target.editable_click_requires_text");
+  assert.equal(decision.pixelLimitedAction, false);
+  assert.equal(decision.requiredActionKind, "type_text");
+  assert.match(decision.nextAction, /same fresh screenshot observationId/);
+});
+
 test("OCR glyph coordinates cannot ground keyboard actions", () => {
   const value = observation({
     observationId: "ocr-1",

@@ -270,7 +270,7 @@ $text = [System.Text.Encoding]::UTF8.GetString(
 $inputBehavior = [string]$payload.inputBehavior
 if ($inputBehavior -eq "incremental")
 {
-    $utf16CodeUnits = [AgentComputerUseUnicodeInput]::SendUnicode(
+    $result = [AgentComputerUseUnicodeInput]::PasteUnicode(
         $text,
         [long]$payload.windowId,
         [uint32]$payload.processId,
@@ -278,10 +278,10 @@ if ($inputBehavior -eq "incremental")
     )
     @{
         status = "ok"
-        utf16CodeUnits = $utf16CodeUnits
-        clipboardRestored = $true
-        changeSignalDelivered = $true
-        deliveryPath = "windows_unicode_incremental"
+        utf16CodeUnits = $result.Utf16CodeUnits
+        clipboardRestored = $result.ClipboardRestored
+        changeSignalDelivered = $result.ChangeSignalDelivered
+        deliveryPath = "windows_clipboard_incremental"
     } | ConvertTo-Json -Compress
 }
 elseif ($inputBehavior -eq "commit")
@@ -425,7 +425,7 @@ export async function sendWindowsUnicodeText(options = {}) {
           || !Number.isInteger(result.utf16CodeUnits)
           || typeof result.clipboardRestored !== "boolean"
           || typeof result.changeSignalDelivered !== "boolean"
-          || !["windows_unicode_incremental", "windows_clipboard_transaction"].includes(result.deliveryPath)) {
+          || !["windows_clipboard_incremental", "windows_clipboard_transaction"].includes(result.deliveryPath)) {
           throw new Error("invalid bridge response");
         }
         finish(resolve, {

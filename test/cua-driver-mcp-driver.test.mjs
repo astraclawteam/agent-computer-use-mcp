@@ -461,6 +461,43 @@ test("CuaDriverMcpDriver keeps semantic Unicode text on the cua-driver path", as
   });
 });
 
+test("CuaDriverMcpDriver reasserts foreground immediately before a pixel click", async () => {
+  const calls = [];
+  const driver = new CuaDriverMcpDriver({
+    session: "foreground-pixel-click-session",
+    client: {
+      async start() {},
+      async callTool(name, args) {
+        calls.push({ name, args });
+        return { status: "ok" };
+      },
+    },
+  });
+
+  await driver.click({
+    window: { windowId: 42, pid: 1234 },
+    x: 160,
+    y: 100,
+    deliveryMode: "foreground",
+  });
+
+  assert.deepEqual(calls, [
+    { name: "start_session", args: { session: "foreground-pixel-click-session" } },
+    { name: "bring_to_front", args: { pid: 1234, window_id: 42 } },
+    {
+      name: "click",
+      args: {
+        pid: 1234,
+        window_id: 42,
+        x: 160,
+        y: 100,
+        delivery_mode: "foreground",
+        session: "foreground-pixel-click-session",
+      },
+    },
+  ]);
+});
+
 test("CuaDriverMcpDriver captures the exact screenshot coordinate source used by pixel actions", async () => {
   const calls = [];
   const driver = new CuaDriverMcpDriver({

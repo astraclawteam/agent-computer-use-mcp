@@ -12,7 +12,7 @@ test("sendWindowsUnicodeText keeps text off process arguments and delivers it th
     return fakeChild({
       onStdin(value, child) {
         stdinText = value;
-        child.stdout.end('{"status":"ok","utf16CodeUnits":2,"clipboardRestored":true,"changeSignalDelivered":true,"deliveryPath":"windows_unicode_incremental"}');
+        child.stdout.end('{"status":"ok","utf16CodeUnits":2,"clipboardRestored":true,"changeSignalDelivered":true,"deliveryPath":"windows_clipboard_incremental"}');
         child.emit("close", 0, null);
       },
     });
@@ -32,7 +32,7 @@ test("sendWindowsUnicodeText keeps text off process arguments and delivers it th
     utf16CodeUnits: 2,
     clipboardRestored: true,
     changeSignalDelivered: true,
-    deliveryPath: "windows_unicode_incremental",
+    deliveryPath: "windows_clipboard_incremental",
   });
   const payload = JSON.parse(stdinText);
   assert.deepEqual(payload, {
@@ -47,10 +47,11 @@ test("sendWindowsUnicodeText keeps text off process arguments and delivers it th
   assert.equal(spawnCalls[0].command, "powershell.exe");
   assert.equal(spawnCalls[0].args.some((value) => value.includes("宋鹏")), false);
   assert.equal(spawnCalls[0].args.includes("-Sta"), true);
+  assert.ok(spawnCalls[0].args.at(-1).length < 30_000, "encoded bridge must stay below Windows command-line limits");
   const bridgeScript = Buffer.from(spawnCalls[0].args.at(-1), "base64").toString("utf16le");
-  assert.equal(bridgeScript.split("EmitChangeBoundary(inputSize);").length - 1, 2);
-  assert.match(bridgeScript, /Thread\.Sleep\(75\);\s*EmitChangeBoundary\(inputSize\)/);
-  assert.match(bridgeScript, /SendKey\(VK_SPACE[\s\S]*Thread\.Sleep\(75\);\s*SendKey\(VK_BACK/);
+  assert.equal(bridgeScript.split("[AgentComputerUseUnicodeInput]::PasteUnicode(").length - 1, 2);
+  assert.match(bridgeScript, /SendChord\(VK_CONTROL, 0x56, inputSize, "clipboard paste"\)/);
+  assert.match(bridgeScript, /Thread\.Sleep\(50\);\s*EmitChangeBoundary\(inputSize\)/);
   assert.equal(JSON.stringify(spawnCalls[0].options).includes("宋鹏"), false);
   assert.equal(spawnCalls[0].options.windowsHide, true);
   assert.deepEqual(spawnCalls[0].options.stdio, ["pipe", "pipe", "pipe"]);

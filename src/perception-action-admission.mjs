@@ -25,6 +25,14 @@ export function admitPerceptionAction({ observation, element, action, now = Date
     if (action.guessedAction === true || !coordinatesWithinObservation(action, observation)) {
       return denied("observation.insufficient");
     }
+    if (action.kind === "click" && action.targetRole === "editable") {
+      return denied("target.editable_click_requires_text", {
+        reason: "Editable surfaces are focused and written atomically; a separate focus click is not an admissible public action.",
+        targetRole: "editable",
+        requiredActionKind: "type_text",
+        nextAction: "Reuse this same fresh screenshot observationId and targetBounds in one type_text action with value, textMode, and inputBehavior. Do not observe or click first.",
+      });
+    }
     if (action.kind === "click" && !isPixelClickIntent(action.interactionIntent)) {
       return denied("target.interaction_intent_required", {
         allowedInteractionIntents: [

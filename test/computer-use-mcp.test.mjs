@@ -908,11 +908,15 @@ test("agent-computer-use-mcp freezes the local MCP tool contract", () => {
   );
   assert.deepEqual(
     act.inputSchema.properties.action.allOf[1].then.required,
-    ["interactionIntent"],
+    ["interactionIntent", "targetRole"],
   );
   assert.deepEqual(
     act.inputSchema.properties.action.properties.interactionIntent.enum,
     ["activate-control", "select-item"],
+  );
+  assert.deepEqual(
+    act.inputSchema.properties.action.properties.targetRole.enum,
+    ["button", "list-item", "menu-item", "toggle", "editable", "other"],
   );
   assert.equal(act.inputSchema.properties.action.properties.observationId.type, "string");
   assert.equal(act.inputSchema.properties.action.properties.x.type, "number");
