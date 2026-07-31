@@ -2,6 +2,12 @@
 
 All notable changes to `agent-computer-use-mcp` are tracked here.
 
+## 0.0.26
+
+- Emit a reversible native edit boundary after incremental Unicode input so custom-drawn search, filtering, validation, and autocomplete models refresh.
+- Preserve the exact requested text while making the incremental path's `changeSignalDelivered` receipt truthful.
+- Share the same change-boundary behavior across incremental and paste-style Unicode delivery.
+
 ## 0.0.25
 
 - Prefer an application's exact identity-matched primary window over larger auxiliary or custom-drawn surfaces.

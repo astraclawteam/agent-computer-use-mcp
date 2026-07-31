@@ -138,13 +138,7 @@ public static class AgentComputerUseUnicodeInput
             SendChord(VK_CONTROL, 0x56, inputSize, "clipboard paste");
             pasted = true;
             Thread.Sleep(50);
-            // Some custom-drawn desktop edit controls render clipboard text without
-            // invalidating their search/composition model. Emit a reversible native
-            // edit so those controls receive a real change boundary while preserving
-            // the exact requested value.
-            SendKey(VK_SPACE, inputSize, "text change signal");
-            SendKey(VK_BACK, inputSize, "text change rollback");
-            Thread.Sleep(250);
+            EmitChangeBoundary(inputSize);
         }
         finally
         {
@@ -247,7 +241,19 @@ public static class AgentComputerUseUnicodeInput
             // refresh live search/filter/autocomplete state before the next one.
             Thread.Sleep(8);
         }
+        EmitChangeBoundary(inputSize);
         return text.Length;
+    }
+
+    private static void EmitChangeBoundary(int inputSize)
+    {
+        // Some custom-drawn desktop edit controls render injected Unicode or
+        // clipboard text without invalidating their search/composition model.
+        // Emit a reversible native edit so those controls receive a real change
+        // boundary while preserving the exact requested value.
+        SendKey(VK_SPACE, inputSize, "text change signal");
+        SendKey(VK_BACK, inputSize, "text change rollback");
+        Thread.Sleep(250);
     }
 }
 '@ -ReferencedAssemblies System.Windows.Forms
