@@ -65,11 +65,15 @@ try {
       value: expectedText,
     },
   });
+  const postValueCapture = await server.callTool("computer.observe", { mode: "semantic" });
+  const postValueSave = postValueCapture.elements.find((element) => element.role === "button" && element.name === "Save")
+    ?? postValueCapture.elements.find((element) => element.name === "Save");
+  if (!postValueSave) throw new Error("element.not_found_after_set_value: Save");
   const click = await server.callTool("computer.act", {
     action: {
       kind: "click",
-      elementToken: save.elementToken,
-      elementIndex: save.elementIndex,
+      elementToken: postValueSave.elementToken,
+      elementIndex: postValueSave.elementIndex,
       deliveryMode: "background",
       captureAfter: true,
     },

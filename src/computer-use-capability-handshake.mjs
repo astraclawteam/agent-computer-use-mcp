@@ -1,5 +1,5 @@
 export const COMPUTER_USE_CAPABILITY_SCHEMA_VERSION = 1;
-export const COMPUTER_USE_PROVIDER_PROTOCOL_VERSION = 1;
+export const COMPUTER_USE_PROVIDER_PROTOCOL_VERSION = 2;
 
 export function createComputerUseCapabilityHandshake({
   moduleVersion,
@@ -35,6 +35,7 @@ export function createComputerUseCapabilityHandshake({
         release: true,
         restoreOrLaunchApplication: true,
         leaseBoundControl: true,
+        secureDesktopFailClosed: true,
       },
       observation: {
         state: true,
@@ -46,6 +47,8 @@ export function createComputerUseCapabilityHandshake({
         focusedElementMetadata: true,
         truncationMetadata: true,
         coordinateScaleMetadata: true,
+        singleUseSurfaceReceipts: true,
+        screenshotToNativeTransform: true,
       },
       action: {
         activateWindow: true,
@@ -58,6 +61,7 @@ export function createComputerUseCapabilityHandshake({
         focusReceipts: true,
         executionPathMetadata: true,
         fallbackReasonMetadata: true,
+        oneActionPerObservation: true,
       },
       delivery: {
         background: true,
@@ -70,6 +74,8 @@ export function createComputerUseCapabilityHandshake({
         managedImageContent: true,
         startupNetworkRequired: false,
         selfUpdateAllowed: false,
+        inputDesktopVerification: true,
+        capturedSurfaceIdentityVerification: true,
       },
     },
   };

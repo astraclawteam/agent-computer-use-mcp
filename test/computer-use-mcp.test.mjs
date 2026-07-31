@@ -148,7 +148,7 @@ test("successful unified OCR observations satisfy the public result envelope", a
   }, "computer.observe", { mode: "ocr-region" });
 
   assert.equal(result.isError, false);
-  assert.equal(result.structuredContent.resultSchemaVersion, "5.4");
+  assert.equal(result.structuredContent.resultSchemaVersion, "5.5");
   assert.equal(result.structuredContent.includeUserOverlay, false);
   const observe = COMPUTER_USE_MCP_TOOLS.find((tool) => tool.name === "computer.observe");
   const validate = new Ajv({ strict: false }).compile(observe.outputSchema);
@@ -959,7 +959,7 @@ test("provider router prewarms OCR buckets during non-fast health", async () => 
 
   assert.equal(health.prewarm.status, "completed");
   assert.equal(health.capabilityHandshake.schemaVersion, 1);
-  assert.equal(health.capabilityHandshake.module.resultSchemaVersion, "5.4");
+  assert.equal(health.capabilityHandshake.module.resultSchemaVersion, "5.5");
   assert.equal(health.capabilityHandshake.supports.observation.focusedElementMetadata, true);
   assert.equal(health.capabilityHandshake.supports.action.executionPathMetadata, true);
   assert.deepEqual(health.prewarm.buckets.map((bucket) => bucket.size), ["128x96", "288x96", "704x320"]);
@@ -1038,6 +1038,7 @@ test("provider router manages request/capture/action/cancel lifecycle", async ()
     selectionReason: null,
     fallback: { used: false, reason: null },
   });
+  await router.capture({ mode: "semantic" });
   const typed = await router.act({
     action: {
       kind: "type_text",
@@ -1057,7 +1058,43 @@ test("provider router manages request/capture/action/cancel lifecycle", async ()
   assert.equal(cancelled.status, "cancelled");
   assert.equal((await router.listState()).activeController, null);
   assert.deepEqual(overlayCalls.map((call) => call.method), ["start", "stop"]);
-  assert.deepEqual(calls.map((call) => call.method), ["findWindow", "capture", "setValue", "typeText"]);
+  assert.deepEqual(calls.map((call) => call.method), ["findWindow", "capture", "setValue", "capture", "typeText"]);
+});
+
+test("provider router fails closed on a secure Windows input desktop", async () => {
+  const { ComputerUseProviderRouter } = await import("../src/computer-use-provider-router.mjs");
+  let findWindowCalls = 0;
+  const router = new ComputerUseProviderRouter({
+    driver: {
+      async desktopState() {
+        return {
+          status: "locked",
+          inputDesktop: "Winlogon",
+          secureDesktop: true,
+        };
+      },
+      async findWindow() {
+        findWindowCalls += 1;
+        return { windowId: 42, title: "Fixture", pid: 1234 };
+      },
+    },
+  });
+
+  await assert.rejects(
+    router.requestAccess({ titlePart: "Fixture", tier: "full", agentId: "agent-1" }),
+    (error) => (
+      error.code === "desktop.locked"
+      && error.detail?.terminal === true
+      && error.detail?.requiresUserAction === "unlock"
+    ),
+  );
+  assert.equal(findWindowCalls, 0);
+
+  const state = await router.listState();
+  assert.equal(state.status, "blocked");
+  assert.equal(state.blocker.code, "desktop.locked");
+  assert.equal(state.desktopState.inputDesktop, "Winlogon");
+  await router.close();
 });
 
 test("provider router activates the acquired window without perception coordinates", async () => {

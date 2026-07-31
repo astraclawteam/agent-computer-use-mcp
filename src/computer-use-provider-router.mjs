@@ -71,6 +71,9 @@ export class ComputerUseProviderRouter {
     this.lastScreenshot = null;
     this.lastVisualUnderstandingDigest = null;
     this.pendingUnverifiedMutation = null;
+    this.lastDesktopState = null;
+    this.surfaceGeneration = 0;
+    this.consumedSurfaceReceiptId = null;
     this.actionTail = Promise.resolve();
     this.activeFocusReceipt = null;
     this.semanticElementAliases = new Map();
@@ -103,7 +106,7 @@ export class ComputerUseProviderRouter {
     const result = {
       status: "ready",
       module: "agent-computer-use-mcp",
-      version: "0.0.19",
+      version: "0.0.20",
       phases: {
         "0.9": "contract-freeze",
         "0.10": "release-metadata-changelog",
@@ -513,6 +516,12 @@ export class ComputerUseProviderRouter {
       });
     }
     this.expireAccessApproval();
+    await this.assertDesktopInteractive(ticket, "acquire");
+    if (this.controllerRequestInProgress) {
+      fail("controller.request_in_progress", "A Gateway-managed Computer Use controller request is already in progress.", {
+        includeUserOverlay: false,
+      });
+    }
     if (this.pendingAccessApproval) {
       fail("controller.approval_pending", "A Gateway-managed Computer Use approval request is already pending.", {
         token: this.pendingAccessApproval.token,
@@ -817,6 +826,7 @@ export class ComputerUseProviderRouter {
 
   async captureOperation(args = {}, ticket) {
     await this.awaitExternal(ticket, () => this.requireActiveController(ticket, args.requestContext));
+    await this.assertDesktopInteractive(ticket, "observe");
     const mode = args.mode ?? "semantic";
     let observation;
     if (mode === "semantic") {
@@ -1013,6 +1023,7 @@ export class ComputerUseProviderRouter {
 
   async actOperation(args = {}, ticket) {
     await this.awaitExternal(ticket, () => this.requireActiveController(ticket, args.requestContext));
+    await this.assertDesktopInteractive(ticket, "act");
     const actionObservation = this.lastCapture;
     const action = normalizeActionCoordinates(
       args.action,
@@ -1030,6 +1041,30 @@ export class ComputerUseProviderRouter {
         },
       );
     }
+    const surfaceReceipt = actionObservation?.surfaceReceipt;
+    if (surfaceReceipt?.id && args.action?.surfaceReceiptId !== undefined
+      && args.action.surfaceReceiptId !== surfaceReceipt.id) {
+      fail(
+        "action.surface_receipt_mismatch",
+        "The supplied surface receipt does not match the latest observation.",
+        {
+          expectedSurfaceReceiptId: surfaceReceipt.id,
+          retryable: true,
+          nextTool: "computer.observe",
+        },
+      );
+    }
+    if (surfaceReceipt?.id && this.consumedSurfaceReceiptId === surfaceReceipt.id) {
+      fail(
+        "action.fresh_observation_required",
+        "The latest surface observation has already authorized one action. Observe again before another action.",
+        {
+          consumedSurfaceReceiptId: surfaceReceipt.id,
+          retryable: true,
+          nextTool: "computer.observe",
+        },
+      );
+    }
     const { admission, driverTarget, element, focusReceipt } = this.validateAction(action);
     const effectiveDeliveryMode = resolveEffectiveDeliveryMode(action, admission, focusReceipt);
     if (action.kind === "activate_window" || action.kind === "click" || action.kind === "set_value"
@@ -1042,7 +1077,9 @@ export class ComputerUseProviderRouter {
       elementToken: action.elementToken,
       elementIndex: action.elementIndex,
       effectiveDeliveryMode,
+      surfaceReceiptId: surfaceReceipt?.id ?? null,
     });
+    if (surfaceReceipt?.id) this.consumedSurfaceReceiptId = surfaceReceipt.id;
 
     let result;
     let outcome = "applied";
@@ -1213,6 +1250,13 @@ export class ComputerUseProviderRouter {
         effectiveDeliveryMode,
       }),
       includeUserOverlay: false,
+      ...(surfaceReceipt?.id ? {
+        consumedSurfaceReceipt: {
+          id: surfaceReceipt.id,
+          generation: surfaceReceipt.generation,
+        },
+        postActionObservationRequired: true,
+      } : {}),
     };
     if (this.activeFocusReceipt) actionResult.focusReceipt = serializeFocusReceipt(this.activeFocusReceipt);
     if (action.captureAfter) {
@@ -1352,6 +1396,36 @@ export class ComputerUseProviderRouter {
       () => this.expireActiveController({ throwOnExpire: false }, ticket),
     );
     this.expireAccessApproval();
+    const desktopState = await this.probeDesktopState(ticket);
+    if (desktopState.status === "locked") {
+      return {
+        status: "blocked",
+        blocker: {
+          code: "desktop.locked",
+          message: "The Windows input desktop is locked or otherwise secure.",
+          requiresUserAction: "unlock",
+        },
+        desktopState,
+        activeController: this.activeController,
+        pendingAccessApproval: this.getPendingAccessApproval(),
+        lastCapture: this.lastCapture,
+        pendingRepairApproval: this.getPendingRepairApproval(),
+        foregroundWindow: null,
+        windows: [],
+        windowDiscovery: {
+          status: "blocked",
+          source: "windows-input-desktop",
+        },
+        applications: [],
+        applicationDiscovery: {
+          status: "blocked",
+          source: "windows-input-desktop",
+        },
+        auditEvents: this.auditEvents.slice(-50),
+        startsDesktopControl: false,
+        includeUserOverlay: false,
+      };
+    }
     let windows = [];
     let foregroundWindow = null;
     let windowDiscovery;
@@ -1445,6 +1519,7 @@ export class ComputerUseProviderRouter {
       windowDiscovery,
       applications,
       applicationDiscovery,
+      desktopState,
       auditEvents: this.auditEvents.slice(-50),
       startsDesktopControl: false,
       includeUserOverlay: false,
@@ -2029,7 +2104,12 @@ export class ComputerUseProviderRouter {
     if (!admission.allowed) fail(admission.code, perceptionAdmissionMessage(admission), admission);
     return {
       admission,
-      driverTarget: resolveDriverActionTarget(action, element, admission.pixelLimitedAction),
+      driverTarget: resolveDriverActionTarget(
+        action,
+        element,
+        admission.pixelLimitedAction,
+        this.lastCapture?.coordinateScale,
+      ),
       element,
       focusReceipt,
     };
@@ -2149,13 +2229,45 @@ export class ComputerUseProviderRouter {
           ?? createIdentityCoordinateScale(coordinateBounds)
         )
       : undefined;
+    const observationId = observation.observationId ?? `observation-${now}`;
+    const actionTransform = coordinateScale?.actionTransform;
+    const coordinateTransform = isIdentityCoordinateTransform(actionTransform)
+      ? "identity"
+      : "scale-offset";
+    const existingReceipt = observation.surfaceReceipt;
+    const controllerId = this.activeController?.controllerId;
+    const windowId = controllerWindowId(this.activeController?.window);
+    const surfaceReceipt = existingReceipt?.controllerId === controllerId
+      && existingReceipt?.windowId === windowId
+      ? existingReceipt
+      : {
+          schemaVersion: 1,
+          id: randomUUID(),
+          generation: ++this.surfaceGeneration,
+          controllerId,
+          windowId,
+          observationId,
+          screenshotId: isImageBearingObservation(observation) ? observationId : null,
+          desktopState: this.lastDesktopState?.status ?? "unknown",
+          secureDesktop: this.lastDesktopState?.secureDesktop === true,
+          capturedAt: this.clock.iso(now),
+          provenance: observation.capture?.surfaceProvenance
+            ?? observation.surfaceProvenance
+            ?? {
+              schemaVersion: 1,
+              binding: "controller-window",
+              requestedWindowId: windowId,
+              identityVerified: true,
+            },
+        };
     return {
       ...observation,
-      observationId: observation.observationId ?? `observation-${now}`,
+      observationId,
+      surfaceReceipt,
       coordinateSpace: "window-local",
       ...(coordinateBounds ? {
         coordinateBounds,
-        coordinateTransform: "identity",
+        coordinateTransform,
         coordinateScale,
       } : {}),
       interactionContract: {
@@ -2198,6 +2310,62 @@ export class ComputerUseProviderRouter {
       ),
       includeUserOverlay: false,
     };
+  }
+
+  async probeDesktopState(ticket) {
+    if (!this.driver?.desktopState) {
+      this.lastDesktopState = {
+        status: "unavailable",
+        inputDesktop: null,
+        secureDesktop: false,
+      };
+      return this.lastDesktopState;
+    }
+    try {
+      this.lastDesktopState = await this.awaitExternal(
+        ticket,
+        () => this.driver.desktopState(),
+      );
+    } catch (error) {
+      this.assertOperationTicket(ticket);
+      this.lastDesktopState = {
+        status: "unavailable",
+        inputDesktop: null,
+        secureDesktop: false,
+        error: serializeToolError(error),
+      };
+    }
+    return this.lastDesktopState;
+  }
+
+  async assertDesktopInteractive(ticket, phase) {
+    const desktopState = await this.probeDesktopState(ticket);
+    if (desktopState.status === "locked" || desktopState.secureDesktop === true) {
+      fail(
+        "desktop.locked",
+        "The Windows input desktop is locked or secure. Computer Use stopped before interacting.",
+        {
+          phase,
+          terminal: true,
+          retryable: false,
+          requiresUserAction: "unlock",
+          desktopState,
+        },
+      );
+    }
+    if (this.driver?.desktopState && desktopState.status !== "interactive") {
+      fail(
+        "desktop.state_unavailable",
+        "The Windows input desktop could not be verified as interactive.",
+        {
+          phase,
+          terminal: true,
+          retryable: false,
+          desktopState,
+        },
+      );
+    }
+    return desktopState;
   }
 
   enforcePolicyDecision(decision) {
@@ -2756,6 +2924,15 @@ function normalizeActionCoordinates(action = {}, observation, window) {
   };
 }
 
+function isIdentityCoordinateTransform(transform) {
+  return !transform || (
+    transform.scaleX === 1
+    && transform.scaleY === 1
+    && (transform.offsetX ?? 0) === 0
+    && (transform.offsetY ?? 0) === 0
+  );
+}
+
 function resolveEffectiveDeliveryMode(action, admission, focusReceipt) {
   if (action.kind === "activate_window") return "foreground";
   if (action.deliveryMode) return action.deliveryMode;
@@ -2763,7 +2940,7 @@ function resolveEffectiveDeliveryMode(action, admission, focusReceipt) {
   return "background";
 }
 
-function resolveDriverActionTarget(action, element, pixelLimitedAction) {
+function resolveDriverActionTarget(action, element, pixelLimitedAction, coordinateScale) {
   if (!pixelLimitedAction) {
     if (action.elementToken === undefined && action.elementIndex === undefined) return {};
     return {
@@ -2774,13 +2951,31 @@ function resolveDriverActionTarget(action, element, pixelLimitedAction) {
     };
   }
   if (Number.isFinite(action.x) && Number.isFinite(action.y)) {
-    return { x: action.x, y: action.y };
+    return transformObservationPoint(
+      { x: action.x, y: action.y },
+      coordinateScale?.actionTransform,
+    );
   }
   const region = element?.sourceRegion ?? element?.bounds;
   if (!region) return {};
-  return {
+  return transformObservationPoint({
     x: region.x + (region.width / 2),
     y: region.y + (region.height / 2),
+  }, coordinateScale?.actionTransform);
+}
+
+function transformObservationPoint(point, transform) {
+  if (!transform || isIdentityCoordinateTransform(transform)) return point;
+  return {
+    x: (point.x * transform.scaleX) + (transform.offsetX ?? 0),
+    y: (point.y * transform.scaleY) + (transform.offsetY ?? 0),
+    observationPoint: point,
+    appliedCoordinateTransform: {
+      scaleX: transform.scaleX,
+      scaleY: transform.scaleY,
+      offsetX: transform.offsetX ?? 0,
+      offsetY: transform.offsetY ?? 0,
+    },
   };
 }
 

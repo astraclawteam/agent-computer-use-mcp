@@ -2,6 +2,13 @@
 
 All notable changes to `agent-computer-use-mcp` are tracked here.
 
+## 0.0.20
+
+- Fail closed before acquire, observation, or action when the Windows input desktop is locked or secure.
+- Bind each observation to a single-use surface receipt and require a fresh observation after every action.
+- Reject screenshot surfaces whose reported native window identity differs from the acquired target.
+- Apply screenshot-pixel to native-window scaling inside the Host instead of asking the Agent to transform coordinates.
+
 ## 0.0.19
 
 - Restrict tray accessibility discovery to notification icon elements instead of traversing every desktop button.

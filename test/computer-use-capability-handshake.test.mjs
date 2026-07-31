@@ -9,7 +9,7 @@ import {
 test("capability handshake declares the compact Computer Use contract without adding tools", () => {
   const handshake = createComputerUseCapabilityHandshake({
     moduleVersion: "0.0.6",
-    resultSchemaVersion: "5.4",
+    resultSchemaVersion: "5.5",
     driver: { status: "healthy", version: "cua-driver 0.7.1" },
     ocr: { status: "ready", modelPack: "PP-OCRv6-small" },
   });
@@ -24,15 +24,20 @@ test("capability handshake declares the compact Computer Use contract without ad
   assert.equal(handshake.supports.observation.focusedElementMetadata, true);
   assert.equal(handshake.supports.observation.truncationMetadata, true);
   assert.equal(handshake.supports.observation.coordinateScaleMetadata, true);
+  assert.equal(handshake.supports.observation.singleUseSurfaceReceipts, true);
+  assert.equal(handshake.supports.observation.screenshotToNativeTransform, true);
   assert.equal(handshake.supports.action.executionPathMetadata, true);
   assert.equal(handshake.supports.action.fallbackReasonMetadata, true);
+  assert.equal(handshake.supports.action.oneActionPerObservation, true);
   assert.equal(handshake.supports.security.managedImageContent, true);
+  assert.equal(handshake.supports.security.inputDesktopVerification, true);
+  assert.equal(handshake.supports.security.capturedSurfaceIdentityVerification, true);
 });
 
 test("fast capability handshake reports deferred providers without claiming runtime health", () => {
   const handshake = createComputerUseCapabilityHandshake({
     moduleVersion: "0.0.6",
-    resultSchemaVersion: "5.4",
+    resultSchemaVersion: "5.5",
     fast: true,
   });
 

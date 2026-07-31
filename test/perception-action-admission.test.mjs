@@ -1008,6 +1008,126 @@ test("router requires an explicit coordinate space and translates screen coordin
   }]);
 });
 
+test("a surface receipt authorizes exactly one action before a fresh observation", async (t) => {
+  const router = new ComputerUseProviderRouter({
+    driver: {
+      async click() {
+        return { status: "ok", verified: true };
+      },
+    },
+  });
+  t.after(() => router.close());
+  router.activeController = {
+    controllerId: "controller-1",
+    tier: "full",
+    window: {
+      id: "window-1",
+      windowId: "window-1",
+      title: "Fixture",
+      pid: 100,
+      bounds: { x: 0, y: 0, width: 960, height: 720 },
+    },
+    expiresAt: new Date(Date.now() + 10_000).toISOString(),
+    expiresAtMs: Date.now() + 10_000,
+  };
+  router.lastCapture = router.createActionObservation({
+    observationId: "single-use-observation",
+    source: "window-capture",
+    capture: { x: 0, y: 0, width: 960, height: 720 },
+    elements: [],
+  });
+  const surfaceReceiptId = router.lastCapture.surfaceReceipt.id;
+
+  await router.act({
+    action: {
+      kind: "click",
+      observationId: "single-use-observation",
+      surfaceReceiptId,
+      coordinateSpace: "window-local",
+      x: 100,
+      y: 100,
+      interactionIntent: "activate-control",
+    },
+  });
+  await assert.rejects(
+    router.act({
+      action: {
+        kind: "click",
+        observationId: "single-use-observation",
+        surfaceReceiptId,
+        coordinateSpace: "window-local",
+        x: 200,
+        y: 100,
+        interactionIntent: "activate-control",
+      },
+    }),
+    (error) => error.code === "action.fresh_observation_required",
+  );
+});
+
+test("router applies screenshot-to-native scaling after pixel admission", async (t) => {
+  const calls = [];
+  const router = new ComputerUseProviderRouter({
+    driver: {
+      async click(args) {
+        calls.push(args);
+        return { status: "ok", verified: true };
+      },
+    },
+  });
+  t.after(() => router.close());
+  router.activeController = {
+    controllerId: "controller-1",
+    tier: "full",
+    window: {
+      id: "window-1",
+      windowId: "window-1",
+      title: "Fixture",
+      pid: 100,
+      bounds: { x: 0, y: 0, width: 1_200, height: 900 },
+    },
+    expiresAt: new Date(Date.now() + 10_000).toISOString(),
+    expiresAtMs: Date.now() + 10_000,
+  };
+  router.lastCapture = router.createActionObservation({
+    observationId: "scaled-observation",
+    source: "window-capture",
+    capture: {
+      x: 0,
+      y: 0,
+      width: 960,
+      height: 720,
+      coordinateScale: {
+        schemaVersion: 1,
+        sourceSpace: "screenshot-pixel",
+        actionSpace: "window-local",
+        actionTransform: {
+          scaleX: 1.25,
+          scaleY: 1.25,
+          offsetX: 0,
+          offsetY: 0,
+        },
+      },
+    },
+    elements: [],
+  });
+
+  await router.act({
+    action: {
+      kind: "click",
+      observationId: "scaled-observation",
+      coordinateSpace: "window-local",
+      x: 400,
+      y: 300,
+      interactionIntent: "activate-control",
+    },
+  });
+
+  assert.equal(router.lastCapture.coordinateTransform, "scale-offset");
+  assert.equal(calls[0].x, 500);
+  assert.equal(calls[0].y, 375);
+});
+
 test("provider router dispatches screenshot-grounded text and key actions without semantic elements", async (t) => {
   const calls = [];
   const router = new ComputerUseProviderRouter({

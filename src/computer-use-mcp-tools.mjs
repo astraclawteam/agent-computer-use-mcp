@@ -1,4 +1,4 @@
-export const MCP_RESULT_SCHEMA_VERSION = "5.4";
+export const MCP_RESULT_SCHEMA_VERSION = "5.5";
 
 const ANY_OBJECT = { type: "object", additionalProperties: true };
 const ANY_ARRAY = { type: "array", items: {} };
@@ -390,7 +390,10 @@ const LEGACY_COMPUTER_USE_MCP_TOOLS = [
       observationId: { type: "string" },
       coordinateSpace: { type: "string", enum: ["window-local"] },
       coordinateBounds: { anyOf: [BOX_SCHEMA, { type: "null" }] },
-      coordinateTransform: { type: "string", enum: ["identity"] },
+      coordinateTransform: { type: "string", enum: ["identity", "scale-offset"] },
+      coordinateScale: ANY_OBJECT,
+      surfaceReceipt: ANY_OBJECT,
+      surfaceProvenance: ANY_OBJECT,
       provider: { type: "string" },
       source: { type: "string" },
       mode: { type: "string" },
@@ -406,7 +409,7 @@ const LEGACY_COMPUTER_USE_MCP_TOOLS = [
   {
     name: "computer.act",
     title: "Act On Computer",
-    description: "Run an approved action against the active Gateway-managed target. Use activate_window to bring the acquired window to the OS foreground without guessing coordinates. Prefer a semantic elementToken. Every pixel click must declare interactionIntent. OCR geometry is accepted only for activate-recognized-text; focus-editable, activate-control, and select-item require screenshot-grounded control geometry. For text entry on a custom-drawn surface, derive the full editable rectangle from a fresh screenshot and send one type_text action to a safe point near its visual center, using the exact latest screenshot observationId and an explicit textMode. Never infer an editable point from the position of a nearby action button or toolbar icon: composers and editors may place their editable body above a bottom toolbar or button row. If a dialog, sheet, or overlay covers the target, resolve or dismiss it and re-observe before typing. Use replace-all when the field must equal the supplied value or may already contain text; use insert only when appending at the current caret is intended. Coordinate-grounded text defaults to incremental native Unicode input so live search, filtering, validation, and autocomplete controls receive each edit event. Use inputBehavior commit only when the control should receive the final value as one paste-style transaction; the Host restores the prior clipboard. OCR bounds and OCR interactionPoint values describe recognized glyphs only; they are never proof of a control's editable interior and are rejected for type_text or coordinate-grounded press_key. Exclude icons, labels, borders, and affordances when grounding an editable point. Window-local image coordinates start at (0,0): never add window.bounds.x/y to them. Do not click first. Pixel-grounded actions default to foreground delivery so native focus and IME events reach the application. Targetless type_text and press_key require the unexpired focusReceiptId returned by an explicitly focus-verified action. Never infer focus from a successful RPC or an OCR label click. A semantic accessibility click may return outcome=delivered when invocation succeeded but no stable state change is immediately visible; never replay that click, continue with the next distinct planned action, and verify at the next observable boundary. If a pixel action or text mutation is indeterminate, possibly_applied, or unverified, call computer.observe before any further action and follow the structured recovery contract from the fresh state. Task completion still requires observing the intended UI state transition.",
+    description: "Run one approved action against the active Gateway-managed target using the latest single-use surfaceReceipt. Observe immediately after every action; a consumed observation cannot authorize a second action. Use activate_window to bring the acquired window to the OS foreground without guessing coordinates. Prefer a semantic elementToken. Every pixel click must declare interactionIntent. OCR geometry is accepted only for activate-recognized-text; focus-editable, activate-control, and select-item require screenshot-grounded control geometry. For text entry on a custom-drawn surface, derive the full editable rectangle from a fresh screenshot and send one type_text action to a safe point near its visual center, using the exact latest screenshot observationId and an explicit textMode. Never infer an editable point from the position of a nearby action button or toolbar icon: composers and editors may place their editable body above a bottom toolbar or button row. If a dialog, sheet, or overlay covers the target, resolve or dismiss it and re-observe before typing. Use replace-all when the field must equal the supplied value or may already contain text; use insert only when appending at the current caret is intended. Coordinate-grounded text defaults to incremental native Unicode input so live search, filtering, validation, and autocomplete controls receive each edit event. Use inputBehavior commit only when the control should receive the final value as one paste-style transaction; the Host restores the prior clipboard. OCR bounds and OCR interactionPoint values describe recognized glyphs only; they are never proof of a control's editable interior and are rejected for type_text or coordinate-grounded press_key. Exclude icons, labels, borders, and affordances when grounding an editable point. Window-local image coordinates start at (0,0): never add window.bounds.x/y to them. The Host applies screenshot-to-native scaling. Do not click first. Pixel-grounded actions default to foreground delivery so native focus and IME events reach the application. Targetless type_text and press_key require the unexpired focusReceiptId returned by an explicitly focus-verified action. Never infer focus from a successful RPC or an OCR label click. A semantic accessibility click may return outcome=delivered when invocation succeeded but no stable state change is immediately visible; never replay that click, continue with the next distinct planned action, and verify at the next observable boundary. If a pixel action or text mutation is indeterminate, possibly_applied, or unverified, call computer.observe before any further action and follow the structured recovery contract from the fresh state. Task completion still requires observing the intended UI state transition.",
     annotations: { phase: "1.3", destructiveHint: true },
     inputSchema: {
       type: "object",
@@ -461,6 +464,10 @@ const LEGACY_COMPUTER_USE_MCP_TOOLS = [
             observationId: {
               type: "string",
               description: "Required with x/y so the action is bound to the exact latest observation. Text entry requires a screenshot observation visually grounded to the editable interior; OCR text observations are rejected for keyboard actions.",
+            },
+            surfaceReceiptId: {
+              type: "string",
+              description: "Optional explicit binding to the latest observation's single-use surfaceReceipt.id. If supplied, it must match exactly. Every observation authorizes at most one action even when omitted.",
             },
             elementToken: { type: "string" },
             elementIndex: { type: "number" },
@@ -527,6 +534,8 @@ const LEGACY_COMPUTER_USE_MCP_TOOLS = [
       execution: ANY_OBJECT,
       focusReceipt: ANY_OBJECT,
       capture: ANY_OBJECT,
+      consumedSurfaceReceipt: ANY_OBJECT,
+      postActionObservationRequired: { type: "boolean" },
     }, ["status", "provider", "action", "result", "pixelLimitedAction", "execution"]),
   },
   {
@@ -580,6 +589,8 @@ const LEGACY_COMPUTER_USE_MCP_TOOLS = [
       foregroundWindow: { anyOf: [ANY_OBJECT, { type: "null" }] },
       windows: ANY_ARRAY,
       windowDiscovery: ANY_OBJECT,
+      desktopState: ANY_OBJECT,
+      blocker: ANY_OBJECT,
       auditEvents: ANY_ARRAY,
       startsDesktopControl: { const: false },
     }, [
@@ -773,7 +784,7 @@ const acquireTool = {
 const observeTool = {
   name: "computer.observe",
   title: "Observe Computer",
-  description: "Read desktop state or capture semantic, screenshot, OCR, and changed-region observations through one bounded interface. Start with semantic; when pixels are needed the Host automatically evaluates screenshot change, runs changed-region or window OCR within a short local budget, and only permits the image-understanding model for an explicit unresolved layout, icon, or complex visual question. Repeating the same visual request on an unchanged screenshot is suppressed. OCR can ground only an explicit activate-recognized-text click; its bounds and interactionPoint describe glyph geometry rather than parent-control geometry. Never use an OCR point to focus an editable field, select a containing row, type text, or ground a coordinate press_key. For a custom-drawn editable surface, capture a fresh screenshot and set visualQuestion to the concrete layout, focus, control, or state question that remains unresolved after structured observation. The Host securely runs the configured image-understanding model inside the same observation transaction and returns pixel-grounded visual evidence; do not call a second media tool for that screenshot. Screenshot, capture-window, and OCR observations return an observationId plus coordinateSpace and zero-based coordinateBounds for bounded x/y actions. Copy coordinateSpace and projected screenshot coordinates unchanged into computer.act; never add window.bounds to window-local coordinates. Artifact paths are connector-private and must not be passed to unrelated file or media tools.",
+  description: "Read desktop state or capture semantic, screenshot, OCR, and changed-region observations through one bounded interface. A locked or secure Windows input desktop is a terminal blocker: ask the user to unlock and do not acquire, perceive, or act through it. Start with semantic; when pixels are needed the Host automatically evaluates screenshot change, runs changed-region or window OCR within a short local budget, and only permits the image-understanding model for an explicit unresolved layout, icon, or complex visual question. Repeating the same visual request on an unchanged screenshot is suppressed. OCR can ground only an explicit activate-recognized-text click; its bounds and interactionPoint describe glyph geometry rather than parent-control geometry. Never use an OCR point to focus an editable field, select a containing row, type text, or ground a coordinate press_key. For a custom-drawn editable surface, capture a fresh screenshot and set visualQuestion to the concrete layout, focus, control, or state question that remains unresolved after structured observation. The Host securely runs the configured image-understanding model inside the same observation transaction and returns pixel-grounded visual evidence; do not call a second media tool for this screenshot. Screenshot, capture-window, and OCR observations return an observationId, a single-use surfaceReceipt, coordinateSpace, and zero-based coordinateBounds. Copy projected image coordinates unchanged into computer.act; the Host applies the declared screenshot-to-native transform. Every observation authorizes at most one action, so observe immediately after each action. Artifact paths are connector-private and must not be passed to unrelated file or media tools.",
   _meta: semanticCapabilityMeta({
     summary: "Inspect visible state in local graphical applications using window discovery, semantic elements, screenshots, OCR, or visual differences.",
     scenarios: [
@@ -858,6 +869,8 @@ const observeTool = {
     applications: ANY_ARRAY,
     applicationCount: { type: "number", minimum: 0 },
     applicationDiscovery: ANY_OBJECT,
+    desktopState: ANY_OBJECT,
+    blocker: ANY_OBJECT,
     auditEvents: ANY_ARRAY,
     observationId: { type: "string" },
     coordinateSpace: {
@@ -868,10 +881,12 @@ const observeTool = {
     coordinateBounds: { anyOf: [BOX_SCHEMA, { type: "null" }] },
     coordinateTransform: {
       type: "string",
-      enum: ["identity"],
-      description: "Identity means image/OCR x/y must be passed unchanged; do not add window.bounds.",
+      enum: ["identity", "scale-offset"],
+      description: "Copy image/OCR x/y unchanged. The Host applies any scale-offset transform before native input; do not add window.bounds.",
     },
     coordinateScale: ANY_OBJECT,
+    surfaceReceipt: ANY_OBJECT,
+    surfaceProvenance: ANY_OBJECT,
     focusedElement: { anyOf: [ANY_OBJECT, { type: "null" }] },
     truncation: ANY_OBJECT,
     interactionContract: ANY_OBJECT,

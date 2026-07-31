@@ -10,6 +10,7 @@ import { activateWindowsForeground } from "./windows-foreground-activation.mjs";
 import { queryWindowsForegroundWindowId } from "./windows-foreground-probe.mjs";
 import { queryWindowsProcessApplications } from "./windows-process-application-probe.mjs";
 import { activateWindowsTrayApplication } from "./windows-tray-application-activation.mjs";
+import { queryWindowsDesktopSession } from "./windows-desktop-session-probe.mjs";
 
 const DEFAULT_DRIVER_PATH = `${process.env.LOCALAPPDATA}\\Programs\\Cua\\cua-driver\\bin\\cua-driver.exe`;
 
@@ -24,6 +25,7 @@ export class CuaDriverMcpDriver {
     this.foregroundWindowProbe = options.foregroundWindowProbe ?? queryWindowsForegroundWindowId;
     this.processApplicationProbe = options.processApplicationProbe ?? queryWindowsProcessApplications;
     this.trayApplicationActivator = options.trayApplicationActivator ?? activateWindowsTrayApplication;
+    this.desktopSessionProbe = options.desktopSessionProbe ?? queryWindowsDesktopSession;
     this.clientStarted = false;
     this.clientStartAttempted = false;
     this.sessionStarted = false;
@@ -298,6 +300,14 @@ export class CuaDriverMcpDriver {
     });
   }
 
+  desktopState() {
+    return this.runWork(async (ticket) => {
+      const state = await this.desktopSessionProbe();
+      this.assertWorkTicket(ticket);
+      return state;
+    });
+  }
+
   capture({ window, mode = "semantic" }) {
     return this.runWork(async (ticket) => {
       await this.ensureStartedResources(ticket);
@@ -311,7 +321,8 @@ export class CuaDriverMcpDriver {
       });
       this.assertWorkTicket(ticket);
       const rawObservation = result.structuredContent ?? result;
-      return normalizeCuaObservation({
+      const surfaceProvenance = verifyCaptureWindowIdentity(window, rawObservation.window);
+      const observation = normalizeCuaObservation({
         ...rawObservation,
         window: reconcileReportedWindow(window, rawObservation.window),
       }, {
@@ -319,6 +330,10 @@ export class CuaDriverMcpDriver {
         maxElements: 500,
         maxDepth: 20,
       });
+      return {
+        ...observation,
+        surfaceProvenance,
+      };
     });
   }
 
@@ -336,6 +351,7 @@ export class CuaDriverMcpDriver {
       });
       this.assertWorkTicket(ticket);
       const resultWindow = result.window ?? {};
+      const surfaceProvenance = verifyCaptureWindowIdentity(window, resultWindow);
       const reconciledWindow = reconcileReportedWindow(window, resultWindow);
       const reportedBounds = reconciledWindow.bounds;
       const screenshot = await readPngArtifact(outputPath);
@@ -360,6 +376,7 @@ export class CuaDriverMcpDriver {
         width: bounds?.width,
         height: bounds?.height,
         nativeWindowBounds: reportedBounds,
+        surfaceProvenance,
         coordinateScale: createCoordinateScaleMetadata({
           screenshot,
           nativeWindowBounds: reportedBounds,
@@ -903,13 +920,15 @@ function createCoordinateScaleMetadata({ screenshot, nativeWindowBounds }) {
   const nativeHeight = nativeWindowBounds?.height ?? observationHeight;
   const scaleX = positiveRatio(observationWidth, nativeWidth);
   const scaleY = positiveRatio(observationHeight, nativeHeight);
+  const observationToNativeScaleX = positiveRatio(nativeWidth, observationWidth);
+  const observationToNativeScaleY = positiveRatio(nativeHeight, observationHeight);
   return {
     schemaVersion: 1,
     sourceSpace: screenshot ? "screenshot-pixel" : "window-local",
     actionSpace: "window-local",
     actionTransform: {
-      scaleX: 1,
-      scaleY: 1,
+      scaleX: observationToNativeScaleX,
+      scaleY: observationToNativeScaleY,
       offsetX: 0,
       offsetY: 0,
     },
@@ -925,6 +944,55 @@ function createCoordinateScaleMetadata({ screenshot, nativeWindowBounds }) {
       scaleX,
       scaleY,
     },
+  };
+}
+
+function captureWindowIdentity(window = {}) {
+  const rawWindowId = window.windowId ?? window.window_id ?? window.id;
+  const rawPid = window.pid ?? window.processId ?? window.process_id;
+  return {
+    windowId: rawWindowId === undefined || rawWindowId === null
+      ? null
+      : String(rawWindowId),
+    pid: Number.isSafeInteger(Number(rawPid)) && Number(rawPid) > 0
+      ? Number(rawPid)
+      : null,
+  };
+}
+
+function verifyCaptureWindowIdentity(requestedWindow, reportedWindow = {}) {
+  const reportedIdentity = captureWindowIdentity(reportedWindow);
+  const requestedIdentity = captureWindowIdentity(requestedWindow);
+  const windowIdentityVerified = reportedIdentity.windowId === null
+    || requestedIdentity.windowId === null
+    || sameNativeWindowId(reportedIdentity.windowId, requestedIdentity.windowId);
+  const processIdentityVerified = reportedIdentity.pid === null
+    || requestedIdentity.pid === null
+    || reportedIdentity.pid === requestedIdentity.pid;
+  const identityVerified = windowIdentityVerified && processIdentityVerified;
+  if (!identityVerified) {
+    const error = new Error(
+      "The observation provider returned a surface that does not belong to the acquired window.",
+    );
+    error.code = "capture.surface_identity_mismatch";
+    error.detail = {
+      requestedWindowId: requestedIdentity.windowId,
+      reportedWindowId: reportedIdentity.windowId,
+      requestedProcessId: requestedIdentity.pid,
+      reportedProcessId: reportedIdentity.pid,
+    };
+    throw error;
+  }
+  return {
+    schemaVersion: 1,
+    requestedWindowId: requestedIdentity.windowId,
+    reportedWindowId: reportedIdentity.windowId,
+    requestedProcessId: requestedIdentity.pid,
+    reportedProcessId: reportedIdentity.pid,
+    identityVerified,
+    binding: reportedIdentity.windowId === null
+      ? "requested-window"
+      : "reported-window",
   };
 }
 
