@@ -901,6 +901,7 @@ const observeTool = {
         ocrFirst: { type: "boolean" },
         screenshotDigest: { type: "string" },
         frameStatus: { type: "string", enum: ["new-frame", "changed-region", "unchanged"] },
+        visualSceneChanged: { type: "boolean" },
         dirtyRegion: { anyOf: [ANY_OBJECT, { type: "null" }] },
         ocrRegion: { anyOf: [ANY_OBJECT, { type: "null" }] },
         localElementCount: { type: "number", minimum: 0 },
