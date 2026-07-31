@@ -12,7 +12,10 @@ import {
   createPerceptionRegionCacheKey,
   readOverlayFreeRegionPixels,
 } from "./perception-region-cache.mjs";
-import { UI_TEXT_NORMALIZATION_VERSION } from "./ui-text-normalization.mjs";
+import {
+  normalizeRecognizedUiText,
+  UI_TEXT_NORMALIZATION_VERSION,
+} from "./ui-text-normalization.mjs";
 import { admitPerceptionAction } from "./perception-action-admission.mjs";
 import { buildDiagnosticsPolicy } from "./diagnostics-policy.mjs";
 import { captureWindowPngByTitle } from "./real-window-capture.mjs";
@@ -106,7 +109,7 @@ export class ComputerUseProviderRouter {
     const result = {
       status: "ready",
       module: "agent-computer-use-mcp",
-      version: "0.0.20",
+      version: "0.0.21",
       phases: {
         "0.9": "contract-freeze",
         "0.10": "release-metadata-changelog",
@@ -883,7 +886,7 @@ export class ComputerUseProviderRouter {
       provider: observation.provider ?? "gateway-managed",
     });
     this.rememberSemanticElements(this.lastCapture);
-    this.pendingUnverifiedMutation = null;
+    this.reconcilePendingTextFocus(this.lastCapture);
     this.recordAudit("computer.capture.created", {
       controllerId: this.activeController.controllerId,
       mode,
@@ -1229,6 +1232,7 @@ export class ComputerUseProviderRouter {
       this.pendingUnverifiedMutation = {
         actionKind: action.kind,
         controllerId: this.activeController.controllerId,
+        windowId: controllerWindowId(this.activeController.window),
         observationId: this.lastCapture?.observationId,
         value: action.kind === "type_text" ? action.value : undefined,
         target: describeActionTarget(action, element, driverTarget),
@@ -2189,6 +2193,50 @@ export class ComputerUseProviderRouter {
     };
   }
 
+  reconcilePendingTextFocus(observation) {
+    const pending = this.pendingUnverifiedMutation;
+    this.pendingUnverifiedMutation = null;
+    if (pending?.actionKind !== "type_text"
+      || pending.controllerId !== this.activeController?.controllerId
+      || pending.windowId !== controllerWindowId(this.activeController?.window)
+      || typeof pending.value !== "string"
+      || pending.value.length === 0) {
+      return null;
+    }
+
+    const matchingElement = findObservedTextAtTarget(
+      observation,
+      pending.value,
+      pending.target,
+    );
+    if (!matchingElement) {
+      observation.mutationVerification = {
+        status: "not-confirmed",
+        actionKind: "type_text",
+        replaySafe: false,
+        focusReceiptIssued: false,
+      };
+      return null;
+    }
+
+    this.activeFocusReceipt = this.createFocusReceipt({
+      action: { kind: "type_text" },
+      element: matchingElement,
+      driverTarget: pending.target,
+    });
+    const serializedReceipt = serializeFocusReceipt(this.activeFocusReceipt);
+    observation.focusReceipt = serializedReceipt;
+    observation.mutationVerification = {
+      status: "confirmed",
+      actionKind: "type_text",
+      method: "exact-observed-value-near-grounded-target",
+      replaySafe: false,
+      focusReceiptIssued: true,
+      matchedElementToken: matchingElement.elementToken,
+    };
+    return serializedReceipt;
+  }
+
   createActionObservation(observation) {
     const now = this.clock.now();
     const ocrTextGeometry = observation.source === "ocr" || observation.mode === "ocr";
@@ -2990,6 +3038,37 @@ function describeActionTarget(action, element, driverTarget) {
   const bounds = element?.sourceRegion ?? element?.bounds;
   if (bounds) target.bounds = { ...bounds };
   return target;
+}
+
+function findObservedTextAtTarget(observation, intendedValue, target) {
+  const intendedText = normalizeRecognizedUiText(intendedValue, { languageClass: "mixed" });
+  if (!intendedText || !Number.isFinite(target?.x) || !Number.isFinite(target?.y)) return null;
+  const elements = observation?.elements ?? observation?.observation?.elements ?? [];
+  if (!Array.isArray(elements)) return null;
+  const width = Number(observation?.coordinateBounds?.width ?? observation?.window?.bounds?.width);
+  const height = Number(observation?.coordinateBounds?.height ?? observation?.window?.bounds?.height);
+  const horizontalTolerance = Number.isFinite(width) ? Math.max(96, width * 0.18) : 160;
+  const verticalTolerance = Number.isFinite(height) ? Math.max(32, height * 0.06) : 48;
+
+  return elements.find((element) => {
+    const observedValue = typeof element?.value === "string"
+      ? element.value
+      : typeof element?.name === "string"
+        ? element.name
+        : "";
+    if (normalizeRecognizedUiText(observedValue, { languageClass: "mixed" }) !== intendedText) {
+      return false;
+    }
+    const bounds = element?.sourceRegion ?? element?.bounds;
+    if (!Number.isFinite(bounds?.x) || !Number.isFinite(bounds?.y)
+      || !Number.isFinite(bounds?.width) || !Number.isFinite(bounds?.height)) {
+      return false;
+    }
+    const nearestX = Math.max(bounds.x, Math.min(target.x, bounds.x + bounds.width));
+    const nearestY = Math.max(bounds.y, Math.min(target.y, bounds.y + bounds.height));
+    return Math.abs(target.x - nearestX) <= horizontalTolerance
+      && Math.abs(target.y - nearestY) <= verticalTolerance;
+  }) ?? null;
 }
 
 function describeActionExecution({

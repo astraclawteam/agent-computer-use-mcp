@@ -2,6 +2,12 @@
 
 All notable changes to `agent-computer-use-mcp` are tracked here.
 
+## 0.0.21
+
+- Preserve safe keyboard continuation after coordinate Unicode input when a fresh same-window observation confirms the exact value near the grounded target.
+- Return the recovered short-lived focus receipt on that observation so an Agent can commit live search or message input without another guessed click.
+- Keep uncertain writes fail-closed when the exact post-action value or surface identity cannot be confirmed.
+
 ## 0.0.20
 
 - Fail closed before acquire, observation, or action when the Windows input desktop is locked or secure.
