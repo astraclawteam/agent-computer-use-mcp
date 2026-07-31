@@ -2,6 +2,11 @@
 
 All notable changes to `agent-computer-use-mcp` are tracked here.
 
+## 0.0.22
+
+- Declare post-write `focusReceipt` and `mutationVerification` fields in the strict observation output schema.
+- Cover the real MCP result envelope so a recovered focus receipt cannot be rejected as an additional property.
+
 ## 0.0.21
 
 - Preserve safe keyboard continuation after coordinate Unicode input when a fresh same-window observation confirms the exact value near the grounded target.
