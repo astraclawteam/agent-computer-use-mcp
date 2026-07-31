@@ -109,7 +109,7 @@ export class ComputerUseProviderRouter {
     const result = {
       status: "ready",
       module: "agent-computer-use-mcp",
-      version: "0.0.22",
+      version: "0.0.23",
       phases: {
         "0.9": "contract-freeze",
         "0.10": "release-metadata-changelog",
@@ -2331,6 +2331,9 @@ export class ComputerUseProviderRouter {
           coordinateRule: ocrTextGeometry
             ? "fresh-screenshot-editable-interior-required"
             : "copy-grounded-editable-interior-point",
+          targetBoundsRequired: true,
+          targetBoundsRule: "full editable surface rectangle from the same screenshot observation",
+          executionPoint: "validated targetBounds center",
           pointSelection: "derive the full editable surface from the screenshot, then use a safe point near its visual center",
           excludedTargets: [
             "action-button row",
@@ -2758,6 +2761,9 @@ function pickOcrIdentity(response) {
 
 function perceptionAdmissionMessage(admission) {
   if (admission?.code === "target.editable_interior_required") {
+    if (admission?.requiredGrounding === "editable-surface-bounds") {
+      return "Coordinate-grounded text focus requires the full editable surface rectangle and a safe central point from the same screenshot.";
+    }
     return "OCR text geometry cannot safely focus a keyboard target. Ground the editable interior from a fresh screenshot before typing.";
   }
   if (admission?.code === "target.interaction_intent_required") {
@@ -2967,6 +2973,13 @@ function normalizeActionCoordinates(action = {}, observation, window) {
     ...action,
     x: action.x - bounds.x,
     y: action.y - bounds.y,
+    ...(isCoordinateBox(action.targetBounds) ? {
+      targetBounds: {
+        ...action.targetBounds,
+        x: action.targetBounds.x - bounds.x,
+        y: action.targetBounds.y - bounds.y,
+      },
+    } : {}),
     coordinateSpace: "window-local",
     suppliedCoordinateSpace: "screen",
   };
@@ -2999,8 +3012,14 @@ function resolveDriverActionTarget(action, element, pixelLimitedAction, coordina
     };
   }
   if (Number.isFinite(action.x) && Number.isFinite(action.y)) {
+    const observationPoint = shouldUseEditableTargetCenter(action)
+      ? {
+          x: action.targetBounds.x + (action.targetBounds.width / 2),
+          y: action.targetBounds.y + (action.targetBounds.height / 2),
+        }
+      : { x: action.x, y: action.y };
     return transformObservationPoint(
-      { x: action.x, y: action.y },
+      observationPoint,
       coordinateScale?.actionTransform,
     );
   }
@@ -3010,6 +3029,26 @@ function resolveDriverActionTarget(action, element, pixelLimitedAction, coordina
     x: region.x + (region.width / 2),
     y: region.y + (region.height / 2),
   }, coordinateScale?.actionTransform);
+}
+
+function shouldUseEditableTargetCenter(action) {
+  return isCoordinateBox(action.targetBounds)
+    && (
+      action.kind === "type_text"
+      || (action.kind === "click" && action.interactionIntent === "focus-editable")
+    );
+}
+
+function isCoordinateBox(value) {
+  return value !== null
+    && typeof value === "object"
+    && !Array.isArray(value)
+    && Number.isFinite(value.x)
+    && Number.isFinite(value.y)
+    && Number.isFinite(value.width)
+    && value.width > 0
+    && Number.isFinite(value.height)
+    && value.height > 0;
 }
 
 function transformObservationPoint(point, transform) {

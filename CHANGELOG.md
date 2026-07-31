@@ -2,6 +2,12 @@
 
 All notable changes to `agent-computer-use-mcp` are tracked here.
 
+## 0.0.23
+
+- Require screenshot-grounded editable-surface bounds for coordinate text focus instead of accepting a placeholder glyph or border point.
+- Validate a safe central target region and execute at the editable rectangle center to make focus placement deterministic across custom-drawn controls.
+- Keep screen-coordinate target rectangles aligned when the Host projects them into window-local action space.
+
 ## 0.0.22
 
 - Declare post-write `focusReceipt` and `mutationVerification` fields in the strict observation output schema.

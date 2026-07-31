@@ -814,6 +814,14 @@ test("agent-computer-use-mcp freezes the local MCP tool contract", () => {
     act.inputSchema.properties.action.allOf[2].then.required,
     ["textMode", "inputBehavior"],
   );
+  assert.deepEqual(
+    act.inputSchema.properties.action.allOf[3].then.required,
+    ["targetBounds"],
+  );
+  assert.deepEqual(
+    act.inputSchema.properties.action.allOf[4].then.required,
+    ["targetBounds"],
+  );
   assert.equal(act.inputSchema.properties.action.properties.inputBehavior.default, undefined);
   assert.deepEqual(
     act.inputSchema.properties.action.allOf[0].then.required,
@@ -830,6 +838,10 @@ test("agent-computer-use-mcp freezes the local MCP tool contract", () => {
   assert.equal(act.inputSchema.properties.action.properties.observationId.type, "string");
   assert.equal(act.inputSchema.properties.action.properties.x.type, "number");
   assert.equal(act.inputSchema.properties.action.properties.y.type, "number");
+  assert.deepEqual(
+    act.inputSchema.properties.action.properties.targetBounds.required,
+    ["x", "y", "width", "height"],
+  );
   assert.equal(act.inputSchema.properties.action.properties.key.type, "string");
   assert.deepEqual(observe.outputSchema.properties.expiresAt, {
     anyOf: [{ type: "number" }, { type: "null" }],

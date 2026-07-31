@@ -411,7 +411,7 @@ const LEGACY_COMPUTER_USE_MCP_TOOLS = [
   {
     name: "computer.act",
     title: "Act On Computer",
-    description: "Run one approved action against the active Gateway-managed target using the latest single-use surfaceReceipt. Observe immediately after every action; a consumed observation cannot authorize a second action. Use activate_window to bring the acquired window to the OS foreground without guessing coordinates. Prefer a semantic elementToken. Every pixel click must declare interactionIntent. OCR geometry is accepted only for activate-recognized-text; focus-editable, activate-control, and select-item require screenshot-grounded control geometry. For text entry on a custom-drawn surface, derive the full editable rectangle from a fresh screenshot and send one type_text action to a safe point near its visual center, using the exact latest screenshot observationId and an explicit textMode. Never infer an editable point from the position of a nearby action button or toolbar icon: composers and editors may place their editable body above a bottom toolbar or button row. If a dialog, sheet, or overlay covers the target, resolve or dismiss it and re-observe before typing. Use replace-all when the field must equal the supplied value or may already contain text; use insert only when appending at the current caret is intended. Coordinate-grounded text defaults to incremental native Unicode input so live search, filtering, validation, and autocomplete controls receive each edit event. Use inputBehavior commit only when the control should receive the final value as one paste-style transaction; the Host restores the prior clipboard. OCR bounds and OCR interactionPoint values describe recognized glyphs only; they are never proof of a control's editable interior and are rejected for type_text or coordinate-grounded press_key. Exclude icons, labels, borders, and affordances when grounding an editable point. Window-local image coordinates start at (0,0): never add window.bounds.x/y to them. The Host applies screenshot-to-native scaling. Do not click first. Pixel-grounded actions default to foreground delivery so native focus and IME events reach the application. Targetless type_text and press_key require an unexpired focusReceiptId. A verified focus action returns it immediately; after an indeterminate coordinate type_text, the mandatory fresh observation may return a recovered focusReceipt only when the exact entered value is observed near the same grounded target on the same controlled window. Use that observation receipt for a single commit key instead of guessing another click. Never infer focus from a successful RPC or an OCR label click. A semantic accessibility click may return outcome=delivered when invocation succeeded but no stable state change is immediately visible; never replay that click, continue with the next distinct planned action, and verify at the next observable boundary. If a pixel action or text mutation is indeterminate, possibly_applied, or unverified, call computer.observe before any further action and follow the structured recovery contract from the fresh state. Task completion still requires observing the intended UI state transition.",
+    description: "Run one approved action against the active Gateway-managed target using the latest single-use surfaceReceipt. Observe immediately after every action; a consumed observation cannot authorize a second action. Use activate_window to bring the acquired window to the OS foreground without guessing coordinates. Prefer a semantic elementToken. Every pixel click must declare interactionIntent. OCR geometry is accepted only for activate-recognized-text; focus-editable, activate-control, and select-item require screenshot-grounded control geometry. For text entry on a custom-drawn surface, derive the full editable rectangle from a fresh screenshot, provide it as targetBounds, and send one type_text action with x/y near its visual center, using the exact latest screenshot observationId and an explicit textMode. The Host validates the safe central region and executes at the targetBounds center. Never infer an editable point from the position of a nearby action button or toolbar icon: composers and editors may place their editable body above a bottom toolbar or button row. If a dialog, sheet, or overlay covers the target, resolve or dismiss it and re-observe before typing. Use replace-all when the field must equal the supplied value or may already contain content; use insert only when appending at the current caret is intended. Coordinate-grounded text defaults to incremental native Unicode input so live search, filtering, validation, and autocomplete controls receive each edit event. Use inputBehavior commit only when the control should receive the final value as one paste-style transaction; the Host restores the prior clipboard. OCR bounds and OCR interactionPoint values describe recognized glyphs only; they are never proof of a control's editable interior and are rejected for type_text or coordinate-grounded press_key. Exclude icons, labels, borders, and affordances when grounding an editable point. Window-local image coordinates start at (0,0): never add window.bounds.x/y to them. The Host applies screenshot-to-native scaling. Do not click first. Pixel-grounded actions default to foreground delivery so native focus and IME events reach the application. Targetless type_text and press_key require an unexpired focusReceiptId. A verified focus action returns it immediately; after an indeterminate coordinate type_text, the mandatory fresh observation may return a recovered focusReceipt only when the exact entered value is observed near the same grounded target on the same controlled window. Use that observation receipt for a single commit key instead of guessing another click. Never infer focus from a successful RPC or an OCR label click. A semantic accessibility click may return outcome=delivered when invocation succeeded but no stable state change is immediately visible; never replay that click, continue with the next distinct planned action, and verify at the next observable boundary. If a pixel action or text mutation is indeterminate, possibly_applied, or unverified, call computer.observe before any further action and follow the structured recovery contract from the fresh state. Task completion still requires observing the intended UI state transition.",
     annotations: { phase: "1.3", destructiveHint: true },
     inputSchema: {
       type: "object",
@@ -456,6 +456,45 @@ const LEGACY_COMPUTER_USE_MCP_TOOLS = [
             then: {
               required: ["textMode", "inputBehavior"],
             },
+          }, {
+            if: {
+              allOf: [
+                {
+                  properties: { kind: { const: "type_text" } },
+                  required: ["kind"],
+                },
+                {
+                  anyOf: [
+                    { required: ["x"] },
+                    { required: ["y"] },
+                  ],
+                },
+              ],
+            },
+            then: {
+              required: ["targetBounds"],
+            },
+          }, {
+            if: {
+              allOf: [
+                {
+                  properties: {
+                    kind: { const: "click" },
+                    interactionIntent: { const: "focus-editable" },
+                  },
+                  required: ["kind", "interactionIntent"],
+                },
+                {
+                  anyOf: [
+                    { required: ["x"] },
+                    { required: ["y"] },
+                  ],
+                },
+              ],
+            },
+            then: {
+              required: ["targetBounds"],
+            },
           }],
           properties: {
             kind: {
@@ -494,6 +533,18 @@ const LEGACY_COMPUTER_USE_MCP_TOOLS = [
             y: {
               type: "number",
               description: "Y in the explicitly declared coordinateSpace. Bind it to the latest observationId. For text entry, it must be a screenshot-grounded editable-interior point, not an OCR glyph center or a rectangle edge.",
+            },
+            targetBounds: {
+              type: "object",
+              required: ["x", "y", "width", "height"],
+              properties: {
+                x: { type: "number" },
+                y: { type: "number" },
+                width: { type: "number", exclusiveMinimum: 0 },
+                height: { type: "number", exclusiveMinimum: 0 },
+              },
+              additionalProperties: false,
+              description: "Required for coordinate-grounded type_text and focus-editable clicks. The full editable surface rectangle from the same screenshot observation, in coordinateSpace. The Host validates that x/y is safely inside its central region and executes at the rectangle center, avoiding placeholder glyphs, borders, and adjacent icons.",
             },
             value: {
               type: "string",

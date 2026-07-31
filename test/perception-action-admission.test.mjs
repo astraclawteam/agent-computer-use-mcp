@@ -85,10 +85,34 @@ test("window-local coordinates require the exact fresh observation and stay insi
   const admitted = admitPerceptionAction({
     observation: value,
     element: null,
-    action: action({ kind: "type_text", observationId: "capture-1", x: 500, y: 650 }),
+    action: action({
+      kind: "type_text",
+      observationId: "capture-1",
+      x: 500,
+      y: 650,
+      targetBounds: { x: 400, y: 600, width: 200, height: 100 },
+    }),
     now: 100,
   });
   assert.deepEqual(admitted, { allowed: true, code: "action.allowed", pixelLimitedAction: true });
+  assert.equal(admitPerceptionAction({
+    observation: value,
+    element: null,
+    action: action({ kind: "type_text", observationId: "capture-1", x: 500, y: 650 }),
+    now: 100,
+  }).code, "target.editable_interior_required");
+  assert.equal(admitPerceptionAction({
+    observation: value,
+    element: null,
+    action: action({
+      kind: "type_text",
+      observationId: "capture-1",
+      x: 415,
+      y: 605,
+      targetBounds: { x: 400, y: 600, width: 200, height: 100 },
+    }),
+    now: 100,
+  }).code, "target.editable_interior_required");
   assert.equal(admitPerceptionAction({
     observation: value,
     element: null,
@@ -366,6 +390,7 @@ test("explicitly unverified pixel clicks are indeterminate and require observati
         coordinateSpace: "window-local",
         x: 100,
         y: 50,
+        targetBounds: { x: 50, y: 20, width: 100, height: 60 },
         value: "blocked",
         textMode: "insert",
       },
@@ -381,6 +406,7 @@ test("explicitly unverified pixel clicks are indeterminate and require observati
       coordinateSpace: "window-local",
       x: 100,
       y: 50,
+      targetBounds: { x: 50, y: 20, width: 100, height: 60 },
       value: "foreground text",
       textMode: "insert",
     },
@@ -843,6 +869,9 @@ test("screenshot geometry outranks stale minimized-window bounds", async (t) => 
         "replace-all": "Atomically focus the grounded editable point, select all existing content, and enter the exact value.",
       },
       coordinateRule: "copy-grounded-editable-interior-point",
+      targetBoundsRequired: true,
+      targetBoundsRule: "full editable surface rectangle from the same screenshot observation",
+      executionPoint: "validated targetBounds center",
       pointSelection: "derive the full editable surface from the screenshot, then use a safe point near its visual center",
       excludedTargets: [
         "action-button row",
@@ -1159,8 +1188,9 @@ test("provider router dispatches screenshot-grounded text and key actions withou
       kind: "type_text",
       observationId: "capture-1",
       coordinateSpace: "window-local",
-      x: 500,
+      x: 450,
       y: 650,
+      targetBounds: { x: 400, y: 600, width: 200, height: 100 },
       value: "hello",
       textMode: "insert",
       deliveryMode: "foreground",
@@ -1424,6 +1454,7 @@ test("possibly-applied text requires a fresh observation before any replay or co
       coordinateSpace: "window-local",
       x: 200,
       y: 100,
+      targetBounds: { x: 150, y: 70, width: 100, height: 60 },
       value: "possibly landed",
       textMode: "insert",
       deliveryMode: "background",
@@ -1541,6 +1572,7 @@ test("fresh OCR confirmation restores a limited focus continuation after coordin
       x: 200,
       y: 100,
       value: "宋鹏",
+      targetBounds: { x: 150, y: 70, width: 100, height: 60 },
       textMode: "replace-all",
     },
   });
