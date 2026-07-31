@@ -116,11 +116,11 @@ export async function callTool(router, name, args, requestContext) {
     }
   } catch (error) {
     const toolError = serializeToolError(error);
-    if (isSafeActionRejection(name, toolError)) {
+    if (isSafeContractRejection(name, toolError)) {
       const rejected = withResultContract({
         status: "not-applied",
         provider: "gateway-managed",
-        action: args?.action?.kind ?? "unknown",
+        ...(name === "computer.act" ? { action: args?.action?.kind ?? "unknown" } : {}),
         result: {
           effect: "not-applied",
           replaySafe: true,
@@ -206,10 +206,15 @@ export async function callTool(router, name, args, requestContext) {
   };
 }
 
-function isSafeActionRejection(name, toolError) {
-  return name === "computer.act"
-    && toolError?.detail?.allowed === false
-    && toolError?.detail?.pixelLimitedAction === false;
+function isSafeContractRejection(name, toolError) {
+  if (name === "computer.act") {
+    return toolError?.detail?.allowed === false
+      && toolError?.detail?.pixelLimitedAction === false;
+  }
+  return name === "computer.acquire"
+    && toolError?.code === "window.not_found"
+    && toolError?.detail?.retryable === true
+    && toolError?.detail?.nextTool === "computer.observe";
 }
 
 /**

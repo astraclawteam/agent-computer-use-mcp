@@ -79,6 +79,7 @@ export class ComputerUseProviderRouter {
     this.consumedSurfaceReceiptId = null;
     this.actionTail = Promise.resolve();
     this.activeFocusReceipt = null;
+    this.recentEditableTarget = null;
     this.semanticElementAliases = new Map();
     this.currentSemanticElements = new Map();
     this.applicationCatalog = new Map();
@@ -1141,6 +1142,14 @@ export class ComputerUseProviderRouter {
           inputBehavior: action.inputBehavior ?? "incremental",
           deliveryMode: effectiveDeliveryMode,
         }));
+        if (isCoordinateBox(action.targetBounds)) {
+          this.recentEditableTarget = {
+            controllerId: this.activeController.controllerId,
+            windowId: controllerWindowId(this.activeController.window),
+            bounds: { ...action.targetBounds },
+            expiresAtMs: this.clock.now() + ACTION_OBSERVATION_TTL_MS,
+          };
+        }
         if (hasVerifiedFocus(result)) {
           this.activeFocusReceipt = this.createFocusReceipt({ action, element, driverTarget });
         }
@@ -2125,6 +2134,7 @@ export class ComputerUseProviderRouter {
     const admission = admitPerceptionAction({
       observation: this.lastCapture,
       element,
+      recentEditableTarget: this.recentEditableTarget,
       action: {
         ...action,
         windowId: controllerWindowId(this.activeController.window),

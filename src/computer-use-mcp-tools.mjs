@@ -819,7 +819,7 @@ const acquireTool = {
   ...byLegacyName("computer.request_access"),
   name: "computer.acquire",
   title: "Acquire Computer Access",
-  description: "Acquire a Gateway-managed controller lease for one explicit or foreground window. Repeating the call from the same Agent reuses an equivalent active lease or safely retargets it when the foreground window changes. If the requested app is minimized to its tray or has no window, call computer.observe mode=\"state\" and acquire its opaque applicationToken to restore or launch it without shell commands.",
+  description: "Acquire a Gateway-managed controller lease for one window identified by fresh Computer Use state. For an application task, first call computer.observe mode=\"state\", then pass its opaque applicationToken; this restores a tray-minimized app and chooses its primary window even when auxiliary windows exist. Use target=\"foreground\" only when fresh state proves the intended app is already foreground. Repeating the call from the same Agent reuses an equivalent active lease or safely retargets it.",
   _meta: Object.freeze({
     ...semanticCapabilityMeta({
     summary: "Establish bounded control of a local graphical application window so it can be observed or operated for the user's requested outcome.",

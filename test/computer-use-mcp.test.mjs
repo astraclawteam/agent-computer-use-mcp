@@ -138,6 +138,30 @@ test("safe action contract rejections are non-fatal not-applied results", async 
   assert.equal(result.structuredContent.error.code, "target.editable_interior_required");
 });
 
+test("a missing foreground window is a non-fatal acquire precondition", async () => {
+  const result = await callTool({
+    async requestAccess() {
+      const error = new Error("No visible window matched the requested selector.");
+      error.code = "window.not_found";
+      error.detail = {
+        retryable: true,
+        nextTool: "computer.observe",
+        suggestedAction: "Discover state and acquire the returned applicationToken.",
+      };
+      throw error;
+    },
+  }, "computer.acquire", {
+    target: "foreground",
+    tier: "full",
+  });
+
+  assert.equal(result.isError, false);
+  assert.equal(result.structuredContent.status, "not-applied");
+  assert.equal(result.structuredContent.outcome, "blocked");
+  assert.equal(result.structuredContent.error.code, "window.not_found");
+  assert.equal(result.structuredContent.result.replaySafe, true);
+});
+
 test("unified OCR observation preserves the active controller context", async () => {
   const calls = [];
   const result = await observeComputer({

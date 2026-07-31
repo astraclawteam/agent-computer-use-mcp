@@ -127,6 +127,57 @@ test("window-local coordinates require the exact fresh observation and stay insi
   }).code, "observation.insufficient");
 });
 
+test("a non-editable click cannot reuse the latest text-entry surface as a result row", () => {
+  const value = observation({
+    observationId: "screenshot-after-text",
+    source: "window-capture",
+    expiresAt: 1_000,
+    capture: { width: 960, height: 720 },
+  });
+  const recentEditableTarget = {
+    controllerId: "controller-1",
+    windowId: "window-1",
+    bounds: { x: 75, y: 43, width: 200, height: 26 },
+    expiresAtMs: 1_000,
+  };
+  const rejected = admitPerceptionAction({
+    observation: value,
+    recentEditableTarget,
+    action: action({
+      kind: "click",
+      observationId: "screenshot-after-text",
+      coordinateSpace: "window-local",
+      interactionIntent: "select-item",
+      targetRole: "list-item",
+      targetBounds: { x: 64, y: 38, width: 72, height: 36 },
+      x: 100,
+      y: 56,
+    }),
+    now: 100,
+  });
+
+  assert.equal(rejected.allowed, false);
+  assert.equal(rejected.code, "target.overlaps_recent_editable_surface");
+  assert.deepEqual(rejected.rejectedRegion, recentEditableTarget.bounds);
+
+  const admitted = admitPerceptionAction({
+    observation: value,
+    recentEditableTarget,
+    action: action({
+      kind: "click",
+      observationId: "screenshot-after-text",
+      coordinateSpace: "window-local",
+      interactionIntent: "select-item",
+      targetRole: "list-item",
+      targetBounds: { x: 75, y: 100, width: 300, height: 64 },
+      x: 225,
+      y: 132,
+    }),
+    now: 100,
+  });
+  assert.equal(admitted.allowed, true);
+});
+
 test("editable pixel clicks are safely redirected to atomic text entry", () => {
   const decision = admitPerceptionAction({
     observation: observation({
