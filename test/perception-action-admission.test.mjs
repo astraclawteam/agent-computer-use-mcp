@@ -1224,15 +1224,16 @@ test("router applies screenshot-to-native scaling after pixel admission", async 
       kind: "click",
       observationId: "scaled-observation",
       coordinateSpace: "window-local",
-      x: 400,
-      y: 300,
+      x: 340,
+      y: 250,
+      targetBounds: { x: 320, y: 240, width: 160, height: 80 },
       interactionIntent: "activate-control",
     },
   });
 
   assert.equal(router.lastCapture.coordinateTransform, "scale-offset");
   assert.equal(calls[0].x, 500);
-  assert.equal(calls[0].y, 375);
+  assert.equal(calls[0].y, 350);
 });
 
 test("provider router dispatches screenshot-grounded text and key actions without semantic elements", async (t) => {

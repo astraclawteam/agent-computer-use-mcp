@@ -3069,7 +3069,7 @@ function resolveDriverActionTarget(action, element, pixelLimitedAction, coordina
     };
   }
   if (Number.isFinite(action.x) && Number.isFinite(action.y)) {
-    const observationPoint = shouldUseEditableTargetCenter(action)
+    const observationPoint = shouldUseTargetBoundsCenter(action)
       ? {
           x: action.targetBounds.x + (action.targetBounds.width / 2),
           y: action.targetBounds.y + (action.targetBounds.height / 2),
@@ -3088,11 +3088,11 @@ function resolveDriverActionTarget(action, element, pixelLimitedAction, coordina
   }, coordinateScale?.actionTransform);
 }
 
-function shouldUseEditableTargetCenter(action) {
+function shouldUseTargetBoundsCenter(action) {
   return isCoordinateBox(action.targetBounds)
     && (
       action.kind === "type_text"
-      || (action.kind === "click" && action.interactionIntent === "focus-editable")
+      || action.kind === "click"
     );
 }
 
