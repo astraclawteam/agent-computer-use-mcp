@@ -142,6 +142,17 @@ test("successful unified OCR observations satisfy the public result envelope", a
         crop: null,
         timings: { totalMs: 125 },
         elements: [],
+        focusReceipt: {
+          id: "focus-post-write-1",
+          status: "verified",
+        },
+        mutationVerification: {
+          status: "confirmed",
+          actionKind: "type_text",
+          method: "exact-observed-value-near-grounded-target",
+          replaySafe: false,
+          focusReceiptIssued: true,
+        },
         includeUserOverlay: false,
       };
     },
@@ -153,6 +164,8 @@ test("successful unified OCR observations satisfy the public result envelope", a
   const observe = COMPUTER_USE_MCP_TOOLS.find((tool) => tool.name === "computer.observe");
   const validate = new Ajv({ strict: false }).compile(observe.outputSchema);
   assert.equal(validate(result.structuredContent), true, JSON.stringify(validate.errors));
+  assert.equal(result.structuredContent.focusReceipt.id, "focus-post-write-1");
+  assert.equal(result.structuredContent.mutationVerification.status, "confirmed");
 });
 
 test("semantic-first screenshot observations satisfy the strict public result envelope", async () => {
@@ -777,6 +790,8 @@ test("agent-computer-use-mcp freezes the local MCP tool contract", () => {
   assert.ok(observe.outputSchema.properties.windowDiscovery);
   assert.ok(observe.outputSchema.properties.applications);
   assert.ok(observe.outputSchema.properties.applicationDiscovery);
+  assert.ok(observe.outputSchema.properties.focusReceipt);
+  assert.ok(observe.outputSchema.properties.mutationVerification);
   assert.deepEqual(observe.outputSchema.properties.window, {
     type: "object",
     additionalProperties: true,

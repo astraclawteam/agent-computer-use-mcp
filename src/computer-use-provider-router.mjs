@@ -109,7 +109,7 @@ export class ComputerUseProviderRouter {
     const result = {
       status: "ready",
       module: "agent-computer-use-mcp",
-      version: "0.0.21",
+      version: "0.0.22",
       phases: {
         "0.9": "contract-freeze",
         "0.10": "release-metadata-changelog",
