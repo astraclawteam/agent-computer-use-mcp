@@ -929,6 +929,65 @@ test("CuaDriverMcpDriver restores a tray-only process by exact application ident
   assert.equal(calls.some(({ name }) => name === "launch_app"), false);
 });
 
+test("CuaDriverMcpDriver ignores an open auxiliary window until tray restoration exposes the main window", async () => {
+  const calls = [];
+  let trayInvoked = false;
+  const driver = new CuaDriverMcpDriver({
+    session: "tray-main-window-session",
+    trayApplicationActivator: async ({ name }) => {
+      assert.equal(name, "Tray App");
+      trayInvoked = true;
+      return { status: "invoked" };
+    },
+    client: {
+      async start() {},
+      async callTool(name, args) {
+        calls.push({ name, args });
+        if (name === "list_windows") {
+          return {
+            windows: [
+              {
+                window_id: 90,
+                title: "Auxiliary History",
+                app_name: "tray-app.exe",
+                pid: 505,
+                is_on_screen: true,
+                bounds: { x: 10, y: 20, width: 1200, height: 900 },
+                z_index: 2,
+              },
+              ...(trayInvoked ? [{
+                window_id: 91,
+                title: "Tray App",
+                app_name: "tray-app.exe",
+                pid: 505,
+                is_on_screen: true,
+                bounds: { x: 30, y: 40, width: 900, height: 700 },
+                z_index: 1,
+              }] : []),
+            ],
+          };
+        }
+        if (name === "bring_to_front") throw new Error("must not activate an auxiliary window");
+        if (name === "launch_app") throw new Error("must not launch a restored tray process");
+        return { status: "ok" };
+      },
+    },
+  });
+
+  const result = await driver.launchApp({
+    launchPath: "C:\\Program Files\\Tray App\\tray-app.exe",
+    name: "Tray App",
+    pid: 505,
+    running: true,
+  });
+
+  assert.equal(result.status, "restored");
+  assert.equal(result.method, "tray-accessibility-invoke");
+  assert.equal(result.windows[0].windowId, 91);
+  assert.equal(calls.some(({ name }) => name === "bring_to_front"), false);
+  assert.equal(calls.some(({ name }) => name === "launch_app"), false);
+});
+
 test("CuaDriverMcpDriver projects a restorable token source for tray-only processes", async () => {
   const driver = new CuaDriverMcpDriver({
     session: "tray-process-discovery-session",

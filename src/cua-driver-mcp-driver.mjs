@@ -166,7 +166,10 @@ export class CuaDriverMcpDriver {
             right,
             { name },
           ));
-        for (const existingWindow of existingWindows) {
+        const identityMatchedWindows = existingWindows.filter((window) => (
+          matchesApplicationWindowIdentity(window, { name })
+        ));
+        for (const existingWindow of identityMatchedWindows) {
           const activation = await this.activateWindowResources(ticket, existingWindow);
           if (activation.verified === true) {
             return {
@@ -192,6 +195,7 @@ export class CuaDriverMcpDriver {
               includeForeground: false,
             }))
               .filter((window) => candidateProcessIds.has(window.pid))
+              .filter((window) => matchesApplicationWindowIdentity(window, { name }))
               .sort((left, right) => compareApplicationWindowControllability(
                 left,
                 right,
@@ -1120,13 +1124,17 @@ function compareWindowControllability(left, right) {
 }
 
 function compareApplicationWindowControllability(left, right, { name } = {}) {
-  const expectedName = normalizeApplicationIdentity(name);
-  const leftIdentityMatch = expectedName !== ""
-    && normalizeApplicationIdentity(left.title) === expectedName;
-  const rightIdentityMatch = expectedName !== ""
-    && normalizeApplicationIdentity(right.title) === expectedName;
+  const leftIdentityMatch = matchesApplicationWindowIdentity(left, { name });
+  const rightIdentityMatch = matchesApplicationWindowIdentity(right, { name });
   if (leftIdentityMatch !== rightIdentityMatch) return leftIdentityMatch ? -1 : 1;
   return compareWindowControllability(left, right);
+}
+
+function matchesApplicationWindowIdentity(window, { name } = {}) {
+  const expectedName = normalizeApplicationIdentity(name);
+  if (expectedName === "") return true;
+  const title = normalizeApplicationIdentity(window?.title);
+  return title === expectedName || title.includes(expectedName);
 }
 
 function normalizeApplicationIdentity(value) {
