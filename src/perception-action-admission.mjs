@@ -57,6 +57,17 @@ export function admitPerceptionAction({ observation, element, action, now = Date
         nextAction: "Capture a fresh screenshot, ask the Host image-understanding path for a point strictly inside the intended editable surface (excluding icons, labels, borders, and affordances), then use that screenshot observationId and projected point in one type_text action.",
       });
     }
+    if (requiresEditableTargetBounds(action)
+      && (!isBox(action.targetBounds)
+        || !boxWithinObservation(action.targetBounds, observation)
+        || !pointWithinSafeTargetCore(action, action.targetBounds))) {
+      return denied("target.editable_interior_required", {
+        reason: "Coordinate-grounded text focus requires the full editable surface rectangle and a point inside its central safe region.",
+        requiredGrounding: "editable-surface-bounds",
+        safePointRule: "Use the rectangle center; exclude placeholder glyphs, borders, icons, and adjacent affordances.",
+        nextAction: "Capture a fresh screenshot, derive the full editable surface rectangle, set targetBounds in the observation coordinate space, and place x/y near its center. The Host executes at the validated rectangle center.",
+      });
+    }
     return allowed(true);
   }
   if (!isRecord(element)) return denied("observation.insufficient");
@@ -137,6 +148,31 @@ function coordinatesWithinObservation(action, observation) {
     && Number.isFinite(height) && height > 0
     && action.x >= 0 && action.x < width
     && action.y >= 0 && action.y < height;
+}
+
+function requiresEditableTargetBounds(action) {
+  return action.kind === "type_text"
+    || (action.kind === "click" && action.interactionIntent === "focus-editable");
+}
+
+function boxWithinObservation(box, observation) {
+  const width = observation.capture?.width ?? observation.window?.bounds?.width;
+  const height = observation.capture?.height ?? observation.window?.bounds?.height;
+  return Number.isFinite(width) && width > 0
+    && Number.isFinite(height) && height > 0
+    && box.x >= 0
+    && box.y >= 0
+    && box.x + box.width <= width
+    && box.y + box.height <= height;
+}
+
+function pointWithinSafeTargetCore(action, box) {
+  const horizontalInset = box.width * 0.2;
+  const verticalInset = box.height * 0.2;
+  return action.x >= box.x + horizontalInset
+    && action.x <= box.x + box.width - horizontalInset
+    && action.y >= box.y + verticalInset
+    && action.y <= box.y + box.height - verticalInset;
 }
 
 function isRecord(value) {
