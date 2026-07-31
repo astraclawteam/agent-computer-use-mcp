@@ -2,6 +2,12 @@
 
 All notable changes to `agent-computer-use-mcp` are tracked here.
 
+## 0.0.24
+
+- Preserve every running process identity for one executable so multi-process desktop applications remain one semantic application.
+- Restore and select controllable windows owned by any sibling process after a tray accessibility invocation.
+- Avoid falling through to a duplicate launcher when the restored primary window belongs to a sibling process.
+
 ## 0.0.23
 
 - Require screenshot-grounded editable-surface bounds for coordinate text focus instead of accepting a placeholder glyph or border point.

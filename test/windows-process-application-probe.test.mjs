@@ -45,6 +45,7 @@ test("Windows process application probe returns validated opaque-token sources",
     running: true,
     active: false,
     pid: 505,
+    processIds: [505, 506],
     lastUsed: null,
     launchPath: "C:\\Program Files\\Tray App\\tray-app.exe",
   }]);

@@ -113,6 +113,7 @@ export class CuaDriverMcpDriver {
             running: app.running === true || Boolean(process),
             active: app.active === true,
             pid: Number.isInteger(app.pid) && app.pid > 0 ? app.pid : (process?.pid ?? 0),
+            processIds: normalizeProcessIds(app.process_ids, app.pid, process?.pid),
             lastUsed: app.last_used ?? null,
             launchPath: app.launch_path,
           };
@@ -127,10 +128,22 @@ export class CuaDriverMcpDriver {
         if (existing) {
           existing.running = true;
           existing.pid ||= processApplication.pid;
+          existing.processIds = normalizeProcessIds(
+            existing.processIds,
+            existing.pid,
+            ...normalizeProcessIds(processApplication.processIds, processApplication.pid),
+          );
           continue;
         }
-        applications.push(processApplication);
-        byExecutable.set(key, processApplication);
+        const normalizedProcessApplication = {
+          ...processApplication,
+          processIds: normalizeProcessIds(
+            processApplication.processIds,
+            processApplication.pid,
+          ),
+        };
+        applications.push(normalizedProcessApplication);
+        byExecutable.set(key, normalizedProcessApplication);
       }
       return applications
         .sort(compareApplications)
@@ -138,22 +151,23 @@ export class CuaDriverMcpDriver {
     });
   }
 
-  launchApp({ launchPath, name, pid, running = false }) {
+  launchApp({ launchPath, name, pid, processIds = [], running = false }) {
     return this.runWork(async (ticket) => {
       await this.ensureStartedResources(ticket);
-      if (running === true && Number.isSafeInteger(pid) && pid > 0) {
+      const candidateProcessIds = new Set(normalizeProcessIds(processIds, pid));
+      if (running === true && candidateProcessIds.size > 0) {
         const existingWindows = (await this.listWindowsResources(ticket, {
           onScreenOnly: false,
           includeForeground: false,
         }))
-          .filter((window) => window.pid === pid)
+          .filter((window) => candidateProcessIds.has(window.pid))
           .sort(compareWindowControllability);
         for (const existingWindow of existingWindows) {
           const activation = await this.activateWindowResources(ticket, existingWindow);
           if (activation.verified === true) {
             return {
               status: "restored",
-              pid,
+              pid: activation.foregroundWindow.pid,
               name: null,
               windows: [
                 activation.foregroundWindow,
@@ -173,14 +187,14 @@ export class CuaDriverMcpDriver {
               onScreenOnly: false,
               includeForeground: false,
             }))
-              .filter((window) => window.pid === pid)
+              .filter((window) => candidateProcessIds.has(window.pid))
               .sort(compareWindowControllability);
           }
           if (restoredWindows.length > 0) {
             return {
               status: "restored",
               method: "tray-accessibility-invoke",
-              pid,
+              pid: restoredWindows[0].pid,
               name,
               windows: restoredWindows,
             };
@@ -1047,6 +1061,20 @@ function normalizeWindow(window, index) {
     isForeground: false,
     bounds: normalizeBounds(window.bounds),
   };
+}
+
+function normalizeProcessIds(processIds, ...fallbackProcessIds) {
+  const normalized = [];
+  for (const processId of [
+    ...(Array.isArray(processIds) ? processIds : []),
+    ...fallbackProcessIds,
+  ]) {
+    const value = Number(processId);
+    if (Number.isSafeInteger(value) && value > 0 && !normalized.includes(value)) {
+      normalized.push(value);
+    }
+  }
+  return normalized;
 }
 
 function executableNameFromLaunchPath(launchPath) {

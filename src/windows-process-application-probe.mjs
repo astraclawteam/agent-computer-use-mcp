@@ -148,8 +148,8 @@ export async function queryWindowsProcessApplications(options = {}) {
 
 function normalizeApplications(value) {
   if (!Array.isArray(value)) throw new TypeError("applications must be an array");
-  const seen = new Set();
-  return value.flatMap((application) => {
+  const applicationsByPath = new Map();
+  for (const application of value) {
     const name = String(application?.name ?? "").trim();
     const launchPath = String(application?.launchPath ?? "").trim();
     const pid = Number(application?.pid);
@@ -161,20 +161,25 @@ function normalizeApplications(value) {
       || !launchPath.toLowerCase().endsWith(".exe")
       || !Number.isSafeInteger(pid)
       || pid <= 0
-    ) return [];
+    ) continue;
     const key = launchPath.toLowerCase();
-    if (seen.has(key)) return [];
-    seen.add(key);
-    return [{
+    const existing = applicationsByPath.get(key);
+    if (existing) {
+      if (!existing.processIds.includes(pid)) existing.processIds.push(pid);
+      continue;
+    }
+    applicationsByPath.set(key, {
       name,
       kind: "desktop",
       running: true,
       active: false,
       pid,
+      processIds: [pid],
       lastUsed: null,
       launchPath,
-    }];
-  });
+    });
+  }
+  return [...applicationsByPath.values()];
 }
 
 function processProbeError(code, message) {
