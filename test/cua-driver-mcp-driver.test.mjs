@@ -292,6 +292,7 @@ test("CuaDriverMcpDriver activates a window and verifies the foreground result",
   const calls = [];
   const driver = new CuaDriverMcpDriver({
     session: "activate-window-session",
+    foregroundWindowProbe: async () => "0x2a",
     client: {
       async start() {},
       async callTool(name, args) {
@@ -769,6 +770,7 @@ test("CuaDriverMcpDriver restores an existing process window before launching an
   const calls = [];
   const driver = new CuaDriverMcpDriver({
     session: "existing-process-window-session",
+    foregroundWindowProbe: async () => "77",
     client: {
       async start() {},
       async callTool(name, args) {
@@ -812,6 +814,69 @@ test("CuaDriverMcpDriver restores an existing process window before launching an
     name: "bring_to_front",
     args: { pid: 404, window_id: 77 },
   }]);
+});
+
+test("CuaDriverMcpDriver prefers the identity-matched main window and independently verifies foreground", async () => {
+  const calls = [];
+  let foregroundWindowId = "999";
+  const driver = new CuaDriverMcpDriver({
+    session: "primary-window-identity-session",
+    foregroundWindowProbe: async () => foregroundWindowId,
+    client: {
+      async start() {},
+      async callTool(name, args) {
+        calls.push({ name, args });
+        if (name === "list_windows") {
+          return {
+            windows: [
+              {
+                window_id: 80,
+                title: "Auxiliary Surface",
+                app_name: "tray-app.exe",
+                pid: 505,
+                is_on_screen: true,
+                bounds: { x: 10, y: 20, width: 1200, height: 900 },
+                z_index: 2,
+              },
+              {
+                window_id: 81,
+                title: "Tray App",
+                app_name: "tray-app.exe",
+                pid: 505,
+                is_on_screen: true,
+                bounds: { x: -32000, y: -32000, width: 146, height: 21 },
+                z_index: 1,
+              },
+            ],
+          };
+        }
+        if (name === "bring_to_front") {
+          if (args.window_id === 81) foregroundWindowId = "81";
+          return {
+            landed_on_target: true,
+            now_fg_hwnd: String(args.window_id),
+          };
+        }
+        if (name === "launch_app") throw new Error("must not launch after restoring the primary window");
+        return { status: "ok" };
+      },
+    },
+  });
+
+  const result = await driver.launchApp({
+    launchPath: "C:\\Program Files\\Tray App\\tray-app.exe",
+    name: "Tray App",
+    pid: 505,
+    running: true,
+  });
+
+  assert.equal(result.status, "restored");
+  assert.equal(result.windows[0].windowId, 81);
+  assert.deepEqual(calls.filter(({ name }) => name === "bring_to_front"), [{
+    name: "bring_to_front",
+    args: { pid: 505, window_id: 81 },
+  }]);
+  assert.equal(calls.some(({ name }) => name === "launch_app"), false);
 });
 
 test("CuaDriverMcpDriver restores a tray-only process by exact application identity before launching", async () => {
