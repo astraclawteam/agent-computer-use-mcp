@@ -425,9 +425,10 @@ function compactPerceptionElement(element) {
   if (!element || typeof element !== "object") return element;
   if (element.source === "ocr") {
     return {
-      ...(element.elementToken !== undefined ? { elementToken: element.elementToken } : {}),
       ...(element.name !== undefined ? { name: element.name } : {}),
       ...(element.bounds !== undefined ? { bounds: compactComputerUseResult(element.bounds) } : {}),
+      source: "ocr",
+      observationOnly: true,
       ...(element.exact === true ? { exact: true } : {}),
     };
   }

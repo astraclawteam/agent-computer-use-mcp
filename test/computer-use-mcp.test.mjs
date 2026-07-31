@@ -723,12 +723,13 @@ test("MCP projection keeps OCR grounding compact without weakening the router ob
   const projected = compactComputerUseResult(providerObservation);
 
   assert.equal(projected.elementCount, 180);
-  assert.equal(projected.elements[0].elementToken, "ocr-1");
+  assert.equal(projected.elements[0].elementToken, undefined);
   assert.deepEqual(projected.elements[0].bounds, fullElement.bounds);
+  assert.equal(projected.elements[0].source, "ocr");
+  assert.equal(projected.elements[0].observationOnly, true);
   assert.equal(projected.elements[0].role, undefined);
   assert.equal(projected.elements[0].actions, undefined);
   assert.equal(projected.elements[0].confidence, undefined);
-  assert.equal(projected.elements[0].source, undefined);
   assert.equal(projected.elements[0].modelIdentity, undefined);
   assert.equal(projected.elements[0].rawTextSha256, undefined);
   assert.equal(projected.elements[0].sourceRegion, undefined);
