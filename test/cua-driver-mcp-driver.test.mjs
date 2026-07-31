@@ -836,7 +836,7 @@ test("CuaDriverMcpDriver restores a tray-only process by exact application ident
                   window_id: 88,
                   title: "Tray App",
                   app_name: "tray-app.exe",
-                  pid: 505,
+                  pid: 506,
                   is_on_screen: true,
                   bounds: { x: 10, y: 20, width: 900, height: 700 },
                   z_index: 1,
@@ -853,11 +853,13 @@ test("CuaDriverMcpDriver restores a tray-only process by exact application ident
     launchPath: "C:\\Program Files\\Tray App\\tray-app.exe",
     name: "Tray App",
     pid: 505,
+    processIds: [505, 506],
     running: true,
   });
 
   assert.equal(result.status, "restored");
   assert.equal(result.method, "tray-accessibility-invoke");
+  assert.equal(result.pid, 506);
   assert.equal(result.windows[0].windowId, 88);
   assert.equal(calls.some(({ name }) => name === "launch_app"), false);
 });
@@ -871,6 +873,7 @@ test("CuaDriverMcpDriver projects a restorable token source for tray-only proces
       running: true,
       active: false,
       pid: 505,
+      processIds: [505, 506],
       lastUsed: null,
       launchPath: "C:\\Program Files\\Tray App\\tray-app.exe",
     }],
@@ -894,6 +897,7 @@ test("CuaDriverMcpDriver projects a restorable token source for tray-only proces
     running: true,
     active: false,
     pid: 505,
+    processIds: [505, 506],
     lastUsed: null,
     launchPath: "C:\\Program Files\\Tray App\\tray-app.exe",
   }]);
