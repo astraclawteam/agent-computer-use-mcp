@@ -216,7 +216,13 @@ export async function projectComputerUseMediaResult(router, name, args, value) {
   }
   const mode = args?.mode;
   const artifactPath = value?.artifact?.path ?? value?.capture?.path;
-  const shouldAttachImage = (mode === "screenshot" || mode === "capture-window")
+  const explicitVisualQuestion = typeof args?.visualQuestion === "string"
+    && args.visualQuestion.trim() !== "";
+  const visualUnderstandingEligible = value?.perceptionRouting?.visualUnderstandingEligible !== false;
+  const shouldAttachImage = (
+    mode === "capture-window"
+    || (mode === "screenshot" && explicitVisualQuestion && visualUnderstandingEligible)
+  )
     && typeof artifactPath === "string";
   const structuredContent = sanitizeObservationMediaPaths(value, shouldAttachImage);
   if (!shouldAttachImage) return { structuredContent, imageContent: [] };

@@ -1270,11 +1270,31 @@ export class ComputerUseProviderRouter {
       } : {}),
     };
     if (this.activeFocusReceipt) actionResult.focusReceipt = serializeFocusReceipt(this.activeFocusReceipt);
-    if (action.captureAfter) {
+    const automaticLocalPostActionObservation = outcome === "unverified"
+      && admission.pixelLimitedAction === true
+      && (action.kind === "click" || action.kind === "type_text")
+      && typeof this.driver?.captureScreenshot === "function"
+      && this.ocrSession;
+    if (action.captureAfter || automaticLocalPostActionObservation) {
       actionResult.capture = await this.awaitExternal(
         ticket,
-        () => this.captureOperation({ mode: "semantic", requestContext: args.requestContext }, ticket),
+        () => this.captureOperation({
+          mode: automaticLocalPostActionObservation ? "screenshot" : "semantic",
+          requestContext: args.requestContext,
+        }, ticket),
       );
+      if (automaticLocalPostActionObservation) {
+        actionResult.postActionObservation = {
+          source: "host-local-ocr",
+          automatic: true,
+          visionRequested: false,
+          freshSurfaceReceiptId: actionResult.capture?.surfaceReceipt?.id ?? null,
+          nextAction: "Use this fresh local post-action observation before requesting another screenshot. Request Host vision only if OCR and change metadata leave a concrete layout, icon, or complex-scene ambiguity.",
+        };
+      }
+      if (this.activeFocusReceipt) {
+        actionResult.focusReceipt = serializeFocusReceipt(this.activeFocusReceipt);
+      }
     }
     this.recordAudit(
       outcome === "unverified" ? "computer.action.indeterminate" : "computer.action.completed",

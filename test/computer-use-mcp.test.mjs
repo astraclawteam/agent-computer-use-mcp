@@ -237,7 +237,7 @@ test("screenshot observations return MCP ImageContent without exposing the conne
   assert.doesNotMatch(JSON.stringify(result), /agent-computer-use-mcp-private/u);
 });
 
-test("plain screenshot observations do not spend the Host vision budget", async () => {
+test("plain screenshot observations stay structured and omit image model input", async () => {
   const png = Buffer.from("89504e470d0a1a0a0000000d49484452", "hex");
   const result = await callTool({
     async capture() {
@@ -253,12 +253,9 @@ test("plain screenshot observations do not spend the Host vision budget", async 
   }, "computer.observe", { mode: "screenshot" });
 
   assert.equal(result.isError, false);
-  assert.deepEqual(result._meta["xiaozhiclaw/visual-understanding-capability"], {
-    sameTransaction: true,
-    requestField: "visualQuestion",
-  });
-  assert.equal(result._meta["xiaozhiclaw/visual-understanding"], undefined);
-  assert.equal(result.content[1].type, "image");
+  assert.equal(result._meta, undefined);
+  assert.equal(result.content.length, 1);
+  assert.equal(result.structuredContent.artifact.delivery, undefined);
 });
 
 test("unchanged-frame routing omits the Host visual request even when the caller repeats its question", async () => {
@@ -285,7 +282,8 @@ test("unchanged-frame routing omits the Host visual request even when the caller
   });
 
   assert.equal(result.isError, false);
-  assert.equal(result._meta["xiaozhiclaw/visual-understanding"], undefined);
+  assert.equal(result._meta, undefined);
+  assert.equal(result.content.length, 1);
   assert.equal(result.structuredContent.perceptionRouting.visualUnderstandingEligible, false);
 });
 
@@ -341,12 +339,18 @@ test("screenshot ImageContent survives deletion of the private handoff file", as
 
   try {
     await router.requestAccess({ titlePart: "Media Test", tier: "observe" });
-    const observation = await router.capture({ mode: "screenshot" });
+    const observation = await router.capture({
+      mode: "screenshot",
+      visualQuestion: "Inspect the current layout.",
+    });
     assert.equal(screenshotPath.endsWith("window.png"), true);
     const projected = await projectComputerUseMediaResult(
       router,
       "computer.observe",
-      { mode: "screenshot" },
+      {
+        mode: "screenshot",
+        visualQuestion: "Inspect the current layout.",
+      },
       observation,
     );
     assert.equal(projected.imageContent[0].data, png.toString("base64"));
