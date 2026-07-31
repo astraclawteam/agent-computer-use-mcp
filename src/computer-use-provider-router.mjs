@@ -37,7 +37,7 @@ function sameRequestContext(left, right) {
 
 const ACTION_OBSERVATION_TTL_MS = 30_000;
 const VISUAL_GROUNDING_OBSERVATION_TTL_MS = 120_000;
-const FOCUS_RECEIPT_TTL_MS = 5_000;
+const FOCUS_RECEIPT_TTL_MS = 30_000;
 const LOCAL_OCR_LATENCY_BUDGET_MS = 5_000;
 const STABLE_SEMANTIC_SOURCES = new Set(["cua-driver", "uia", "uia-som", "semantic"]);
 
@@ -1141,6 +1141,9 @@ export class ComputerUseProviderRouter {
           inputBehavior: action.inputBehavior ?? "incremental",
           deliveryMode: effectiveDeliveryMode,
         }));
+        if (hasVerifiedFocus(result)) {
+          this.activeFocusReceipt = this.createFocusReceipt({ action, element, driverTarget });
+        }
         if (!isVerifiedTextMutation(result)) {
           const verification = admission.pixelLimitedAction === false && (element || focusReceipt)
             ? await this.verifySemanticStateTransition(actionObservation, args.requestContext, ticket)
@@ -1231,7 +1234,8 @@ export class ComputerUseProviderRouter {
     }
 
     if (outcome === "unverified" && action.kind !== "activate_window") {
-      this.activeFocusReceipt = null;
+      const independentlyVerifiedTextFocus = action.kind === "type_text" && hasVerifiedFocus(result);
+      if (!independentlyVerifiedTextFocus) this.activeFocusReceipt = null;
       this.pendingUnverifiedMutation = {
         actionKind: action.kind,
         controllerId: this.activeController.controllerId,

@@ -561,6 +561,9 @@ export class CuaDriverMcpDriver {
           inputBehavior,
         });
         this.assertWorkTicket(ticket);
+        const foregroundWindowId = await this.foregroundWindowProbe();
+        this.assertWorkTicket(ticket);
+        const focusVerified = sameNativeWindowId(foregroundWindowId, window.windowId);
         return {
           status: unicodeResult.status ?? "ok",
           path: unicodeResult.deliveryPath ?? "windows_unicode_send_input",
@@ -576,6 +579,13 @@ export class CuaDriverMcpDriver {
           inputBehavior,
           effect: "possibly_applied",
           verified: false,
+          focusVerified,
+          foregroundWindow: focusVerified
+            ? {
+                ...window,
+                isForeground: true,
+              }
+            : null,
         };
       }
       const result = await this.client.callTool("type_text", {

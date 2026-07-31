@@ -1504,6 +1504,67 @@ test("possibly-applied text requires a fresh observation before any replay or co
   assert.deepEqual(calls.map((call) => call.method), ["typeText", "capture", "pressKey"]);
 });
 
+test("coordinate text entry returns independently verified focus while mutation still requires observation", async (t) => {
+  const router = new ComputerUseProviderRouter({
+    driver: {
+      async typeText() {
+        return {
+          status: "ok",
+          effect: "possibly_applied",
+          verified: false,
+          focusVerified: true,
+          foregroundWindow: {
+            windowId: "window-1",
+            pid: 100,
+            isForeground: true,
+          },
+        };
+      },
+    },
+  });
+  t.after(() => router.close());
+  router.activeController = {
+    controllerId: "controller-1",
+    tier: "full",
+    window: {
+      id: "window-1",
+      windowId: "window-1",
+      title: "Fixture",
+      pid: 100,
+      bounds: { width: 960, height: 720 },
+    },
+    expiresAt: new Date(Date.now() + 60_000).toISOString(),
+    expiresAtMs: Date.now() + 60_000,
+  };
+  router.lastCapture = router.createActionObservation({
+    ...observation({
+      source: "window-capture",
+      expiresAt: Date.now() + 5_000,
+      capture: { width: 960, height: 720 },
+    }),
+    elements: [],
+  });
+
+  const typed = await router.act({
+    action: {
+      kind: "type_text",
+      observationId: router.lastCapture.observationId,
+      coordinateSpace: "window-local",
+      x: 200,
+      y: 100,
+      value: "瀹嬮箯",
+      targetBounds: { x: 150, y: 70, width: 100, height: 60 },
+      textMode: "replace-all",
+    },
+  });
+
+  assert.equal(typed.outcome, "unverified");
+  assert.equal(typed.focusReceipt.status, "verified");
+  assert.equal(typed.focusReceipt.target.kind, "type_text");
+  assert.ok(Date.parse(typed.focusReceipt.expiresAt) - Date.parse(typed.focusReceipt.issuedAt) >= 30_000);
+  assert.equal(router.pendingUnverifiedMutation.actionKind, "type_text");
+});
+
 test("fresh OCR confirmation restores a limited focus continuation after coordinate text entry", async (t) => {
   const calls = [];
   const router = new ComputerUseProviderRouter({

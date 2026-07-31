@@ -215,6 +215,7 @@ test("CuaDriverMcpDriver uses verified Windows Unicode input for coordinate-grou
   const unicodeCalls = [];
   const driver = new CuaDriverMcpDriver({
     session: "unicode-session",
+    foregroundWindowProbe: async () => "42",
     unicodeInput: async (args) => {
       unicodeCalls.push(args);
       return {
@@ -285,6 +286,12 @@ test("CuaDriverMcpDriver uses verified Windows Unicode input for coordinate-grou
     inputBehavior: "incremental",
     effect: "possibly_applied",
     verified: false,
+    focusVerified: true,
+    foregroundWindow: {
+      windowId: 42,
+      pid: 1234,
+      isForeground: true,
+    },
   });
 });
 

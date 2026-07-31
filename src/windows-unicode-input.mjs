@@ -241,6 +241,10 @@ public static class AgentComputerUseUnicodeInput
             // refresh live search/filter/autocomplete state before the next one.
             Thread.Sleep(8);
         }
+        // Let the target drain injected Unicode events before the native edit
+        // boundary. Otherwise custom controls can render the text while
+        // coalescing the trailing signal into the same UI queue turn.
+        Thread.Sleep(75);
         EmitChangeBoundary(inputSize);
         return text.Length;
     }
@@ -252,6 +256,7 @@ public static class AgentComputerUseUnicodeInput
         // Emit a reversible native edit so those controls receive a real change
         // boundary while preserving the exact requested value.
         SendKey(VK_SPACE, inputSize, "text change signal");
+        Thread.Sleep(75);
         SendKey(VK_BACK, inputSize, "text change rollback");
         Thread.Sleep(250);
     }

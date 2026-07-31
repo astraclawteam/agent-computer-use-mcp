@@ -49,6 +49,8 @@ test("sendWindowsUnicodeText keeps text off process arguments and delivers it th
   assert.equal(spawnCalls[0].args.includes("-Sta"), true);
   const bridgeScript = Buffer.from(spawnCalls[0].args.at(-1), "base64").toString("utf16le");
   assert.equal(bridgeScript.split("EmitChangeBoundary(inputSize);").length - 1, 2);
+  assert.match(bridgeScript, /Thread\.Sleep\(75\);\s*EmitChangeBoundary\(inputSize\)/);
+  assert.match(bridgeScript, /SendKey\(VK_SPACE[\s\S]*Thread\.Sleep\(75\);\s*SendKey\(VK_BACK/);
   assert.equal(JSON.stringify(spawnCalls[0].options).includes("宋鹏"), false);
   assert.equal(spawnCalls[0].options.windowsHide, true);
   assert.deepEqual(spawnCalls[0].options.stdio, ["pipe", "pipe", "pipe"]);
