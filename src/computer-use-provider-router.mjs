@@ -928,8 +928,17 @@ export class ComputerUseProviderRouter {
       }
     }
 
-    const repeatedVisualFrame = unchanged
-      && this.lastVisualUnderstandingDigest === currentDigest;
+    const visualBounds = isCoordinateBox(screenshot.coordinateBounds)
+      ? screenshot.coordinateBounds
+      : isCoordinateBox(screenshot.capture)
+        ? screenshot.capture
+        : screenshot.window?.bounds;
+    const visualSceneStable = unchanged || isVisuallyImmaterialDirtyRegion(dirtyRegion, visualBounds);
+    const repeatedVisualFrame = visualSceneStable
+      && (
+        this.lastVisualUnderstandingDigest === currentDigest
+        || this.lastVisualUnderstandingDigest === previous?.digest
+      );
     const explicitVisualQuestion = typeof args.visualQuestion === "string"
       && args.visualQuestion.trim() !== "";
     const baselineOcrAttempts = previous?.baselineOcrAttempts ?? 0;
@@ -977,6 +986,7 @@ export class ComputerUseProviderRouter {
       : baselineOcrAttempts;
     const visualUnderstandingEligible = explicitVisualQuestion && !repeatedVisualFrame;
     if (visualUnderstandingEligible) this.lastVisualUnderstandingDigest = currentDigest;
+    if (repeatedVisualFrame) this.lastVisualUnderstandingDigest = currentDigest;
     this.lastScreenshot = {
       path: imagePath,
       digest: currentDigest,
@@ -1002,6 +1012,7 @@ export class ComputerUseProviderRouter {
         baselineOcrAttempts: nextBaselineOcrAttempts,
         screenshotDigest: `sha256:${currentDigest}`,
         frameStatus: unchanged ? "unchanged" : (dirtyRegion ? "changed-region" : "new-frame"),
+        visualSceneChanged: !visualSceneStable,
         dirtyRegion,
         ocrRegion,
         localElementCount: localElements,
@@ -3029,6 +3040,15 @@ function isIdentityCoordinateTransform(transform) {
     && (transform.offsetX ?? 0) === 0
     && (transform.offsetY ?? 0) === 0
   );
+}
+
+function isVisuallyImmaterialDirtyRegion(region, bounds) {
+  if (!isCoordinateBox(region) || !isCoordinateBox(bounds)) return false;
+  const frameArea = bounds.width * bounds.height;
+  const hasChangedPixelCount = Number.isFinite(region.changedPixels) && region.changedPixels > 0;
+  const changedArea = hasChangedPixelCount ? region.changedPixels : region.width * region.height;
+  if (frameArea <= 0 || changedArea <= 0) return false;
+  return changedArea / frameArea <= (hasChangedPixelCount ? 0.001 : 0.005);
 }
 
 function resolveEffectiveDeliveryMode(action, admission, focusReceipt) {

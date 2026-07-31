@@ -535,6 +535,85 @@ test("unchanged screenshot digest suppresses repeated Host vision after local OC
   }
 });
 
+test("caret-sized frame changes do not trigger repeated Host vision", async () => {
+  const { ComputerUseProviderRouter } = await import("../src/computer-use-provider-router.mjs");
+  const artifactRoot = await mkdtemp(join(tmpdir(), "computer-use-visual-scene-digest-"));
+  const baselineCanvas = createCanvas(400, 300);
+  const baselineContext = baselineCanvas.getContext("2d");
+  baselineContext.fillStyle = "#ffffff";
+  baselineContext.fillRect(0, 0, 400, 300);
+  const changedCanvas = createCanvas(400, 300);
+  const changedContext = changedCanvas.getContext("2d");
+  changedContext.fillStyle = "#ffffff";
+  changedContext.fillRect(0, 0, 400, 300);
+  changedContext.fillStyle = "#000000";
+  changedContext.fillRect(100, 80, 2, 15);
+  const frames = [baselineCanvas.toBuffer("image/png"), changedCanvas.toBuffer("image/png")];
+  const router = new ComputerUseProviderRouter({
+    artifactRoot,
+    ocrSession: {
+      async start() {},
+      async recognize() {
+        return { status: "ok", items: [] };
+      },
+      async close() {},
+    },
+    driver: {
+      async findWindow() {
+        return {
+          windowId: "window-caret",
+          title: "Caret Surface",
+          pid: 404,
+          bounds: { x: 0, y: 0, width: 400, height: 300 },
+        };
+      },
+      async capture() {
+        return { observationId: "semantic-empty", elements: [] };
+      },
+      async captureScreenshot({ outputPath }) {
+        await writeFile(outputPath, frames.shift() ?? changedCanvas.toBuffer("image/png"));
+        return {
+          status: "ok",
+          path: outputPath,
+          width: 400,
+          height: 300,
+          window: {
+            id: "window-caret",
+            title: "Caret Surface",
+            pid: 404,
+            bounds: { x: 0, y: 0, width: 400, height: 300 },
+          },
+        };
+      },
+    },
+  });
+
+  try {
+    await router.requestAccess({ titlePart: "Caret Surface", tier: "observe" });
+    const first = await router.capture({
+      mode: "screenshot",
+      visualQuestion: "Resolve the layout ambiguity.",
+    });
+    const second = await router.capture({
+      mode: "screenshot",
+      visualQuestion: "Read the same unchanged layout again.",
+    });
+
+    assert.equal(first.perceptionRouting.visualUnderstandingEligible, true);
+    assert.equal(second.perceptionRouting.frameStatus, "changed-region");
+    assert.equal(
+      second.perceptionRouting.visualSceneChanged,
+      false,
+      JSON.stringify(second.perceptionRouting),
+    );
+    assert.equal(second.perceptionRouting.visualUnderstandingEligible, false);
+    assert.equal(second.perceptionRouting.reason, "unchanged-frame-visual-already-requested");
+  } finally {
+    await router.close();
+    await rm(artifactRoot, { recursive: true, force: true });
+  }
+});
+
 test("unchanged screenshot retries one missing full-window OCR baseline after sidecar startup failure", async () => {
   const { ComputerUseProviderRouter } = await import("../src/computer-use-provider-router.mjs");
   const artifactRoot = await mkdtemp(join(tmpdir(), "computer-use-ocr-baseline-retry-"));
