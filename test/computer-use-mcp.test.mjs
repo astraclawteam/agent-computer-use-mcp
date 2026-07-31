@@ -107,6 +107,37 @@ test("indeterminate desktop actions remain successful MCP calls that require obs
   assert.equal(result.structuredContent.result.replaySafe, false);
 });
 
+test("safe action contract rejections are non-fatal not-applied results", async () => {
+  const result = await callTool({
+    async act() {
+      const error = new Error("A screenshot-grounded target rectangle is required.");
+      error.code = "target.editable_interior_required";
+      error.detail = {
+        allowed: false,
+        pixelLimitedAction: false,
+        nextAction: "Capture a fresh screenshot and use atomic type_text.",
+      };
+      throw error;
+    },
+  }, "computer.act", {
+    action: {
+      kind: "click",
+      interactionIntent: "activate-control",
+      observationId: "ocr-1",
+      coordinateSpace: "window-local",
+      x: 75,
+      y: 46,
+    },
+  });
+
+  assert.equal(result.isError, false);
+  assert.equal(result.structuredContent.status, "not-applied");
+  assert.equal(result.structuredContent.outcome, "blocked");
+  assert.equal(result.structuredContent.result.effect, "not-applied");
+  assert.equal(result.structuredContent.result.replaySafe, true);
+  assert.equal(result.structuredContent.error.code, "target.editable_interior_required");
+});
+
 test("unified OCR observation preserves the active controller context", async () => {
   const calls = [];
   const result = await observeComputer({
@@ -837,7 +868,7 @@ test("agent-computer-use-mcp freezes the local MCP tool contract", () => {
   );
   assert.deepEqual(
     act.inputSchema.properties.action.properties.interactionIntent.enum,
-    ["activate-recognized-text", "focus-editable", "activate-control", "select-item"],
+    ["activate-recognized-text", "activate-control", "select-item"],
   );
   assert.equal(act.inputSchema.properties.action.properties.observationId.type, "string");
   assert.equal(act.inputSchema.properties.action.properties.x.type, "number");

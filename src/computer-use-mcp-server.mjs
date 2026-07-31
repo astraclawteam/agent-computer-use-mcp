@@ -116,6 +116,34 @@ export async function callTool(router, name, args, requestContext) {
     }
   } catch (error) {
     const toolError = serializeToolError(error);
+    if (isSafeActionRejection(name, toolError)) {
+      const rejected = withResultContract({
+        status: "not-applied",
+        provider: "gateway-managed",
+        action: args?.action?.kind ?? "unknown",
+        result: {
+          effect: "not-applied",
+          replaySafe: true,
+          nextAction: toolError.detail?.nextAction ?? null,
+        },
+        pixelLimitedAction: false,
+        outcome: "blocked",
+        effectiveDeliveryMode: "none",
+        execution: {
+          schemaVersion: 1,
+          targetPath: "rejected-precondition",
+          providerPath: "host-contract",
+          deliveryMode: "none",
+          fallback: { used: false, reason: null },
+        },
+        error: toolError,
+      });
+      return {
+        content: [{ type: "text", text: renderComputerUseTextResult(rejected) }],
+        structuredContent: rejected,
+        isError: false,
+      };
+    }
     return {
       content: [
         {
@@ -176,6 +204,12 @@ export async function callTool(router, name, args, requestContext) {
     // above so agents do not abandon a healthy connector or retry mutations.
     isError: false,
   };
+}
+
+function isSafeActionRejection(name, toolError) {
+  return name === "computer.act"
+    && toolError?.detail?.allowed === false
+    && toolError?.detail?.pixelLimitedAction === false;
 }
 
 /**
