@@ -833,7 +833,7 @@ const acquireTool = {
 const observeTool = {
   name: "computer.observe",
   title: "Observe Computer",
-  description: "Read desktop state or capture semantic, screenshot, OCR, and changed-region observations through one bounded interface. A locked or secure Windows input desktop is a terminal blocker: ask the user to unlock and do not acquire, perceive, or act through it. Start with semantic; when pixels are needed the Host automatically evaluates screenshot change, runs changed-region or window OCR within a short local budget, and only permits the image-understanding model for an explicit unresolved layout, icon, or complex visual question. Repeating the same visual request on an unchanged screenshot is suppressed. OCR can ground only an explicit activate-recognized-text click; its bounds and interactionPoint describe glyph geometry rather than parent-control geometry. Never use an OCR point to focus an editable field, select a containing row, type text, or ground a coordinate press_key. For a custom-drawn editable surface, capture a fresh screenshot and set visualQuestion to the concrete layout, focus, control, or state question that remains unresolved after structured observation. The Host securely runs the configured image-understanding model inside the same observation transaction and returns pixel-grounded visual evidence; do not call a second media tool for this screenshot. Screenshot, capture-window, and OCR observations return an observationId, a single-use surfaceReceipt, coordinateSpace, and zero-based coordinateBounds. Copy projected image coordinates unchanged into computer.act; the Host applies the declared screenshot-to-native transform. Every observation authorizes at most one action, so observe immediately after each action. Artifact paths are connector-private and must not be passed to unrelated file or media tools.",
+  description: "Read desktop state or capture semantic, screenshot, OCR, changed-region, and explicitly escalated visual observations through one bounded interface. A locked or secure Windows input desktop is a terminal blocker: ask the user to unlock and do not acquire, perceive, or act through it. Start with semantic. Use screenshot for the normal pixel path: the Host evaluates frame change and returns changed-region or window OCR without invoking the image-understanding model. Consume that structured evidence before escalating. Use visual only after a prior semantic or screenshot observation leaves one concrete layout, icon, or complex-scene ambiguity that OCR cannot answer; visual requires visualQuestion and runs the configured image-understanding model inside the same transaction. Repeating the same visual request on an unchanged screenshot is suppressed. OCR bounds and interactionPoint describe recognized glyph geometry rather than parent-control geometry. Never use an OCR point to focus an editable field, select a containing row, type text, or ground a coordinate press_key. For a custom-drawn editable surface, first inspect screenshot OCR; escalate once with visual only when the editable rectangle remains ambiguous. Screenshot, visual, capture-window, and OCR observations return an observationId, a single-use surfaceReceipt, coordinateSpace, and zero-based coordinateBounds. Copy projected image coordinates unchanged into computer.act; the Host applies the declared screenshot-to-native transform. Every observation authorizes at most one action, so observe immediately after each action. Artifact paths are connector-private and must not be passed to unrelated file or media tools.",
   _meta: semanticCapabilityMeta({
     summary: "Inspect visible state in local graphical applications using window discovery, semantic elements, screenshots, OCR, or visual differences.",
     scenarios: [
@@ -850,11 +850,11 @@ const observeTool = {
     type: "object",
     required: ["mode"],
     properties: {
-      mode: { type: "string", enum: ["state", "semantic", "screenshot", "capture-window", "ocr-region", "diff"] },
+      mode: { type: "string", enum: ["state", "semantic", "screenshot", "visual", "capture-window", "ocr-region", "diff"] },
       visualQuestion: {
         type: "string",
         maxLength: 1200,
-        description: "Optional natural-language question for screenshot or capture-window. The Host answers it with the configured image-understanding model in the same observation result and projects grounding into this observation's pixel coordinate space.",
+        description: "Required only when mode is visual. Ask the one concrete layout, icon, or complex-scene question that remained unresolved after a prior screenshot/OCR result. It is ignored by the lower-latency screenshot mode.",
       },
       titlePart: { type: "string" },
       outputPath: { type: "string" },
@@ -875,7 +875,7 @@ const observeTool = {
     mode: { type: "string" },
     requestedMode: {
       type: "string",
-      enum: ["screenshot"],
+      enum: ["screenshot", "visual"],
       description: "The caller-requested perception mode when the Host safely satisfies it through a lower-latency equivalent observation.",
     },
     perceptionRouting: {

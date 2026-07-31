@@ -157,6 +157,45 @@ test("unified OCR observation preserves the active controller context", async ()
   assert.deepEqual(result, { status: "ok", source: "ocr", elements: [] });
 });
 
+test("screenshot remains OCR-first even when a caller supplies a visual question", async () => {
+  const calls = [];
+  await observeComputer({
+    async capture(args) {
+      calls.push(args);
+      return { status: "ok" };
+    },
+  }, {
+    mode: "screenshot",
+    visualQuestion: "Is the icon selected?",
+  });
+
+  assert.deepEqual(calls, [{ mode: "screenshot" }]);
+});
+
+test("visual observation is an explicit escalation with one required question", async () => {
+  const calls = [];
+  await assert.rejects(
+    observeComputer({ capture() {} }, { mode: "visual" }),
+    /visual_question_required/u,
+  );
+
+  await observeComputer({
+    async capture(args) {
+      calls.push(args);
+      return { status: "ok" };
+    },
+  }, {
+    mode: "visual",
+    visualQuestion: "  Which icon opens the overflow menu?  ",
+  });
+
+  assert.deepEqual(calls, [{
+    mode: "screenshot",
+    requestedMode: "visual",
+    visualQuestion: "Which icon opens the overflow menu?",
+  }]);
+});
+
 test("successful unified OCR observations satisfy the public result envelope", async () => {
   const result = await callTool({
     async capture() {
@@ -243,7 +282,7 @@ test("screenshot observations return MCP ImageContent without exposing the conne
       return png;
     },
   }, "computer.observe", {
-    mode: "screenshot",
+    mode: "visual",
     visualQuestion: "Locate the search field in the current application window.",
   });
 
@@ -308,7 +347,7 @@ test("unchanged-frame routing omits the Host visual request even when the caller
       return png;
     },
   }, "computer.observe", {
-    mode: "screenshot",
+    mode: "visual",
     visualQuestion: "Resolve the remaining visual ambiguity.",
   });
 
@@ -379,7 +418,7 @@ test("screenshot ImageContent survives deletion of the private handoff file", as
       router,
       "computer.observe",
       {
-        mode: "screenshot",
+        mode: "visual",
         visualQuestion: "Inspect the current layout.",
       },
       observation,
@@ -686,12 +725,16 @@ test("MCP projection keeps OCR grounding compact without weakening the router ob
   assert.equal(projected.elementCount, 180);
   assert.equal(projected.elements[0].elementToken, "ocr-1");
   assert.deepEqual(projected.elements[0].bounds, fullElement.bounds);
+  assert.equal(projected.elements[0].role, undefined);
+  assert.equal(projected.elements[0].actions, undefined);
+  assert.equal(projected.elements[0].confidence, undefined);
+  assert.equal(projected.elements[0].source, undefined);
   assert.equal(projected.elements[0].modelIdentity, undefined);
   assert.equal(projected.elements[0].rawTextSha256, undefined);
   assert.equal(projected.elements[0].sourceRegion, undefined);
   assert.equal(projected.elements[0].support, undefined);
   assert.equal(projected.text, undefined);
-  assert.ok(JSON.stringify(projected).length < 40_000);
+  assert.ok(JSON.stringify(projected).length < 25_000);
   assert.equal(providerObservation.elements[0].modelIdentity.provider, "xiaozhiclaw-ocr-sidecar");
   assert.equal(providerObservation.elements[0].rawTextSha256.length, 64);
 });
@@ -818,7 +861,7 @@ test("agent-computer-use-mcp freezes the local MCP tool contract", () => {
 
   const observe = COMPUTER_USE_MCP_TOOLS.find((tool) => tool.name === "computer.observe");
   assert.equal(observe.annotations.readOnlyHint, true);
-  assert.deepEqual(observe.inputSchema.properties.mode.enum, ["state", "semantic", "screenshot", "capture-window", "ocr-region", "diff"]);
+  assert.deepEqual(observe.inputSchema.properties.mode.enum, ["state", "semantic", "screenshot", "visual", "capture-window", "ocr-region", "diff"]);
   assert.equal(observe.inputSchema.properties.visualQuestion.type, "string");
   assert.ok(observe.outputSchema.properties.foregroundWindow);
   assert.ok(observe.outputSchema.properties.windows);

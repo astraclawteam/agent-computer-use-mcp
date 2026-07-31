@@ -255,7 +255,7 @@ export async function projectComputerUseMediaResult(router, name, args, value) {
   const visualUnderstandingEligible = value?.perceptionRouting?.visualUnderstandingEligible !== false;
   const shouldAttachImage = (
     mode === "capture-window"
-    || (mode === "screenshot" && explicitVisualQuestion && visualUnderstandingEligible)
+    || (mode === "visual" && explicitVisualQuestion && visualUnderstandingEligible)
   )
     && typeof artifactPath === "string";
   const structuredContent = sanitizeObservationMediaPaths(value, shouldAttachImage);
@@ -309,6 +309,40 @@ export function compactComputerUseResult(value) {
 
   const compacted = {};
   for (const [key, entry] of Object.entries(value)) {
+    if (key === "capture" && entry && typeof entry === "object") {
+      compacted.capture = compactCapture(entry);
+      continue;
+    }
+    if (key === "window" && entry && typeof entry === "object") {
+      compacted.window = compactWindow(entry);
+      continue;
+    }
+    if (key === "windows" && Array.isArray(entry)) {
+      compacted.windows = entry.map(compactWindow);
+      continue;
+    }
+    if (key === "surfaceReceipt" && entry && typeof entry === "object") {
+      compacted.surfaceReceipt = compactSurfaceReceipt(entry);
+      continue;
+    }
+    if (key === "surfaceProvenance" && entry && typeof entry === "object") {
+      compacted.surfaceProvenance = compactSurfaceProvenance(entry);
+      continue;
+    }
+    if (key === "auditEvents" && Array.isArray(entry)) {
+      compacted.auditEvents = entry.slice(-12).map((event) => (
+        event && typeof event === "object"
+          ? {
+              ...(event.type !== undefined ? { type: event.type } : {}),
+              ...(event.at !== undefined ? { at: event.at } : {}),
+            }
+          : event
+      ));
+      continue;
+    }
+    if (key === "coordinateScale" || key === "timings") {
+      continue;
+    }
     if (key === "applications" && Array.isArray(entry)) {
       compacted.applications = entry.map(compactApplication);
       compacted.applicationCount = entry.length;
@@ -340,8 +374,63 @@ function compactApplication(application) {
   };
 }
 
+function compactWindow(window) {
+  if (!window || typeof window !== "object") return window;
+  return {
+    ...(window.id !== undefined ? { id: window.id } : {}),
+    ...(window.windowId !== undefined && window.id === undefined ? { windowId: window.windowId } : {}),
+    ...(window.title !== undefined ? { title: window.title } : {}),
+    ...(window.pid !== undefined ? { pid: window.pid } : {}),
+    ...(window.bounds !== undefined ? { bounds: compactComputerUseResult(window.bounds) } : {}),
+  };
+}
+
+function compactCapture(capture) {
+  if (!capture || typeof capture !== "object") return capture;
+  return {
+    ...(capture.status !== undefined ? { status: capture.status } : {}),
+    ...(capture.title !== undefined ? { title: capture.title } : {}),
+    ...(capture.method !== undefined ? { method: capture.method } : {}),
+    ...(capture.hwnd !== undefined ? { hwnd: capture.hwnd } : {}),
+    ...(capture.width !== undefined ? { width: capture.width } : {}),
+    ...(capture.height !== undefined ? { height: capture.height } : {}),
+  };
+}
+
+function compactSurfaceReceipt(receipt) {
+  if (!receipt || typeof receipt !== "object") return receipt;
+  return {
+    ...(receipt.id !== undefined ? { id: receipt.id } : {}),
+    ...(receipt.generation !== undefined ? { generation: receipt.generation } : {}),
+    ...(receipt.windowId !== undefined ? { windowId: receipt.windowId } : {}),
+    ...(receipt.observationId !== undefined ? { observationId: receipt.observationId } : {}),
+    ...(receipt.screenshotId !== undefined && receipt.screenshotId !== receipt.observationId
+      ? { screenshotId: receipt.screenshotId }
+      : {}),
+    ...(receipt.capturedAt !== undefined ? { capturedAt: receipt.capturedAt } : {}),
+  };
+}
+
+function compactSurfaceProvenance(provenance) {
+  if (!provenance || typeof provenance !== "object") return provenance;
+  return {
+    ...(provenance.identityVerified !== undefined
+      ? { identityVerified: provenance.identityVerified }
+      : {}),
+    ...(provenance.binding !== undefined ? { binding: provenance.binding } : {}),
+  };
+}
+
 function compactPerceptionElement(element) {
   if (!element || typeof element !== "object") return element;
+  if (element.source === "ocr") {
+    return {
+      ...(element.elementToken !== undefined ? { elementToken: element.elementToken } : {}),
+      ...(element.name !== undefined ? { name: element.name } : {}),
+      ...(element.bounds !== undefined ? { bounds: compactComputerUseResult(element.bounds) } : {}),
+      ...(element.exact === true ? { exact: true } : {}),
+    };
+  }
   const compacted = {};
   for (const key of [
     "elementToken",
@@ -372,10 +461,33 @@ function compactPerceptionElement(element) {
 export async function observeComputer(router, args, requestContext) {
   const { mode, ...options } = args;
   if (mode === "state") return router.listState();
-  if (mode === "semantic" || mode === "screenshot" || mode === "ocr-region") {
+  if (mode === "semantic" || mode === "ocr-region") {
     return router.capture({
       ...options,
       mode,
+      ...(requestContext === undefined ? {} : { requestContext }),
+    });
+  }
+  if (mode === "screenshot") {
+    const { visualQuestion: _ignoredVisualQuestion, ...screenshotOptions } = options;
+    return router.capture({
+      ...screenshotOptions,
+      mode,
+      ...(requestContext === undefined ? {} : { requestContext }),
+    });
+  }
+  if (mode === "visual") {
+    const visualQuestion = typeof options.visualQuestion === "string"
+      ? options.visualQuestion.trim()
+      : "";
+    if (!visualQuestion) {
+      throw new Error("visual_question_required: mode=visual requires one concrete unresolved visual question");
+    }
+    return router.capture({
+      ...options,
+      visualQuestion,
+      mode: "screenshot",
+      requestedMode: "visual",
       ...(requestContext === undefined ? {} : { requestContext }),
     });
   }
