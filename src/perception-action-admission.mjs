@@ -1,6 +1,12 @@
 const SEMANTIC_SOURCES = new Set(["cua-driver", "uia", "uia-som", "semantic"]);
 
-export function admitPerceptionAction({ observation, element, action, now = Date.now() } = {}) {
+export function admitPerceptionAction({
+  observation,
+  element,
+  action,
+  recentEditableTarget,
+  now = Date.now(),
+} = {}) {
   if (!isRecord(action)) return denied("observation.insufficient");
   if (action.kind === "activate_window") return allowed(false);
   if ((action.kind === "press_key" || action.kind === "type_text") && !hasPixelCoordinates(action)
@@ -24,6 +30,26 @@ export function admitPerceptionAction({ observation, element, action, now = Date
     if (!["click", "type_text", "press_key"].includes(action.kind)) return denied("observation.insufficient");
     if (action.guessedAction === true || !coordinatesWithinObservation(action, observation)) {
       return denied("observation.insufficient");
+    }
+    if (action.kind === "click" && action.targetRole === "editable") {
+      return denied("target.editable_click_requires_text", {
+        reason: "Editable surfaces are focused and written atomically; a separate focus click is not an admissible public action.",
+        targetRole: "editable",
+        requiredActionKind: "type_text",
+        nextAction: "Reuse this same fresh screenshot observationId and targetBounds in one type_text action with value, textMode, and inputBehavior. Do not observe or click first.",
+      });
+    }
+    if (action.kind === "click"
+      && action.targetRole !== "editable"
+      && isRecentEditableTarget(recentEditableTarget, action, now)
+      && pointWithinBox(action, recentEditableTarget.bounds)) {
+      return denied("target.overlaps_recent_editable_surface", {
+        reason: "The proposed non-editable click lands inside the editable surface used by the latest text entry, so it cannot select a result, menu item, or independent control.",
+        targetRole: action.targetRole ?? null,
+        rejectedRegion: recentEditableTarget.bounds,
+        requiredGrounding: "distinct-noneditable-control-bounds",
+        nextAction: "Reuse this fresh screenshot and choose the full bounds of a distinct non-editable result or control outside rejectedRegion. Do not click the entered query text or its editable field.",
+      });
     }
     if (action.kind === "click" && !isPixelClickIntent(action.interactionIntent)) {
       return denied("target.interaction_intent_required", {
@@ -139,6 +165,22 @@ function isBox(value) {
 
 function hasPixelCoordinates(action) {
   return Number.isFinite(action?.x) && Number.isFinite(action?.y);
+}
+
+function isRecentEditableTarget(target, action, now) {
+  return isRecord(target)
+    && isBox(target.bounds)
+    && Number.isFinite(target.expiresAtMs)
+    && target.expiresAtMs > now
+    && String(target.controllerId ?? "") === String(action.controllerId ?? "")
+    && String(target.windowId ?? "") === String(action.windowId ?? "");
+}
+
+function pointWithinBox(action, box) {
+  return action.x >= box.x
+    && action.x < box.x + box.width
+    && action.y >= box.y
+    && action.y < box.y + box.height;
 }
 
 function coordinatesWithinObservation(action, observation) {

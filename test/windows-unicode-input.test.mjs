@@ -12,7 +12,7 @@ test("sendWindowsUnicodeText keeps text off process arguments and delivers it th
     return fakeChild({
       onStdin(value, child) {
         stdinText = value;
-        child.stdout.end('{"status":"ok","utf16CodeUnits":2,"clipboardRestored":true,"changeSignalDelivered":true,"deliveryPath":"windows_unicode_incremental"}');
+        child.stdout.end('{"status":"ok","utf16CodeUnits":2,"clipboardRestored":true,"changeSignalDelivered":true,"deliveryPath":"windows_sendinput_unicode_incremental"}');
         child.emit("close", 0, null);
       },
     });
@@ -32,7 +32,7 @@ test("sendWindowsUnicodeText keeps text off process arguments and delivers it th
     utf16CodeUnits: 2,
     clipboardRestored: true,
     changeSignalDelivered: true,
-    deliveryPath: "windows_unicode_incremental",
+    deliveryPath: "windows_sendinput_unicode_incremental",
   });
   const payload = JSON.parse(stdinText);
   assert.deepEqual(payload, {
@@ -47,6 +47,13 @@ test("sendWindowsUnicodeText keeps text off process arguments and delivers it th
   assert.equal(spawnCalls[0].command, "powershell.exe");
   assert.equal(spawnCalls[0].args.some((value) => value.includes("宋鹏")), false);
   assert.equal(spawnCalls[0].args.includes("-Sta"), true);
+  assert.ok(spawnCalls[0].args.at(-1).length < 30_000, "encoded bridge must stay below Windows command-line limits");
+  const bridgeScript = Buffer.from(spawnCalls[0].args.at(-1), "base64").toString("utf16le");
+  assert.equal(bridgeScript.split("[AgentComputerUseIncrementalInput]::Send(").length - 1, 1);
+  assert.match(bridgeScript, /SendInput\(/);
+  assert.match(bridgeScript, /private const uint KEYEVENTF_UNICODE = 0x0004;/);
+  assert.match(bridgeScript, /SendChord\(0x11, 0x41\);[\s\S]*SendKey\(0x08\);[\s\S]*foreach \(char codeUnit in text\)/);
+  assert.match(bridgeScript, /SendKey\(0x20\);[\s\S]*SendKey\(0x08\);/);
   assert.equal(JSON.stringify(spawnCalls[0].options).includes("宋鹏"), false);
   assert.equal(spawnCalls[0].options.windowsHide, true);
   assert.deepEqual(spawnCalls[0].options.stdio, ["pipe", "pipe", "pipe"]);

@@ -11,8 +11,10 @@ import { queryWindowsForegroundWindowId } from "./windows-foreground-probe.mjs";
 import { queryWindowsProcessApplications } from "./windows-process-application-probe.mjs";
 import { activateWindowsTrayApplication } from "./windows-tray-application-activation.mjs";
 import { queryWindowsDesktopSession } from "./windows-desktop-session-probe.mjs";
+import { queryWindowsWindowRelationships } from "./windows-window-relationship-probe.mjs";
 
 const DEFAULT_DRIVER_PATH = `${process.env.LOCALAPPDATA}\\Programs\\Cua\\cua-driver\\bin\\cua-driver.exe`;
+const DEFAULT_SCREENSHOT_TIMEOUT_MS = 8_000;
 
 export class CuaDriverMcpDriver {
   constructor(options = {}) {
@@ -25,6 +27,8 @@ export class CuaDriverMcpDriver {
     this.foregroundWindowProbe = options.foregroundWindowProbe ?? queryWindowsForegroundWindowId;
     this.processApplicationProbe = options.processApplicationProbe ?? queryWindowsProcessApplications;
     this.trayApplicationActivator = options.trayApplicationActivator ?? activateWindowsTrayApplication;
+    this.windowRelationshipProbe = options.windowRelationshipProbe
+      ?? queryWindowsWindowRelationships;
     this.desktopSessionProbe = options.desktopSessionProbe ?? queryWindowsDesktopSession;
     this.clientStarted = false;
     this.clientStartAttempted = false;
@@ -166,7 +170,41 @@ export class CuaDriverMcpDriver {
             right,
             { name },
           ));
-        for (const existingWindow of existingWindows) {
+        const identityMatchedWindows = existingWindows.filter((window) => (
+          matchesApplicationWindowIdentity(window, { name })
+        ));
+        const relationships = existingWindows.length > 1 && identityMatchedWindows.length > 0
+          ? await this.awaitWindowRelationships(ticket, existingWindows)
+          : [];
+        const blockingModalWindows = findBlockingApplicationModalWindows(
+          existingWindows,
+          identityMatchedWindows,
+          relationships,
+        );
+        for (const blockingWindow of blockingModalWindows) {
+          const activation = await this.activateWindowResources(ticket, blockingWindow);
+          if (activation.verified === true) {
+            return {
+              status: "restored",
+              method: "blocking-owned-window",
+              pid: activation.foregroundWindow.pid,
+              name,
+              windows: [
+                activation.foregroundWindow,
+                ...existingWindows.filter((window) => (
+                  !sameNativeWindowId(window.windowId, blockingWindow.windowId)
+                )),
+              ],
+            };
+          }
+        }
+        const deferredCompactWindows = identityMatchedWindows.filter((window) => (
+          shouldDeferCompactApplicationWindow(window, existingWindows)
+        ));
+        const directActivationWindows = identityMatchedWindows.filter((window) => (
+          !deferredCompactWindows.includes(window)
+        ));
+        for (const existingWindow of directActivationWindows) {
           const activation = await this.activateWindowResources(ticket, existingWindow);
           if (activation.verified === true) {
             return {
@@ -183,28 +221,52 @@ export class CuaDriverMcpDriver {
         const trayActivation = await this.trayApplicationActivator({ name });
         this.assertWorkTicket(ticket);
         if (trayActivation?.status === "invoked") {
-          let restoredWindows = [];
-          for (let attempt = 0; restoredWindows.length === 0 && attempt < 8; attempt += 1) {
+          let restoredWindow = null;
+          let applicationWindows = [];
+          for (let attempt = 0; restoredWindow === null && attempt < 8; attempt += 1) {
             await new Promise((resolve) => setTimeout(resolve, 250));
             this.assertWorkTicket(ticket);
-            restoredWindows = (await this.listWindowsResources(ticket, {
+            applicationWindows = (await this.listWindowsResources(ticket, {
               onScreenOnly: false,
               includeForeground: false,
             }))
               .filter((window) => candidateProcessIds.has(window.pid))
+              .filter((window) => matchesApplicationWindowIdentity(window, { name }))
               .sort((left, right) => compareApplicationWindowControllability(
                 left,
                 right,
                 { name },
               ));
+            restoredWindow = applicationWindows.find((window) => (
+              isMateriallyRestoredApplicationWindow(window, identityMatchedWindows)
+            )) ?? null;
           }
-          if (restoredWindows.length > 0) {
+          if (restoredWindow) {
             return {
               status: "restored",
               method: "tray-accessibility-invoke",
-              pid: restoredWindows[0].pid,
+              pid: restoredWindow.pid,
               name,
-              windows: restoredWindows,
+              windows: [
+                restoredWindow,
+                ...applicationWindows.filter((window) => (
+                  !sameNativeWindowId(window.windowId, restoredWindow.windowId)
+                )),
+              ],
+            };
+          }
+        }
+        for (const existingWindow of deferredCompactWindows) {
+          const activation = await this.activateWindowResources(ticket, existingWindow);
+          if (activation.verified === true) {
+            return {
+              status: "restored",
+              pid: activation.foregroundWindow.pid,
+              name: null,
+              windows: [
+                activation.foregroundWindow,
+                ...existingWindows.filter((window) => window.windowId !== existingWindow.windowId),
+              ],
             };
           }
         }
@@ -236,6 +298,19 @@ export class CuaDriverMcpDriver {
     });
   }
 
+  async awaitWindowRelationships(ticket, windows) {
+    try {
+      const relationships = await this.windowRelationshipProbe({
+        windowIds: windows.map((window) => window.windowId),
+      });
+      this.assertWorkTicket(ticket);
+      return Array.isArray(relationships) ? relationships : [];
+    } catch {
+      this.assertWorkTicket(ticket);
+      return [];
+    }
+  }
+
   async listWindowsResources(ticket, { onScreenOnly, includeForeground = true }) {
     await this.ensureStartedResources(ticket);
     const result = await this.client.callTool("list_windows", {
@@ -254,8 +329,11 @@ export class CuaDriverMcpDriver {
         && window.title
         && !isComputerUseOverlayWindow(window)
       ));
-    normalized.sort(compareWindowZOrder);
-    return normalized.map((window) => ({
+    const controllable = normalized.filter((window) => (
+      !isLikelyProcessBackdrop(window, normalized, foregroundWindowId)
+    ));
+    controllable.sort(compareWindowZOrder);
+    return controllable.map((window) => ({
       ...window,
       isForeground: sameNativeWindowId(window.windowId, foregroundWindowId),
     }));
@@ -359,7 +437,7 @@ export class CuaDriverMcpDriver {
     });
   }
 
-  captureScreenshot({ window, outputPath }) {
+  captureScreenshot({ window, outputPath, timeoutMs = DEFAULT_SCREENSHOT_TIMEOUT_MS }) {
     return this.runWork(async (ticket) => {
       await this.ensureStartedResources(ticket);
       const result = await this.client.callTool("get_window_state", {
@@ -367,10 +445,13 @@ export class CuaDriverMcpDriver {
         window_id: window.windowId,
         include_screenshot: true,
         screenshot_out_file: outputPath,
-        max_elements: 500,
-        max_depth: 20,
+        // Screenshot perception runs OCR separately. Traversing a large
+        // accessibility tree here only adds tail latency and can stall on
+        // dynamic desktop surfaces.
+        max_elements: 1,
+        max_depth: 1,
         session: this.session,
-      });
+      }, { timeoutMs });
       this.assertWorkTicket(ticket);
       const resultWindow = result.window ?? {};
       const surfaceProvenance = verifyCaptureWindowIdentity(window, resultWindow);
@@ -557,6 +638,9 @@ export class CuaDriverMcpDriver {
           inputBehavior,
         });
         this.assertWorkTicket(ticket);
+        const foregroundWindowId = await this.foregroundWindowProbe();
+        this.assertWorkTicket(ticket);
+        const windowForegroundVerified = sameNativeWindowId(foregroundWindowId, window.windowId);
         return {
           status: unicodeResult.status ?? "ok",
           path: unicodeResult.deliveryPath ?? "windows_unicode_send_input",
@@ -572,6 +656,17 @@ export class CuaDriverMcpDriver {
           inputBehavior,
           effect: "possibly_applied",
           verified: false,
+          // A matching foreground top-level window proves delivery stayed
+          // inside the approved app, but it does not prove which custom-drawn
+          // child surface owns keyboard focus. Only a subsequent observation
+          // that confirms the written value can mint a focus receipt.
+          focusVerified: false,
+          foregroundWindow: windowForegroundVerified
+            ? {
+                ...window,
+                isForeground: true,
+              }
+            : null,
         };
       }
       const result = await this.client.callTool("type_text", {
@@ -590,6 +685,13 @@ export class CuaDriverMcpDriver {
   click({ window, elementToken, elementIndex, x, y, deliveryMode = "background" }) {
     return this.runWork(async (ticket) => {
       await this.ensureStartedResources(ticket);
+      if (Number.isFinite(x) && Number.isFinite(y) && deliveryMode === "foreground") {
+        await this.client.callTool("bring_to_front", {
+          pid: window.pid,
+          window_id: window.windowId,
+        });
+        this.assertWorkTicket(ticket);
+      }
       const result = await this.client.callTool("click", {
         pid: window.pid,
         window_id: window.windowId,
@@ -801,12 +903,12 @@ export class CuaDriverMcpClient {
     });
   }
 
-  callTool(name, args) {
+  callTool(name, args, options = {}) {
     const ticket = this.acquireCallTicket();
     if (!ticket) return Promise.reject(lifecycleClosedError());
     let operation;
     try {
-      operation = this.callToolOperation(ticket, name, args);
+      operation = this.callToolOperation(ticket, name, args, options);
     } catch (error) {
       this.finishCallTicket(ticket);
       throw error;
@@ -825,10 +927,20 @@ export class CuaDriverMcpClient {
     });
   }
 
-  async callToolOperation(ticket, name, args) {
+  async callToolOperation(ticket, name, args, options = {}) {
     await this.start();
     this.assertCallTicket(ticket);
-    const result = await this.client.callTool({ name, arguments: args });
+    const timeout = Number.isFinite(options.timeoutMs) && options.timeoutMs > 0
+      ? options.timeoutMs
+      : undefined;
+    const result = await this.client.callTool(
+      { name, arguments: args },
+      undefined,
+      timeout === undefined ? undefined : {
+        timeout,
+        maxTotalTimeout: timeout,
+      },
+    );
     this.assertCallTicket(ticket);
     return result;
   }
@@ -1120,13 +1232,17 @@ function compareWindowControllability(left, right) {
 }
 
 function compareApplicationWindowControllability(left, right, { name } = {}) {
-  const expectedName = normalizeApplicationIdentity(name);
-  const leftIdentityMatch = expectedName !== ""
-    && normalizeApplicationIdentity(left.title) === expectedName;
-  const rightIdentityMatch = expectedName !== ""
-    && normalizeApplicationIdentity(right.title) === expectedName;
+  const leftIdentityMatch = matchesApplicationWindowIdentity(left, { name });
+  const rightIdentityMatch = matchesApplicationWindowIdentity(right, { name });
   if (leftIdentityMatch !== rightIdentityMatch) return leftIdentityMatch ? -1 : 1;
   return compareWindowControllability(left, right);
+}
+
+function matchesApplicationWindowIdentity(window, { name } = {}) {
+  const expectedName = normalizeApplicationIdentity(name);
+  if (expectedName === "") return true;
+  const title = normalizeApplicationIdentity(window?.title);
+  return title === expectedName || title.includes(expectedName);
 }
 
 function normalizeApplicationIdentity(value) {
@@ -1140,6 +1256,93 @@ function boundedWindowArea(window) {
     && Number.isFinite(height) && height > 0
     ? width * height
     : 0;
+}
+
+function shouldDeferCompactApplicationWindow(window, applicationWindows) {
+  const bounds = window?.bounds;
+  const width = Number(bounds?.width);
+  const height = Number(bounds?.height);
+  const x = Number(bounds?.x);
+  const y = Number(bounds?.y);
+  if (
+    window?.isOnScreen !== true
+    || !Number.isFinite(x)
+    || !Number.isFinite(y)
+    || x < -10_000
+    || y < -10_000
+    || !Number.isFinite(width)
+    || !Number.isFinite(height)
+    || (width >= 480 && height >= 320)
+  ) {
+    return false;
+  }
+  return applicationWindows.some((sibling) => (
+    sibling !== window
+    && sibling.pid === window.pid
+    && boundedWindowArea(sibling) > 0
+  ));
+}
+
+function isMateriallyRestoredApplicationWindow(window, initialIdentityWindows) {
+  if (initialIdentityWindows.length === 0) return true;
+  const initialWindow = initialIdentityWindows.find((candidate) => (
+    sameNativeWindowId(candidate.windowId, window.windowId)
+  ));
+  const width = Number(window?.bounds?.width);
+  const height = Number(window?.bounds?.height);
+  const hasPrimarySurface = Number.isFinite(width) && width >= 480
+    && Number.isFinite(height) && height >= 320;
+  if (!hasPrimarySurface) return false;
+  if (!initialWindow) return true;
+  if (initialWindow.isOnScreen !== true && window.isOnScreen === true) return true;
+  return boundedWindowArea(window) >= boundedWindowArea(initialWindow) * 1.5;
+}
+
+function findBlockingApplicationModalWindows(
+  applicationWindows,
+  identityMatchedWindows,
+  relationships,
+) {
+  const relationshipsByWindow = new Map(
+    relationships.map((relationship) => [String(relationship.windowId), relationship]),
+  );
+  const disabledOwnerIds = new Set(identityMatchedWindows
+    .filter((window) => (
+      relationshipsByWindow.get(String(window.windowId))?.enabled === false
+    ))
+    .map((window) => String(window.windowId)));
+  if (disabledOwnerIds.size === 0) return [];
+  return applicationWindows
+    .filter((window) => {
+      const relationship = relationshipsByWindow.get(String(window.windowId));
+      return relationship?.enabled === true
+        && relationship.ownerWindowId !== null
+        && disabledOwnerIds.has(String(relationship.ownerWindowId));
+    })
+    .sort(compareWindowZOrder);
+}
+
+function isLikelyProcessBackdrop(window, windows, foregroundWindowId) {
+  if (sameNativeWindowId(window.windowId, foregroundWindowId)) return false;
+  if (!Number.isSafeInteger(window.pid) || window.pid <= 0) return false;
+  if (Number(window?.bounds?.x) > 0 || Number(window?.bounds?.y) > 0) return false;
+
+  const title = normalizeApplicationIdentity(window.title);
+  const appName = normalizeApplicationIdentity(window.appName);
+  const executableIdentity = appName.endsWith(".exe")
+    ? appName.slice(0, -4)
+    : appName;
+  if (title === "" || executableIdentity === "" || title !== executableIdentity) return false;
+
+  const area = boundedWindowArea(window);
+  if (area === 0) return false;
+  return windows.some((sibling) => (
+    sibling !== window
+    && sibling.pid === window.pid
+    && sibling.isOnScreen === true
+    && boundedWindowArea(sibling) > 0
+    && area >= boundedWindowArea(sibling) * 4
+  ));
 }
 
 function isComputerUseOverlayWindow(window) {

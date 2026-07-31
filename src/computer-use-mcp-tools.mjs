@@ -54,6 +54,7 @@ const PERCEPTION_ELEMENT_ARRAY = {
       editableInteriorKnown: { type: "boolean" },
       confidence: { type: "number" },
       source: { type: "string" },
+      observationOnly: { type: "boolean" },
       proposalId: { type: "string" },
       templateId: { type: "string" },
       pixelLimitedAction: { type: "boolean" },
@@ -272,25 +273,19 @@ const LEGACY_COMPUTER_USE_MCP_TOOLS = [
   {
     name: "computer.request_access",
     title: "Request Computer Access",
-    description: "Acquire a Gateway-managed controller lease for a known window. Prefer target=\"foreground\" when the user refers to the current/frontmost window; use computer.list_state first when the target is unknown. Never guess a title. The legacy exact titlePart value \"*\" is accepted only as an alias for the foreground window.",
+    description: "Acquire a Gateway-managed controller lease from trusted discovery evidence and return an initial semantic observation when available. When the user refers to an application, call computer.observe mode=\"state\" first and pass its applicationToken even if auxiliary windows are already listed; the Host will restore and select the primary application window. Use target=\"foreground\" only when the user explicitly means the current OS foreground window. Use windowId only for the exact window returned by the immediately preceding state observation. Never infer, guess, or synthesize a window title.",
     annotations: { phase: "1.3", destructiveHint: false },
     inputSchema: {
       type: "object",
       oneOf: [
-        { required: ["titlePart"] },
         { required: ["windowId"] },
         { required: ["target"] },
         { required: ["applicationToken"] },
       ],
       properties: {
-        titlePart: {
-          type: "string",
-          minLength: 1,
-          description: "Case-insensitive literal title or app-name substring. Prefer target=\"foreground\" for the current window; the legacy exact value \"*\" is accepted as a foreground alias.",
-        },
         windowId: {
           anyOf: [{ type: "string" }, { type: "number" }],
-          description: "Exact window id returned by computer.list_state.",
+          description: "Exact window id returned by the immediately preceding computer.observe mode=\"state\" when the user explicitly targets that specific window rather than an application.",
         },
         target: {
           type: "string",
@@ -300,7 +295,7 @@ const LEGACY_COMPUTER_USE_MCP_TOOLS = [
         applicationToken: {
           type: "string",
           minLength: 1,
-          description: "Opaque application token returned by computer.observe mode=\"state\". Use it to restore or launch an application that currently has no controllable window, then acquire the resulting window. This exact token takes precedence over a redundant titlePart left from an earlier window lookup; target and windowId remain conflicting selectors.",
+          description: "Opaque application token returned by computer.observe mode=\"state\". Prefer this for every application-level request. It restores a minimized or tray application and selects its primary window without substituting an already-open auxiliary surface.",
         },
         tier: { type: "string", enum: ["observe", "full", "admin"] },
         agentId: { type: "string" },
@@ -326,6 +321,12 @@ const LEGACY_COMPUTER_USE_MCP_TOOLS = [
       controller: { anyOf: [ANY_OBJECT, { type: "null" }] },
       overlay: { anyOf: [ANY_OBJECT, { type: "null" }] },
       startsDesktopControl: { type: "boolean" },
+      initialObservation: ANY_OBJECT,
+      foregroundWindow: { anyOf: [ANY_OBJECT, { type: "null" }] },
+      windows: ANY_ARRAY,
+      applications: ANY_ARRAY,
+      applicationCount: { type: "number" },
+      nextAction: { type: "string" },
     }, ["status", "controller"]),
   },
   {
@@ -411,7 +412,7 @@ const LEGACY_COMPUTER_USE_MCP_TOOLS = [
   {
     name: "computer.act",
     title: "Act On Computer",
-    description: "Run one approved action against the active Gateway-managed target using the latest single-use surfaceReceipt. Observe immediately after every action; a consumed observation cannot authorize a second action. Use activate_window to bring the acquired window to the OS foreground without guessing coordinates. Prefer a semantic elementToken. Every pixel click must declare interactionIntent. OCR geometry is accepted only for activate-recognized-text; focus-editable, activate-control, and select-item require screenshot-grounded control geometry. For text entry on a custom-drawn surface, derive the full editable rectangle from a fresh screenshot, provide it as targetBounds, and send one type_text action with x/y near its visual center, using the exact latest screenshot observationId and an explicit textMode. The Host validates the safe central region and executes at the targetBounds center. Never infer an editable point from the position of a nearby action button or toolbar icon: composers and editors may place their editable body above a bottom toolbar or button row. If a dialog, sheet, or overlay covers the target, resolve or dismiss it and re-observe before typing. Use replace-all when the field must equal the supplied value or may already contain content; use insert only when appending at the current caret is intended. Coordinate-grounded text defaults to incremental native Unicode input so live search, filtering, validation, and autocomplete controls receive each edit event. Use inputBehavior commit only when the control should receive the final value as one paste-style transaction; the Host restores the prior clipboard. OCR bounds and OCR interactionPoint values describe recognized glyphs only; they are never proof of a control's editable interior and are rejected for type_text or coordinate-grounded press_key. Exclude icons, labels, borders, and affordances when grounding an editable point. Window-local image coordinates start at (0,0): never add window.bounds.x/y to them. The Host applies screenshot-to-native scaling. Do not click first. Pixel-grounded actions default to foreground delivery so native focus and IME events reach the application. Targetless type_text and press_key require an unexpired focusReceiptId. A verified focus action returns it immediately; after an indeterminate coordinate type_text, the mandatory fresh observation may return a recovered focusReceipt only when the exact entered value is observed near the same grounded target on the same controlled window. Use that observation receipt for a single commit key instead of guessing another click. Never infer focus from a successful RPC or an OCR label click. A semantic accessibility click may return outcome=delivered when invocation succeeded but no stable state change is immediately visible; never replay that click, continue with the next distinct planned action, and verify at the next observable boundary. If a pixel action or text mutation is indeterminate, possibly_applied, or unverified, call computer.observe before any further action and follow the structured recovery contract from the fresh state. Task completion still requires observing the intended UI state transition.",
+    description: "Execute exactly one action from the latest single-use surfaceReceipt and verify its visible effect. Prefer a semantic elementToken. Otherwise use fresh screenshot coordinates and full targetBounds; OCR glyph bounds cannot ground actions. Enter text with one atomic coordinate-grounded type_text, never a preceding editable click. Use replace-all for an exact field value, insert only for intentional insertion; use incremental for controls that must react per edit and commit for one exact transaction. Exclude borders, icons, adjacent controls, and occlusions from targetBounds. Copy window-local coordinates unchanged. Consume post-action evidence and finish only after the requested transition is observed.",
     annotations: { phase: "1.3", destructiveHint: true },
     inputSchema: {
       type: "object",
@@ -446,7 +447,7 @@ const LEGACY_COMPUTER_USE_MCP_TOOLS = [
               ],
             },
             then: {
-              required: ["interactionIntent"],
+              required: ["interactionIntent", "targetRole"],
             },
           }, {
             if: {
@@ -480,7 +481,9 @@ const LEGACY_COMPUTER_USE_MCP_TOOLS = [
                 {
                   properties: {
                     kind: { const: "click" },
-                    interactionIntent: { const: "focus-editable" },
+                    interactionIntent: {
+                      enum: ["activate-control", "select-item"],
+                    },
                   },
                   required: ["kind", "interactionIntent"],
                 },
@@ -500,39 +503,44 @@ const LEGACY_COMPUTER_USE_MCP_TOOLS = [
             kind: {
               type: "string",
               enum: ["activate_window", "set_value", "type_text", "click", "press_key"],
-              description: "Use activate_window to foreground the already-acquired controller window. Choose type_text, not click, when the immediate goal is to enter text. Coordinate-grounded type_text atomically focuses the editable interior and applies the declared textMode in one action.",
+              description: "Use activate_window to foreground. For text entry use type_text directly; click only when activation or selection is the goal.",
             },
             observationId: {
               type: "string",
-              description: "Required with x/y so the action is bound to the exact latest observation. Text entry requires a screenshot observation visually grounded to the editable interior; OCR text observations are rejected for keyboard actions.",
+              description: "Required with x/y and must identify the latest screenshot observation. OCR-only observations cannot ground keyboard actions.",
             },
             surfaceReceiptId: {
               type: "string",
-              description: "Optional explicit binding to the latest observation's single-use surfaceReceipt.id. If supplied, it must match exactly. Every observation authorizes at most one action even when omitted.",
+              description: "Optional exact binding to the latest single-use surfaceReceipt.id.",
             },
             elementToken: { type: "string" },
             elementIndex: { type: "number" },
             focusReceiptId: {
               type: "string",
-              description: "Required for targetless type_text or press_key. Use only an unexpired receipt returned by computer.act or by the mandatory post-write computer.observe when that observation exactly confirmed the entered value near the same grounded target.",
+              description: "Required for targetless type_text or press_key; use only a current receipt for the same verified target.",
             },
             interactionIntent: {
               type: "string",
-              enum: ["activate-recognized-text", "focus-editable", "activate-control", "select-item"],
-              description: "Required for pixel clicks. State the intended UI effect instead of relying on raw geometry. Use focus-editable only with screenshot-grounded editable-interior geometry. OCR geometry is accepted only for activate-recognized-text and never for focusing an input.",
+              enum: ["activate-control", "select-item"],
+              description: "Required for pixel clicks and bound to screenshot-derived targetBounds. Never use an OCR glyph or an editable-focus click.",
+            },
+            targetRole: {
+              type: "string",
+              enum: ["button", "list-item", "menu-item", "toggle", "editable", "other"],
+              description: "Required for pixel clicks. Classify interaction semantics; every text-entry surface is editable regardless of its label.",
             },
             coordinateSpace: {
               type: "string",
               enum: ["window-local", "screen"],
-              description: "Required with x/y. Copy the fresh observation's coordinateSpace. For text entry, derive the full editable rectangle from the screenshot and choose a safe interior point near its visual center. Do not use the horizontal or vertical position of an adjacent action button as a proxy; an editor body may be above its bottom toolbar or button row. Exclude icons, labels, borders, affordances, and occluding dialogs or sheets. OCR interactionPoint values identify glyph centers and cannot ground keyboard actions. For window-local, never add window.bounds.x/y. Use screen only when coordinates are already absolute desktop coordinates; Host subtracts the observed window origin.",
+              description: "Required with x/y. Copy the observation's space; never add window offsets to window-local coordinates. Text points must be inside screenshot-derived editable bounds.",
             },
             x: {
               type: "number",
-              description: "X in the explicitly declared coordinateSpace. Bind it to the latest observationId. For text entry, it must be a screenshot-grounded editable-interior point, not an OCR glyph center or a rectangle edge.",
+              description: "Optional X. For type_text with targetBounds, omit x/y; Host uses the center.",
             },
             y: {
               type: "number",
-              description: "Y in the explicitly declared coordinateSpace. Bind it to the latest observationId. For text entry, it must be a screenshot-grounded editable-interior point, not an OCR glyph center or a rectangle edge.",
+              description: "Optional Y. For type_text with targetBounds, omit x/y; Host uses the center.",
             },
             targetBounds: {
               type: "object",
@@ -544,21 +552,21 @@ const LEGACY_COMPUTER_USE_MCP_TOOLS = [
                 height: { type: "number", exclusiveMinimum: 0 },
               },
               additionalProperties: false,
-              description: "Required for coordinate-grounded type_text and focus-editable clicks. The full editable surface rectangle from the same screenshot observation, in coordinateSpace. The Host validates that x/y is safely inside its central region and executes at the rectangle center, avoiding placeholder glyphs, borders, and adjacent icons.",
+              description: "Full interactive rectangle from the same screenshot, excluding glyph-only bounds, borders, adjacent controls, and occlusions. Alone it grounds type_text at its center.",
             },
             value: {
               type: "string",
-              description: "Text for set_value or type_text. On custom-drawn fields, use type_text with x/y so focus and entry happen atomically; never precede it with a focus click.",
+              description: "Text for set_value or atomic type_text.",
             },
             textMode: {
               type: "string",
               enum: ["insert", "replace-all"],
-              description: "Required for type_text. Use replace-all with screenshot-grounded x/y when the editable field must equal value or may already contain content. Use insert only when intentional insertion/appending at the current caret is desired. For semantic replacement, use set_value.",
+              description: "Required for type_text. Use replace-all for an exact value; insert only for intentional insertion.",
             },
             inputBehavior: {
               type: "string",
               enum: ["incremental", "commit"],
-              description: "Required generic edit-event semantics for every type_text. Use incremental only when the control must react to each edit, such as live search, filtering, validation, or autocomplete. Use commit for message composers, document fields, forms, and other controls where the exact final value matters; it applies the value in one clipboard-backed transaction and restores the prior clipboard. Select from the control's interaction semantics, never from an application name or keyword.",
+              description: "Required for type_text. Use incremental when each edit must update the UI; use commit for one exact clipboard-restored transaction.",
             },
             key: {
               type: "string",
@@ -587,6 +595,7 @@ const LEGACY_COMPUTER_USE_MCP_TOOLS = [
       execution: ANY_OBJECT,
       focusReceipt: ANY_OBJECT,
       capture: ANY_OBJECT,
+      postActionObservation: ANY_OBJECT,
       consumedSurfaceReceipt: ANY_OBJECT,
       postActionObservationRequired: { type: "boolean" },
     }, ["status", "provider", "action", "result", "pixelLimitedAction", "execution"]),
@@ -626,7 +635,7 @@ const LEGACY_COMPUTER_USE_MCP_TOOLS = [
   {
     name: "computer.list_state",
     title: "List Computer Use State",
-    description: "Read Computer Use state and discover visible desktop windows. Use foregroundWindow to answer which window is currently frontmost, or use its windowId with computer.request_access. This tool never acquires control.",
+    description: "Read Computer Use state and discover desktop windows plus opaque application tokens. For an application-level request, pass the matching applicationToken to computer.acquire so the Host restores and selects the primary window even when only auxiliary windows are visible. Use foregroundWindow only to answer which window is currently frontmost. This tool never acquires control.",
     annotations: { phase: "1.3", readOnlyHint: true },
     inputSchema: {
       type: "object",
@@ -817,7 +826,7 @@ const acquireTool = {
   ...byLegacyName("computer.request_access"),
   name: "computer.acquire",
   title: "Acquire Computer Access",
-  description: "Acquire a Gateway-managed controller lease for one explicit or foreground window. Repeating the call from the same Agent reuses an equivalent active lease or safely retargets it when the foreground window changes. If the requested app is minimized to its tray or has no window, call computer.observe mode=\"state\" and acquire its opaque applicationToken to restore or launch it without shell commands.",
+  description: "Acquire a bounded lease and return an initial semantic observation. With no selector, the Host returns fresh discovery; retry with applicationToken or windowId. If initialObservation resolves the decision, act or release without another observe. For application tasks use applicationToken to restore a tray-minimized primary window instead of an auxiliary window. Use target=\"foreground\" only when intended. An equivalent lease is reused.",
   _meta: Object.freeze({
     ...semanticCapabilityMeta({
     summary: "Establish bounded control of a local graphical application window so it can be observed or operated for the user's requested outcome.",
@@ -837,7 +846,7 @@ const acquireTool = {
 const observeTool = {
   name: "computer.observe",
   title: "Observe Computer",
-  description: "Read desktop state or capture semantic, screenshot, OCR, and changed-region observations through one bounded interface. A locked or secure Windows input desktop is a terminal blocker: ask the user to unlock and do not acquire, perceive, or act through it. Start with semantic; when pixels are needed the Host automatically evaluates screenshot change, runs changed-region or window OCR within a short local budget, and only permits the image-understanding model for an explicit unresolved layout, icon, or complex visual question. Repeating the same visual request on an unchanged screenshot is suppressed. OCR can ground only an explicit activate-recognized-text click; its bounds and interactionPoint describe glyph geometry rather than parent-control geometry. Never use an OCR point to focus an editable field, select a containing row, type text, or ground a coordinate press_key. For a custom-drawn editable surface, capture a fresh screenshot and set visualQuestion to the concrete layout, focus, control, or state question that remains unresolved after structured observation. The Host securely runs the configured image-understanding model inside the same observation transaction and returns pixel-grounded visual evidence; do not call a second media tool for this screenshot. Screenshot, capture-window, and OCR observations return an observationId, a single-use surfaceReceipt, coordinateSpace, and zero-based coordinateBounds. Copy projected image coordinates unchanged into computer.act; the Host applies the declared screenshot-to-native transform. Every observation authorizes at most one action, so observe immediately after each action. Artifact paths are connector-private and must not be passed to unrelated file or media tools.",
+    description: "Discover desktop state or inspect the leased window using semantic, screenshot/OCR, changed-region, or visual evidence. State lists active, visible, and recoverable applications; include installed applications only to launch a stopped target. A locked input desktop is terminal. Reacquire from fresh state each new turn. Start semantic and stop observing when it already resolves the next decision. Use screenshot/OCR only for missing text or geometry. Use visual once only for a remaining layout, icon, or complex-scene ambiguity; ask all facts in one visualQuestion. Unchanged pixels do not prove failure, and proven state needs no reconfirmation. OCR elements are observationOnly glyph geometry, never action targets. Each observation returns a single-use surfaceReceipt; observe after every action. Copy image coordinates unchanged to computer.act. Artifact paths are private.",
   _meta: semanticCapabilityMeta({
     summary: "Inspect visible state in local graphical applications using window discovery, semantic elements, screenshots, OCR, or visual differences.",
     scenarios: [
@@ -854,18 +863,25 @@ const observeTool = {
     type: "object",
     required: ["mode"],
     properties: {
-      mode: { type: "string", enum: ["state", "semantic", "screenshot", "capture-window", "ocr-region", "diff"] },
+      mode: { type: "string", enum: ["state", "semantic", "screenshot", "visual", "capture-window", "ocr-region", "diff"] },
+      includeInstalled: {
+        type: "boolean",
+        description: "State only. Include stopped installed applications when the target is otherwise absent.",
+      },
       visualQuestion: {
         type: "string",
         maxLength: 1200,
-        description: "Optional natural-language question for screenshot or capture-window. The Host answers it with the configured image-understanding model in the same observation result and projects grounding into this observation's pixel coordinate space.",
+        description: "Visual only. Ask one unresolved layout/icon/scene question; combine every needed fact and editable targetBounds in this single request.",
       },
       titlePart: { type: "string" },
       outputPath: { type: "string" },
       imagePath: { type: "string" },
       baselinePath: { type: "string" },
       changedPath: { type: "string" },
-      crop: BOX_SCHEMA,
+      crop: {
+        ...BOX_SCHEMA,
+        description: "Optional fresh window-local crop for a fully local OCR or visual question.",
+      },
       languages: { type: "array", items: { type: "string" } },
       threshold: { type: "number" },
       padding: { type: "number" },
@@ -877,10 +893,31 @@ const observeTool = {
   outputSchema: outputSchema({
     status: { type: "string" },
     mode: { type: "string" },
+    outcome: { type: "string" },
     requestedMode: {
       type: "string",
-      enum: ["screenshot"],
+      enum: ["screenshot", "visual"],
       description: "The caller-requested perception mode when the Host safely satisfies it through a lower-latency equivalent observation.",
+    },
+    executionControl: {
+      type: "object",
+      required: ["status", "scope", "retryable", "allowedNextTools", "reason", "nextAction"],
+      properties: {
+        status: { type: "string", enum: ["blocked"] },
+        scope: { type: "string", enum: ["turn", "interaction-step"] },
+        retryable: { type: "boolean", enum: [false] },
+        allowedNextTools: {
+          type: "array",
+          items: { type: "string" },
+          minItems: 1,
+          uniqueItems: true,
+        },
+        reason: { type: "string" },
+        observationCount: { type: "number", minimum: 0 },
+        observationLimit: { type: "number", minimum: 1 },
+        nextAction: { type: "string" },
+      },
+      additionalProperties: false,
     },
     perceptionRouting: {
       type: "object",
@@ -888,7 +925,7 @@ const observeTool = {
       properties: {
         selectedMode: {
           type: "string",
-          enum: ["semantic", "window-ocr", "window-ocr-baseline-retry", "changed-region-ocr", "unchanged-frame"],
+          enum: ["semantic", "semantic-fallback-existing-screenshot", "window-ocr", "window-ocr-baseline-retry", "changed-region-ocr", "unchanged-frame"],
         },
         avoidedVision: { type: "boolean" },
         sufficient: { type: "boolean" },
@@ -899,19 +936,28 @@ const observeTool = {
         ocrFirst: { type: "boolean" },
         screenshotDigest: { type: "string" },
         frameStatus: { type: "string", enum: ["new-frame", "changed-region", "unchanged"] },
+        visualSceneChanged: { type: "boolean" },
         dirtyRegion: { anyOf: [ANY_OBJECT, { type: "null" }] },
         ocrRegion: { anyOf: [ANY_OBJECT, { type: "null" }] },
+        secondaryOcrRegion: { anyOf: [ANY_OBJECT, { type: "null" }] },
+        visualRegion: { anyOf: [BOX_SCHEMA, { type: "null" }] },
+        suggestedVisualRegion: { anyOf: [BOX_SCHEMA, { type: "null" }] },
+        cropAdjustment: { anyOf: [ANY_OBJECT, { type: "null" }] },
+        stableFrameObservations: { type: "number", minimum: 0 },
         localElementCount: { type: "number", minimum: 0 },
         visualUnderstandingEligible: { type: "boolean" },
         baselineOcrRequired: { type: "boolean" },
         baselineOcrRetry: { type: "boolean" },
         baselineOcrAttempts: { type: "number", minimum: 0 },
         reason: { type: "string" },
+        unchangedInterpretation: ANY_OBJECT,
+        noProgress: ANY_OBJECT,
         ocrError: ANY_OBJECT,
       },
       additionalProperties: false,
     },
     localObservation: ANY_OBJECT,
+    semanticProbe: ANY_OBJECT,
     activeController: { anyOf: [ANY_OBJECT, { type: "null" }] },
     pendingAccessApproval: { anyOf: [ANY_OBJECT, { type: "null" }] },
     pendingRepairApproval: { anyOf: [ANY_OBJECT, { type: "null" }] },
@@ -926,6 +972,11 @@ const observeTool = {
     blocker: ANY_OBJECT,
     auditEvents: ANY_ARRAY,
     observationId: { type: "string" },
+    interactionStep: {
+      type: "number",
+      minimum: 0,
+      description: "Monotonic action-step identity for bounding Host vision retries within this controller lease.",
+    },
     coordinateSpace: {
       type: "string",
       enum: ["window-local"],
