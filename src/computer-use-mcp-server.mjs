@@ -193,6 +193,9 @@ export async function callTool(router, name, args, requestContext) {
         "xiaozhiclaw/visual-understanding": {
           mode: "auto",
           instruction: args.visualQuestion.trim().slice(0, 1200),
+          ...(structuredContent?.perceptionRouting?.visualRegion
+            ? { region: structuredContent.perceptionRouting.visualRegion }
+            : {}),
         },
           } : {}),
       },
@@ -227,20 +230,108 @@ export function renderComputerUseTextResult(value) {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     return `# Computer Use Result\n\n- **value**: ${compactMarkdownValue(value)}`;
   }
+  const modelValue = projectComputerUseModelResult(value);
   const lines = ["# Computer Use Result"];
-  for (const [key, entry] of Object.entries(value)) {
+  for (const [key, entry] of Object.entries(modelValue)) {
     if (Array.isArray(entry)) {
       lines.push("", `## ${key} (${entry.length})`);
       if (entry.length === 0) {
         lines.push("- none");
       } else {
-        for (const item of entry) lines.push(`- ${compactMarkdownValue(item)}`);
+        for (const item of entry) lines.push(`- ${renderModelArrayItem(key, item)}`);
       }
       continue;
     }
     lines.push(`- **${key}**: ${compactMarkdownValue(entry)}`);
   }
   return lines.join("\n");
+}
+
+const MODEL_TEXT_OMITTED_KEYS = new Set([
+  "auditEvents",
+  "coordinateScale",
+  "interactionContract",
+  "surfaceProvenance",
+]);
+
+/**
+ * Keep structuredContent complete for the Host while projecting only the
+ * evidence needed for the next model decision into the text channel.
+ * In particular, state observations must not replay a previous full OCR frame,
+ * and the text-entry contract is stated once instead of being nested under
+ * both the screenshot and local OCR observation.
+ */
+export function projectComputerUseModelResult(value, contextKey = "") {
+  if (Array.isArray(value)) {
+    return value.map((entry) => projectComputerUseModelResult(entry, contextKey));
+  }
+  if (!value || typeof value !== "object") return value;
+  if (contextKey === "lastCapture") return summarizePriorCapture(value);
+
+  const projected = {};
+  for (const [key, entry] of Object.entries(value)) {
+    if (MODEL_TEXT_OMITTED_KEYS.has(key)) continue;
+    if (key === "surfaceReceipt" && entry && typeof entry === "object") {
+      projected.surfaceReceipt = {
+        ...(entry.id !== undefined ? { id: entry.id } : {}),
+        ...(entry.generation !== undefined ? { generation: entry.generation } : {}),
+        ...(entry.observationId !== undefined ? { observationId: entry.observationId } : {}),
+      };
+      continue;
+    }
+    projected[key] = projectComputerUseModelResult(entry, key);
+  }
+
+  if (hasTextEntryContract(value)) {
+    projected.actionGuidance = "OCR bounds are text-only. For a custom editable surface, use one atomic type_text action with the fresh observationId, window-local coordinateSpace, and the full editable targetBounds; then observe again.";
+  }
+  return projected;
+}
+
+function summarizePriorCapture(value) {
+  return {
+    ...(value.status !== undefined ? { status: value.status } : {}),
+    ...(value.observationId !== undefined ? { observationId: value.observationId } : {}),
+    ...(value.source !== undefined ? { source: value.source } : {}),
+    ...(value.window !== undefined ? { window: projectComputerUseModelResult(value.window, "window") } : {}),
+    ...(Array.isArray(value.elements) ? { elementCount: value.elements.length } : {}),
+    ...(value.localObservation && typeof value.localObservation === "object"
+      ? { localElementCount: Array.isArray(value.localObservation.elements) ? value.localObservation.elements.length : 0 }
+      : {}),
+    ...(value.perceptionRouting !== undefined
+      ? { perceptionRouting: projectComputerUseModelResult(value.perceptionRouting, "perceptionRouting") }
+      : {}),
+  };
+}
+
+function hasTextEntryContract(value) {
+  return Boolean(
+    value?.interactionContract?.textEntry
+    || value?.localObservation?.interactionContract?.textEntry
+    || value?.capture?.interactionContract?.textEntry,
+  );
+}
+
+function renderModelArrayItem(key, value) {
+  if (key === "elements" && value && typeof value === "object") {
+    const bounds = value.bounds;
+    const location = bounds && typeof bounds === "object"
+      ? ` @ [${bounds.x},${bounds.y},${bounds.width},${bounds.height}]`
+      : "";
+    const flags = [
+      value.source ? `source=${value.source}` : "",
+      value.observationOnly === true ? "observationOnly" : "",
+    ].filter(Boolean);
+    return `${compactMarkdownValue(value.name ?? value.value ?? "")}${location}${flags.length ? ` ${flags.join(" ")}` : ""}`;
+  }
+  if (key === "applications" && value && typeof value === "object") {
+    return [
+      compactMarkdownValue(value.name ?? ""),
+      value.state ? `state=${value.state}` : "",
+      value.applicationToken ? `token=${value.applicationToken}` : "",
+    ].filter(Boolean).join(" ");
+  }
+  return compactMarkdownValue(value);
 }
 
 function compactMarkdownValue(value) {

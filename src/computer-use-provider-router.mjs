@@ -72,7 +72,7 @@ export class ComputerUseProviderRouter {
     this.pendingAccessApproval = null;
     this.lastCapture = null;
     this.lastScreenshot = null;
-    this.lastVisualUnderstandingDigest = null;
+    this.lastVisualUnderstanding = null;
     this.pendingUnverifiedMutation = null;
     this.lastDesktopState = null;
     this.surfaceGeneration = 0;
@@ -913,6 +913,14 @@ export class ComputerUseProviderRouter {
       ?? "active-window",
     );
     const previous = this.lastScreenshot?.windowId === windowId ? this.lastScreenshot : null;
+    const visualBounds = isCoordinateBox(screenshot.coordinateBounds)
+      ? screenshot.coordinateBounds
+      : Number.isFinite(screenshot.capture?.width) && Number.isFinite(screenshot.capture?.height)
+        ? { x: 0, y: 0, width: screenshot.capture.width, height: screenshot.capture.height }
+        : Number.isFinite(screenshot.window?.bounds?.width) && Number.isFinite(screenshot.window?.bounds?.height)
+          ? { x: 0, y: 0, width: screenshot.window.bounds.width, height: screenshot.window.bounds.height }
+          : null;
+    const requestedCrop = normalizeObservationCrop(args.crop, visualBounds);
     let dirtyRegion = null;
     let unchanged = false;
     if (previous?.path) {
@@ -928,19 +936,9 @@ export class ComputerUseProviderRouter {
       }
     }
 
-    const visualBounds = isCoordinateBox(screenshot.coordinateBounds)
-      ? screenshot.coordinateBounds
-      : isCoordinateBox(screenshot.capture)
-        ? screenshot.capture
-        : screenshot.window?.bounds;
-    const visualSceneStable = unchanged || isVisuallyImmaterialDirtyRegion(dirtyRegion, visualBounds);
-    const repeatedVisualFrame = visualSceneStable
-      && (
-        this.lastVisualUnderstandingDigest === currentDigest
-        || this.lastVisualUnderstandingDigest === previous?.digest
-      );
     const explicitVisualQuestion = typeof args.visualQuestion === "string"
-      && args.visualQuestion.trim() !== "";
+      ? args.visualQuestion.trim()
+      : "";
     const baselineOcrAttempts = previous?.baselineOcrAttempts ?? 0;
     const retryBaselineOcr = unchanged
       && previous?.ocrBaselineReady !== true
@@ -951,7 +949,7 @@ export class ComputerUseProviderRouter {
     let ocrError = null;
 
     if (shouldRunLocalOcr) {
-      ocrRegion = dirtyRegion ? expandRegionToBucket(dirtyRegion) : null;
+      ocrRegion = requestedCrop ?? (dirtyRegion ? expandRegionToBucket(dirtyRegion) : null);
       try {
         const ocr = await this.awaitExternal(ticket, () => this.ocrRegionOperation({
           imagePath,
@@ -984,15 +982,41 @@ export class ComputerUseProviderRouter {
     const nextBaselineOcrAttempts = shouldRunLocalOcr && ocrRegion === null
       ? baselineOcrAttempts + 1
       : baselineOcrAttempts;
-    const visualUnderstandingEligible = explicitVisualQuestion && !repeatedVisualFrame;
-    if (visualUnderstandingEligible) this.lastVisualUnderstandingDigest = currentDigest;
-    if (repeatedVisualFrame) this.lastVisualUnderstandingDigest = currentDigest;
+    const previousOcrElements = Array.isArray(previous?.ocrElements) ? previous.ocrElements : [];
+    const currentOcrElements = Array.isArray(localObservation?.elements) ? localObservation.elements : [];
+    const nonSemanticSparseChange = !unchanged && isNonSemanticSparseDirtyRegion({
+      dirtyRegion,
+      visualBounds,
+      ocrRegion,
+      previousElements: previousOcrElements,
+      currentElements: currentOcrElements,
+    });
+    const visualSceneStable = unchanged
+      || isVisuallyImmaterialDirtyRegion(dirtyRegion, visualBounds)
+      || nonSemanticSparseChange;
+    const repeatedVisualFrame = Boolean(
+      explicitVisualQuestion
+      && visualSceneStable
+      && this.lastVisualUnderstanding?.windowId === windowId
+      && this.lastVisualUnderstanding?.question === explicitVisualQuestion,
+    );
+    const visualUnderstandingEligible = Boolean(explicitVisualQuestion) && !repeatedVisualFrame;
+    if (visualUnderstandingEligible || repeatedVisualFrame) {
+      this.lastVisualUnderstanding = {
+        digest: currentDigest,
+        question: explicitVisualQuestion,
+        windowId,
+      };
+    }
     this.lastScreenshot = {
       path: imagePath,
       digest: currentDigest,
       windowId,
       ocrBaselineReady,
       baselineOcrAttempts: nextBaselineOcrAttempts,
+      ocrElements: shouldRunLocalOcr
+        ? mergeOcrElementSnapshots(previousOcrElements, currentOcrElements, ocrRegion)
+        : previousOcrElements,
     };
 
     return {
@@ -1005,7 +1029,7 @@ export class ComputerUseProviderRouter {
             ? "unchanged-frame"
           : (dirtyRegion ? "changed-region-ocr" : "window-ocr"),
         changedRegionFirst: true,
-        localCropFirst: dirtyRegion !== null,
+        localCropFirst: requestedCrop !== null || dirtyRegion !== null,
         ocrFirst: true,
         baselineOcrRequired: !ocrBaselineReady,
         baselineOcrRetry: retryBaselineOcr,
@@ -1015,6 +1039,7 @@ export class ComputerUseProviderRouter {
         visualSceneChanged: !visualSceneStable,
         dirtyRegion,
         ocrRegion,
+        visualRegion: requestedCrop,
         localElementCount: localElements,
         visualUnderstandingEligible,
         avoidedVision: !visualUnderstandingEligible,
@@ -1253,6 +1278,11 @@ export class ComputerUseProviderRouter {
       throw error;
     }
 
+    // Any delivered mutation invalidates the no-change visual cache. The next
+    // visual question must be allowed to inspect a potentially small but
+    // meaningful state change such as a selected icon or a newly sent message.
+    this.lastVisualUnderstanding = null;
+
     if (outcome === "unverified" && action.kind !== "activate_window") {
       const independentlyVerifiedTextFocus = action.kind === "type_text" && hasVerifiedFocus(result);
       if (!independentlyVerifiedTextFocus) this.activeFocusReceipt = null;
@@ -1378,7 +1408,7 @@ export class ComputerUseProviderRouter {
     this.pendingUnverifiedMutation = null;
     this.activeFocusReceipt = null;
     this.lastScreenshot = null;
-    this.lastVisualUnderstandingDigest = null;
+    this.lastVisualUnderstanding = null;
     this.semanticElementAliases.clear();
     this.currentSemanticElements.clear();
     await this.awaitExternal(ticket, () => this.stopControlVisuals(ticket));
@@ -1408,7 +1438,7 @@ export class ComputerUseProviderRouter {
     this.activeFocusReceipt = null;
     this.lastCapture = null;
     this.lastScreenshot = null;
-    this.lastVisualUnderstandingDigest = null;
+    this.lastVisualUnderstanding = null;
     this.semanticElementAliases.clear();
     this.currentSemanticElements.clear();
     this.pendingRepairApproval = null;
@@ -3049,6 +3079,88 @@ function isVisuallyImmaterialDirtyRegion(region, bounds) {
   const changedArea = hasChangedPixelCount ? region.changedPixels : region.width * region.height;
   if (frameArea <= 0 || changedArea <= 0) return false;
   return changedArea / frameArea <= (hasChangedPixelCount ? 0.001 : 0.005);
+}
+
+function isNonSemanticSparseDirtyRegion({
+  dirtyRegion,
+  visualBounds,
+  ocrRegion,
+  previousElements,
+  currentElements,
+}) {
+  if (!isCoordinateBox(dirtyRegion) || !isCoordinateBox(visualBounds)) return false;
+  if (!Array.isArray(previousElements) || !Array.isArray(currentElements)) return false;
+  const frameArea = visualBounds.width * visualBounds.height;
+  const changedPixels = Number.isFinite(dirtyRegion.changedPixels) ? dirtyRegion.changedPixels : 0;
+  if (frameArea <= 0 || changedPixels <= 0 || changedPixels / frameArea > 0.01) return false;
+  const comparisonRegion = isCoordinateBox(ocrRegion) ? ocrRegion : dirtyRegion;
+  return ocrElementFingerprint(previousElements, comparisonRegion)
+    === ocrElementFingerprint(currentElements, comparisonRegion);
+}
+
+function mergeOcrElementSnapshots(previousElements, currentElements, replacedRegion) {
+  if (!isCoordinateBox(replacedRegion)) return currentElements.map(cloneOcrElementSnapshot);
+  return [
+    ...previousElements
+      .filter((element) => !boxesIntersect(element?.bounds, replacedRegion))
+      .map(cloneOcrElementSnapshot),
+    ...currentElements.map(cloneOcrElementSnapshot),
+  ];
+}
+
+function cloneOcrElementSnapshot(element) {
+  if (!element || typeof element !== "object") return element;
+  return {
+    ...(typeof element.name === "string" ? { name: element.name } : {}),
+    ...(isCoordinateBox(element.bounds) ? { bounds: { ...element.bounds } } : {}),
+  };
+}
+
+function ocrElementFingerprint(elements, region) {
+  return elements
+    .filter((element) => !isCoordinateBox(region) || boxesIntersect(element?.bounds, region))
+    .map((element) => (
+      typeof element?.name === "string"
+        ? normalizeRecognizedUiText(element.name, { languageClass: "mixed" })
+        : ""
+    ))
+    .filter(Boolean)
+    .sort()
+    .join("\u001f");
+}
+
+function boxesIntersect(left, right) {
+  if (!isCoordinateBox(left) || !isCoordinateBox(right)) return false;
+  return left.x < right.x + right.width
+    && left.x + left.width > right.x
+    && left.y < right.y + right.height
+    && left.y + left.height > right.y;
+}
+
+function normalizeObservationCrop(crop, bounds) {
+  if (crop === undefined || crop === null) return null;
+  if (!isCoordinateBox(crop) || !isCoordinateBox(bounds)) {
+    fail("capture.crop_invalid", "The observation crop must be a positive window-local rectangle.");
+  }
+  const normalized = {
+    x: Math.floor(crop.x),
+    y: Math.floor(crop.y),
+    width: Math.ceil(crop.width),
+    height: Math.ceil(crop.height),
+  };
+  if (
+    normalized.x < bounds.x
+    || normalized.y < bounds.y
+    || normalized.x + normalized.width > bounds.x + bounds.width
+    || normalized.y + normalized.height > bounds.y + bounds.height
+  ) {
+    fail("capture.crop_out_of_bounds", "The observation crop must stay inside the latest window-local image bounds.", {
+      crop: normalized,
+      coordinateBounds: bounds,
+      retryable: true,
+    });
+  }
+  return normalized;
 }
 
 function resolveEffectiveDeliveryMode(action, admission, focusReceipt) {

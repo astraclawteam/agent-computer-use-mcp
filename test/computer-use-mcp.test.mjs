@@ -15,6 +15,7 @@ import {
   createPlatformOcrSession,
   main,
   observeComputer,
+  projectComputerUseModelResult,
   projectComputerUseMediaResult,
   renderComputerUseTextResult,
   runComputerUseMcpServer,
@@ -74,6 +75,64 @@ test("application projection keeps semantic state and opaque tokens while droppi
   assert.equal(projected.applicationCount, 1);
   assert.equal(JSON.stringify(projected).includes("4242"), false);
   assert.equal(JSON.stringify(projected).includes("lastUsed"), false);
+});
+
+test("model text projection omits repeated contracts and summarizes prior captures", () => {
+  const interactionContract = {
+    textEntry: {
+      actionKind: "type_text",
+      atomicFocus: true,
+      targetBoundsRequired: true,
+      excludedTargets: Array.from({ length: 20 }, (_, index) => `excluded-${index}`),
+    },
+  };
+  const previousElements = Array.from({ length: 80 }, (_, index) => ({
+    name: `Previous ${index}`,
+    bounds: { x: index, y: index, width: 40, height: 20 },
+    source: "ocr",
+    observationOnly: true,
+  }));
+  const currentElements = [{
+    name: "Current",
+    bounds: { x: 10, y: 20, width: 70, height: 24 },
+    source: "ocr",
+    observationOnly: true,
+  }];
+  const value = {
+    status: "ok",
+    lastCapture: {
+      status: "ok",
+      observationId: "previous-observation",
+      source: "window-capture",
+      elements: previousElements,
+      localObservation: { elements: previousElements, interactionContract },
+      interactionContract,
+    },
+    observationId: "current-observation",
+    elements: currentElements,
+    interactionContract,
+    localObservation: {
+      observationId: "current-ocr",
+      elements: currentElements,
+      interactionContract,
+    },
+  };
+
+  const projected = projectComputerUseModelResult(value);
+  const rendered = renderComputerUseTextResult(value);
+
+  assert.deepEqual(projected.lastCapture, {
+    status: "ok",
+    observationId: "previous-observation",
+    source: "window-capture",
+    elementCount: 80,
+    localElementCount: 80,
+  });
+  assert.equal(JSON.stringify(projected).includes("excluded-0"), false);
+  assert.equal(JSON.stringify(projected).includes("Previous 0"), false);
+  assert.match(rendered, /"Current" @ \[10,20,70,24\] source=ocr observationOnly/u);
+  assert.match(rendered, /atomic type_text/u);
+  assert.ok(rendered.length < JSON.stringify(value).length / 4);
 });
 
 test("indeterminate desktop actions remain successful MCP calls that require observation", async () => {
@@ -299,6 +358,12 @@ test("screenshot observations return MCP ImageContent without exposing the conne
         source: "window-capture",
         artifact: { path: "C:\\Temp\\agent-computer-use-mcp-private\\window.png", mimeType: "image/png" },
         capture: { path: "C:\\Temp\\agent-computer-use-mcp-private\\window.png", width: 800, height: 600 },
+        perceptionRouting: {
+          selectedMode: "window-ocr",
+          avoidedVision: false,
+          visualUnderstandingEligible: true,
+          visualRegion: { x: 400, y: 300, width: 320, height: 180 },
+        },
       };
     },
     async readOwnedArtifact(filePath) {
@@ -308,6 +373,7 @@ test("screenshot observations return MCP ImageContent without exposing the conne
   }, "computer.observe", {
     mode: "visual",
     visualQuestion: "Locate the search field in the current application window.",
+    crop: { x: 400, y: 300, width: 320, height: 180 },
   });
 
   assert.equal(result.isError, false);
@@ -328,6 +394,12 @@ test("screenshot observations return MCP ImageContent without exposing the conne
     result._meta["xiaozhiclaw/visual-understanding"].instruction,
     "Locate the search field in the current application window.",
   );
+  assert.deepEqual(result._meta["xiaozhiclaw/visual-understanding"].region, {
+    x: 400,
+    y: 300,
+    width: 320,
+    height: 180,
+  });
   assert.doesNotMatch(JSON.stringify(result), /agent-computer-use-mcp-private/u);
 });
 
@@ -519,6 +591,10 @@ test("unchanged screenshot digest suppresses repeated Host vision after local OC
       mode: "screenshot",
       visualQuestion: "Resolve the remaining visual ambiguity.",
     });
+    const third = await router.capture({
+      mode: "screenshot",
+      visualQuestion: "Locate a different control in the same frame.",
+    });
 
     assert.equal(first.perceptionRouting.selectedMode, "window-ocr");
     assert.equal(first.perceptionRouting.ocrFirst, true);
@@ -528,6 +604,9 @@ test("unchanged screenshot digest suppresses repeated Host vision after local OC
     assert.equal(second.perceptionRouting.visualUnderstandingEligible, false);
     assert.equal(second.perceptionRouting.avoidedVision, true);
     assert.equal(second.perceptionRouting.reason, "unchanged-frame-visual-already-requested");
+    assert.equal(third.perceptionRouting.selectedMode, "unchanged-frame");
+    assert.equal(third.perceptionRouting.visualUnderstandingEligible, true);
+    assert.equal(third.perceptionRouting.reason, "explicit-complex-visual-question");
     assert.equal(ocrCalls, 1);
   } finally {
     await router.close();
@@ -596,7 +675,7 @@ test("caret-sized frame changes do not trigger repeated Host vision", async () =
     });
     const second = await router.capture({
       mode: "screenshot",
-      visualQuestion: "Read the same unchanged layout again.",
+      visualQuestion: "Resolve the layout ambiguity.",
     });
 
     assert.equal(first.perceptionRouting.visualUnderstandingEligible, true);
@@ -606,6 +685,89 @@ test("caret-sized frame changes do not trigger repeated Host vision", async () =
       false,
       JSON.stringify(second.perceptionRouting),
     );
+    assert.equal(second.perceptionRouting.visualUnderstandingEligible, false);
+    assert.equal(second.perceptionRouting.reason, "unchanged-frame-visual-already-requested");
+  } finally {
+    await router.close();
+    await rm(artifactRoot, { recursive: true, force: true });
+  }
+});
+
+test("sparse animated pixels with unchanged OCR semantics do not repeat the same Host vision question", async () => {
+  const { ComputerUseProviderRouter } = await import("../src/computer-use-provider-router.mjs");
+  const artifactRoot = await mkdtemp(join(tmpdir(), "computer-use-animation-suppression-"));
+  const baselineCanvas = createCanvas(400, 300);
+  const baselineContext = baselineCanvas.getContext("2d");
+  baselineContext.fillStyle = "#ffffff";
+  baselineContext.fillRect(0, 0, 400, 300);
+  const changedCanvas = createCanvas(400, 300);
+  const changedContext = changedCanvas.getContext("2d");
+  changedContext.fillStyle = "#ffffff";
+  changedContext.fillRect(0, 0, 400, 300);
+  changedContext.fillStyle = "#000000";
+  changedContext.fillRect(30, 30, 12, 12);
+  changedContext.fillRect(330, 230, 12, 12);
+  const frames = [baselineCanvas.toBuffer("image/png"), changedCanvas.toBuffer("image/png")];
+  const router = new ComputerUseProviderRouter({
+    artifactRoot,
+    ocrSession: {
+      async start() {},
+      async recognize() {
+        return {
+          status: "ok",
+          items: [{
+            text: "Stable label",
+            confidence: 0.99,
+            bounds: { x: 100, y: 100, width: 90, height: 20 },
+          }],
+        };
+      },
+      async close() {},
+    },
+    driver: {
+      async findWindow() {
+        return {
+          windowId: "window-animation",
+          title: "Animated Surface",
+          pid: 405,
+          bounds: { x: 0, y: 0, width: 400, height: 300 },
+        };
+      },
+      async capture() {
+        return { observationId: "semantic-empty", elements: [] };
+      },
+      async captureScreenshot({ outputPath }) {
+        await writeFile(outputPath, frames.shift() ?? changedCanvas.toBuffer("image/png"));
+        return {
+          status: "ok",
+          path: outputPath,
+          width: 400,
+          height: 300,
+          window: {
+            id: "window-animation",
+            title: "Animated Surface",
+            pid: 405,
+            bounds: { x: 0, y: 0, width: 400, height: 300 },
+          },
+        };
+      },
+    },
+  });
+
+  try {
+    await router.requestAccess({ titlePart: "Animated Surface", tier: "observe" });
+    const first = await router.capture({
+      mode: "screenshot",
+      visualQuestion: "Resolve the current layout ambiguity.",
+    });
+    const second = await router.capture({
+      mode: "screenshot",
+      visualQuestion: "Resolve the current layout ambiguity.",
+    });
+
+    assert.equal(first.perceptionRouting.visualUnderstandingEligible, true);
+    assert.ok(second.perceptionRouting.dirtyRegion.changedPixels > 120);
+    assert.equal(second.perceptionRouting.visualSceneChanged, false);
     assert.equal(second.perceptionRouting.visualUnderstandingEligible, false);
     assert.equal(second.perceptionRouting.reason, "unchanged-frame-visual-already-requested");
   } finally {
@@ -766,6 +928,76 @@ test("changed screenshots run cropped changed-region OCR before Host vision", as
     assert.deepEqual(ocrRequests[1].crop, second.perceptionRouting.ocrRegion);
     assert.equal(ocrRequests[1].timeoutMs, 5_000);
     assert.equal(second.perceptionRouting.visualUnderstandingEligible, true);
+  } finally {
+    await router.close();
+    await rm(artifactRoot, { recursive: true, force: true });
+  }
+});
+
+test("explicit visual crops drive local OCR and Host visual region metadata", async () => {
+  const { ComputerUseProviderRouter } = await import("../src/computer-use-provider-router.mjs");
+  const artifactRoot = await mkdtemp(join(tmpdir(), "computer-use-explicit-visual-crop-"));
+  const canvas = createCanvas(640, 480);
+  const context = canvas.getContext("2d");
+  context.fillStyle = "#ffffff";
+  context.fillRect(0, 0, 640, 480);
+  const png = canvas.toBuffer("image/png");
+  const ocrRequests = [];
+  const router = new ComputerUseProviderRouter({
+    artifactRoot,
+    ocrSession: {
+      async start() {},
+      async recognize(request) {
+        ocrRequests.push(request);
+        return { status: "ok", items: [] };
+      },
+      async close() {},
+    },
+    driver: {
+      async findWindow() {
+        return {
+          windowId: "window-visual-crop",
+          title: "Visual Crop Surface",
+          pid: 505,
+          bounds: { x: 10, y: 20, width: 640, height: 480 },
+        };
+      },
+      async capture() {
+        return { observationId: "semantic-empty", elements: [] };
+      },
+      async captureScreenshot({ outputPath }) {
+        await writeFile(outputPath, png);
+        return {
+          status: "ok",
+          path: outputPath,
+          width: 640,
+          height: 480,
+          window: {
+            id: "window-visual-crop",
+            title: "Visual Crop Surface",
+            pid: 505,
+            bounds: { x: 10, y: 20, width: 640, height: 480 },
+          },
+        };
+      },
+    },
+  });
+
+  try {
+    await router.requestAccess({ titlePart: "Visual Crop Surface", tier: "observe" });
+    const crop = { x: 320, y: 300, width: 280, height: 140 };
+    const observation = await router.capture({
+      mode: "screenshot",
+      requestedMode: "visual",
+      visualQuestion: "Locate the editable surface in this region.",
+      crop,
+    });
+
+    assert.deepEqual(ocrRequests[0].crop, crop);
+    assert.deepEqual(observation.perceptionRouting.ocrRegion, crop);
+    assert.deepEqual(observation.perceptionRouting.visualRegion, crop);
+    assert.equal(observation.perceptionRouting.localCropFirst, true);
+    assert.equal(observation.perceptionRouting.visualUnderstandingEligible, true);
   } finally {
     await router.close();
     await rm(artifactRoot, { recursive: true, force: true });
