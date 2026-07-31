@@ -272,25 +272,19 @@ const LEGACY_COMPUTER_USE_MCP_TOOLS = [
   {
     name: "computer.request_access",
     title: "Request Computer Access",
-    description: "Acquire a Gateway-managed controller lease for a known window. Prefer target=\"foreground\" when the user refers to the current/frontmost window; use computer.list_state first when the target is unknown. Never guess a title. The legacy exact titlePart value \"*\" is accepted only as an alias for the foreground window.",
+    description: "Acquire a Gateway-managed controller lease from trusted discovery evidence. When the user refers to an application, call computer.observe mode=\"state\" first and pass its applicationToken even if auxiliary windows are already listed; the Host will restore and select the primary application window. Use target=\"foreground\" only when the user explicitly means the current OS foreground window. Use windowId only for the exact window returned by the immediately preceding state observation. Never infer, guess, or synthesize a window title.",
     annotations: { phase: "1.3", destructiveHint: false },
     inputSchema: {
       type: "object",
       oneOf: [
-        { required: ["titlePart"] },
         { required: ["windowId"] },
         { required: ["target"] },
         { required: ["applicationToken"] },
       ],
       properties: {
-        titlePart: {
-          type: "string",
-          minLength: 1,
-          description: "Case-insensitive literal title or app-name substring. Prefer target=\"foreground\" for the current window; the legacy exact value \"*\" is accepted as a foreground alias.",
-        },
         windowId: {
           anyOf: [{ type: "string" }, { type: "number" }],
-          description: "Exact window id returned by computer.list_state.",
+          description: "Exact window id returned by the immediately preceding computer.observe mode=\"state\" when the user explicitly targets that specific window rather than an application.",
         },
         target: {
           type: "string",
@@ -300,7 +294,7 @@ const LEGACY_COMPUTER_USE_MCP_TOOLS = [
         applicationToken: {
           type: "string",
           minLength: 1,
-          description: "Opaque application token returned by computer.observe mode=\"state\". Use it to restore or launch an application that currently has no controllable window, then acquire the resulting window. This exact token takes precedence over a redundant titlePart left from an earlier window lookup; target and windowId remain conflicting selectors.",
+          description: "Opaque application token returned by computer.observe mode=\"state\". Prefer this for every application-level request. It restores a minimized or tray application and selects its primary window without substituting an already-open auxiliary surface.",
         },
         tier: { type: "string", enum: ["observe", "full", "admin"] },
         agentId: { type: "string" },
@@ -626,7 +620,7 @@ const LEGACY_COMPUTER_USE_MCP_TOOLS = [
   {
     name: "computer.list_state",
     title: "List Computer Use State",
-    description: "Read Computer Use state and discover visible desktop windows. Use foregroundWindow to answer which window is currently frontmost, or use its windowId with computer.request_access. This tool never acquires control.",
+    description: "Read Computer Use state and discover desktop windows plus opaque application tokens. For an application-level request, pass the matching applicationToken to computer.acquire so the Host restores and selects the primary window even when only auxiliary windows are visible. Use foregroundWindow only to answer which window is currently frontmost. This tool never acquires control.",
     annotations: { phase: "1.3", readOnlyHint: true },
     inputSchema: {
       type: "object",

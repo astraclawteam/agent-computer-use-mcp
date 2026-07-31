@@ -766,11 +766,11 @@ test("agent-computer-use-mcp freezes the local MCP tool contract", () => {
   assert.equal(acquire.annotations.phase, "1.3");
   assert.equal(acquire.inputSchema.required, undefined);
   assert.deepEqual(acquire.inputSchema.oneOf, [
-    { required: ["titlePart"] },
     { required: ["windowId"] },
     { required: ["target"] },
     { required: ["applicationToken"] },
   ]);
+  assert.equal(acquire.inputSchema.properties.titlePart, undefined);
   assert.deepEqual(acquire.inputSchema.properties.target.enum, ["foreground"]);
   assert.equal(acquire.inputSchema.properties.applicationToken.type, "string");
   assert.deepEqual(acquire._meta["xiaozhiclaw/resourceLifecycle"], {
