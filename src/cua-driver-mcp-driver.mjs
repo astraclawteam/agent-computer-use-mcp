@@ -161,7 +161,11 @@ export class CuaDriverMcpDriver {
           includeForeground: false,
         }))
           .filter((window) => candidateProcessIds.has(window.pid))
-          .sort(compareWindowControllability);
+          .sort((left, right) => compareApplicationWindowControllability(
+            left,
+            right,
+            { name },
+          ));
         for (const existingWindow of existingWindows) {
           const activation = await this.activateWindowResources(ticket, existingWindow);
           if (activation.verified === true) {
@@ -188,7 +192,11 @@ export class CuaDriverMcpDriver {
               includeForeground: false,
             }))
               .filter((window) => candidateProcessIds.has(window.pid))
-              .sort(compareWindowControllability);
+              .sort((left, right) => compareApplicationWindowControllability(
+                left,
+                right,
+                { name },
+              ));
           }
           if (restoredWindows.length > 0) {
             return {
@@ -427,17 +435,19 @@ export class CuaDriverMcpDriver {
         window_id: window.windowId,
       });
       this.assertWorkTicket(ticket);
-      const driverConfirmed = activation?.landed_on_target === true
-        || (
-          activation?.landed_on_target !== false
-          && sameNativeWindowId(activation?.now_fg_hwnd, window.windowId)
-        );
+      const foregroundWindowId = await this.foregroundWindowProbe();
+      this.assertWorkTicket(ticket);
+      const driverConfirmed = activation?.landed_on_target !== false
+        && sameNativeWindowId(foregroundWindowId, window.windowId);
       if (driverConfirmed) {
         return {
           status: "ok",
           effect: "applied",
           verified: true,
-          activation,
+          activation: {
+            ...activation,
+            verified_fg_hwnd: foregroundWindowId,
+          },
           foregroundWindow: {
             ...window,
             isForeground: true,
@@ -1107,6 +1117,20 @@ function compareWindowControllability(left, right) {
   if (areaDifference !== 0) return areaDifference;
   if (left.isOnScreen !== right.isOnScreen) return left.isOnScreen ? -1 : 1;
   return compareWindowZOrder(left, right);
+}
+
+function compareApplicationWindowControllability(left, right, { name } = {}) {
+  const expectedName = normalizeApplicationIdentity(name);
+  const leftIdentityMatch = expectedName !== ""
+    && normalizeApplicationIdentity(left.title) === expectedName;
+  const rightIdentityMatch = expectedName !== ""
+    && normalizeApplicationIdentity(right.title) === expectedName;
+  if (leftIdentityMatch !== rightIdentityMatch) return leftIdentityMatch ? -1 : 1;
+  return compareWindowControllability(left, right);
+}
+
+function normalizeApplicationIdentity(value) {
+  return String(value ?? "").normalize("NFKC").trim().toLocaleLowerCase();
 }
 
 function boundedWindowArea(window) {

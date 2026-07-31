@@ -2,6 +2,12 @@
 
 All notable changes to `agent-computer-use-mcp` are tracked here.
 
+## 0.0.25
+
+- Prefer an application's exact identity-matched primary window over larger auxiliary or custom-drawn surfaces.
+- Verify every foreground transition against the independent native foreground handle instead of trusting a driver success flag.
+- Keep tray restoration fail-closed when an application surface cannot actually become the system foreground window.
+
 ## 0.0.24
 
 - Preserve every running process identity for one executable so multi-process desktop applications remain one semantic application.
