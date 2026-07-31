@@ -285,6 +285,13 @@ export function projectComputerUseModelResult(value, contextKey = "") {
   if (hasTextEntryContract(value)) {
     projected.actionGuidance = "OCR bounds are text-only. For a custom editable surface, use one atomic type_text action with the fresh observationId, window-local coordinateSpace, and the full editable targetBounds; then observe again.";
   }
+  if (
+    value.status === "idle"
+    && Array.isArray(value.applications)
+    && Array.isArray(value.windows)
+  ) {
+    projected.controlGuidance = "Before semantic, screenshot, OCR, or visual observation of an application window, call computer.acquire with the matching fresh applicationToken. State discovery itself never grants a controller lease.";
+  }
   return projected;
 }
 

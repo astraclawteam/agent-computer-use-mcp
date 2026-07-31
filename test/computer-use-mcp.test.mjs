@@ -35,6 +35,18 @@ test("model-facing MCP text uses compact Markdown while structuredContent stays 
       { windowId: 7, title: "Example", isForeground: true },
       { windowId: 8, title: "Background", isForeground: false },
     ],
+    applications: [
+      {
+        applicationToken: "application-example",
+        name: "Example",
+        state: "visible",
+        running: true,
+        pid: 4242,
+        kind: "desktop",
+        lastUsed: "2026-07-31T00:00:00.000Z",
+        internalMetadata: { source: "native-process-enumeration", diagnostics: "not model facing" },
+      },
+    ],
   };
   const result = await callTool({
     async listState() {
@@ -44,11 +56,9 @@ test("model-facing MCP text uses compact Markdown while structuredContent stays 
 
   assert.match(result.content[0].text, /^# Computer Use Result\n/u);
   assert.match(result.content[0].text, /## windows \(2\)/u);
+  assert.match(result.content[0].text, /call computer\.acquire/u);
   assert.equal(result.structuredContent.foregroundWindow.title, "Example");
-  assert.ok(
-    result.content[0].text.length < JSON.stringify(result.structuredContent, null, 2).length,
-    "compact Markdown should be smaller than the former pretty-JSON projection",
-  );
+  assert.doesNotMatch(result.content[0].text, /internalMetadata|native-process-enumeration/u);
   assert.equal(renderComputerUseTextResult(null), "# Computer Use Result\n\n- **value**: null");
 });
 
