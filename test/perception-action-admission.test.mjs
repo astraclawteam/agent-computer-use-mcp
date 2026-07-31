@@ -1473,6 +1473,96 @@ test("possibly-applied text requires a fresh observation before any replay or co
   assert.deepEqual(calls.map((call) => call.method), ["typeText", "capture", "pressKey"]);
 });
 
+test("fresh OCR confirmation restores a limited focus continuation after coordinate text entry", async (t) => {
+  const calls = [];
+  const router = new ComputerUseProviderRouter({
+    driver: {
+      async typeText(args) {
+        calls.push({ method: "typeText", args });
+        return {
+          status: "ok",
+          effect: "possibly_applied",
+          verified: false,
+        };
+      },
+      async capture() {
+        calls.push({ method: "capture" });
+        return observation({
+          observationId: "obs-after-unicode-write",
+          source: "ocr",
+          mode: "ocr",
+          expiresAt: Date.now() + 5_000,
+          elements: [{
+            elementToken: "ocr-written-value",
+            role: "text",
+            name: "宋鹏",
+            value: "宋鹏",
+            actions: ["click"],
+            source: "ocr",
+            bounds: { x: 100, y: 82, width: 42, height: 24 },
+            sourceRegion: { x: 100, y: 82, width: 42, height: 24 },
+          }],
+        });
+      },
+      async pressKey(args) {
+        calls.push({ method: "pressKey", args });
+        return { status: "ok", verified: true };
+      },
+    },
+  });
+  t.after(() => router.close());
+  router.activeController = {
+    controllerId: "controller-1",
+    tier: "full",
+    window: {
+      id: "window-1",
+      windowId: "window-1",
+      title: "Fixture",
+      pid: 100,
+      bounds: { width: 960, height: 720 },
+    },
+    expiresAt: new Date(Date.now() + 10_000).toISOString(),
+    expiresAtMs: Date.now() + 10_000,
+  };
+  router.lastCapture = router.createActionObservation({
+    ...observation({
+      source: "window-capture",
+      expiresAt: Date.now() + 5_000,
+      capture: { width: 960, height: 720 },
+    }),
+    elements: [],
+  });
+
+  const typed = await router.act({
+    action: {
+      kind: "type_text",
+      observationId: router.lastCapture.observationId,
+      coordinateSpace: "window-local",
+      x: 200,
+      y: 100,
+      value: "宋鹏",
+      textMode: "replace-all",
+    },
+  });
+  assert.equal(typed.outcome, "unverified");
+
+  const observed = await router.capture({ mode: "semantic" });
+  assert.equal(observed.mutationVerification.status, "confirmed");
+  assert.equal(observed.mutationVerification.method, "exact-observed-value-near-grounded-target");
+  assert.equal(observed.focusReceipt.status, "verified");
+  assert.equal(router.pendingUnverifiedMutation, null);
+
+  const pressed = await router.act({
+    action: {
+      kind: "press_key",
+      key: "return",
+      focusReceiptId: observed.focusReceipt.id,
+    },
+  });
+  assert.equal(pressed.status, "ok");
+  assert.deepEqual(calls.map((call) => call.method), ["typeText", "capture", "pressKey"]);
+});
+
 function observation(overrides = {}) {
   return {
     observationId: "obs-1",
