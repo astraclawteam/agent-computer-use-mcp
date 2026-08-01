@@ -1633,7 +1633,13 @@ export class ComputerUseProviderRouter {
               }
             : {}),
           freshSurfaceReceiptId: actionResult.capture?.surfaceReceipt?.id ?? null,
-          nextAction: "Use this fresh local post-action observation before requesting another screenshot. Request Host vision only if OCR and change metadata leave a concrete layout, icon, or complex-scene ambiguity.",
+          nextAction: "This capture is the fresh post-action observation; do not call computer.observe merely to refresh it. If a focused edit needs a separate commit or navigation key before dependent UI appears, use the returned verified focusReceipt for one press_key action without re-clicking or retyping. Request Host vision only for one remaining layout, icon, or complex-scene ambiguity.",
+        };
+        actionResult.postActionObservationRequired = false;
+        actionResult.result = {
+          ...actionResult.result,
+          verificationRequired: "satisfied_by_post_action_capture",
+          nextAction: actionResult.postActionObservation.nextAction,
         };
         if (action.kind === "type_text"
           && actionResult.capture?.mutationVerification?.status === "confirmed") {
@@ -1651,6 +1657,7 @@ export class ComputerUseProviderRouter {
             },
           };
           actionResult.postActionObservation.nextAction = "Text entry is already confirmed by a fresh exact OCR value that was absent before the action. Do not observe or type it again; continue with the next distinct action using the issued focus receipt when needed.";
+          actionResult.result.nextAction = actionResult.postActionObservation.nextAction;
         }
       }
       if (this.activeFocusReceipt) {

@@ -415,7 +415,7 @@ const LEGACY_COMPUTER_USE_MCP_TOOLS = [
   {
     name: "computer.act",
     title: "Act On Computer",
-    description: "Execute one action from the latest single-use surfaceReceipt and verify its visible effect. Prefer semantic elementToken. For pixels use fresh screenshot targetBounds; OCR glyphs cannot ground actions. Prefer atomic type_text. A custom editable may use a screenshot-grounded focus-editable click, then only its verified focusReceipt. Use replace-all for an exact value and insert for intentional insertion. Text input is incremental so search, filter, autocomplete, and draft controls receive native edit events. Exclude borders, icons, adjacent controls, and occlusions. Copy window-local coordinates unchanged; finish only after the requested transition is observed.",
+    description: "Act once from the latest single-use surfaceReceipt. Prefer semantic elementToken. Pixels require fresh screenshot targetBounds; OCR glyphs never ground actions. For text use one type_text (replace-all exact; insert intentional). Custom editable: screenshot-grounded focus-editable click, then verified focusReceipt. Text is incremental. Consume an embedded fresh post-action capture instead of observing again; use its verified focusReceipt for one commit or navigation key without re-click or retype. Exclude borders, icons, adjacent controls, and occlusions. Copy window-local coordinates unchanged; finish only after the requested transition is observed.",
     annotations: { phase: "1.3", destructiveHint: true },
     inputSchema: {
       type: "object",

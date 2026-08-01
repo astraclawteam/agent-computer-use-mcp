@@ -2228,6 +2228,7 @@ test("indeterminate pixel text entry automatically returns target-local OCR evid
   assert.equal(captures[0].includeChangedRegionAlongsideCrop, undefined);
   assert.equal(captures[0].effectHintRegion, undefined);
   assert.equal(typed.capture.observationId, "post-action-observation");
+  assert.equal(typed.postActionObservationRequired, false);
   assert.equal(typed.postActionObservation.source, "host-local-ocr");
   assert.equal(typed.postActionObservation.regionSource, "action-target");
   assert.equal(typed.postActionObservation.effectRegionSource, "changed-region");
@@ -2239,6 +2240,9 @@ test("indeterminate pixel text entry automatically returns target-local OCR evid
     typed.postActionObservation.verificationRegion,
     { x: 300, y: 530, width: 556, height: 192 },
   );
+  assert.equal(typed.result.verificationRequired, "satisfied_by_post_action_capture");
+  assert.match(typed.result.nextAction, /do not call computer\.observe merely to refresh it/u);
+  assert.match(typed.result.nextAction, /verified focusReceipt/u);
 });
 
 test("fresh exact OCR text promotes coordinate entry without another observe or retry", async (t) => {
