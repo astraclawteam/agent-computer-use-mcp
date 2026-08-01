@@ -414,7 +414,7 @@ const LEGACY_COMPUTER_USE_MCP_TOOLS = [
   {
     name: "computer.act",
     title: "Act On Computer",
-    description: "Execute one action from the latest single-use surfaceReceipt and verify its visible effect. Prefer semantic elementToken. For pixels use fresh screenshot targetBounds; OCR glyphs cannot ground actions. Prefer atomic type_text. A custom editable may use a screenshot-grounded focus-editable click, then only its verified focusReceipt. Use replace-all for an exact value, insert for intentional insertion; incremental for reactive controls and commit for one transaction. Exclude borders, icons, adjacent controls, and occlusions. Copy window-local coordinates unchanged; finish only after the requested transition is observed.",
+    description: "Execute one action from the latest single-use surfaceReceipt and verify its visible effect. Prefer semantic elementToken. For pixels use fresh screenshot targetBounds; OCR glyphs cannot ground actions. Prefer atomic type_text. A custom editable may use a screenshot-grounded focus-editable click, then only its verified focusReceipt. Use replace-all for an exact value and insert for intentional insertion. Text input is incremental so search, filter, autocomplete, and draft controls receive native edit events. Exclude borders, icons, adjacent controls, and occlusions. Copy window-local coordinates unchanged; finish only after the requested transition is observed.",
     annotations: { phase: "1.3", destructiveHint: true },
     inputSchema: {
       type: "object",
@@ -567,8 +567,8 @@ const LEGACY_COMPUTER_USE_MCP_TOOLS = [
             },
             inputBehavior: {
               type: "string",
-              enum: ["incremental", "commit"],
-              description: "Required for type_text. Use incremental when each edit must update the UI; use commit for one exact clipboard-restored transaction.",
+              enum: ["incremental"],
+              description: "Required for type_text. Emits native per-edit events so custom controls react without a paste-only shortcut.",
             },
             key: {
               type: "string",

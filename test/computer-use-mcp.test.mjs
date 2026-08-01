@@ -306,9 +306,47 @@ test("computer.acquire recovers a stale application token with fresh discovery i
   assert.equal(result.isError, false);
   assert.equal(listStateCalls, 1);
   assert.equal(result.structuredContent.status, "target_required");
-  assert.equal(result.structuredContent.recoveryReason, "application-token-stale");
   assert.equal(result.structuredContent.applications[0].applicationToken, "application-fresh");
   assert.match(result.content[0].text, /application-fresh/u);
+});
+
+test("computer.act unwraps one structurally duplicated action envelope", async () => {
+  let received;
+  const result = await callTool({
+    async act(args) {
+      received = args;
+      return {
+        status: "ok",
+        provider: "gateway-managed",
+        action: "type_text",
+        result: { status: "ok", verified: true },
+        pixelLimitedAction: true,
+        outcome: "applied",
+        effectiveDeliveryMode: "foreground",
+        execution: {
+          schemaVersion: 1,
+          targetPath: "observation-coordinate",
+          providerPath: "windows-unicode-input",
+          deliveryMode: "foreground",
+          fallback: { used: false, reason: null },
+        },
+      };
+    },
+  }, "computer.act", {
+    action: {
+      action: {
+        kind: "type_text",
+        value: "宋",
+        textMode: "replace-all",
+        inputBehavior: "incremental",
+      },
+    },
+  });
+
+  assert.equal(result.isError, false);
+  assert.equal(received.action.kind, "type_text");
+  assert.equal(received.action.value, "宋");
+  assert.equal(received.action.action, undefined);
 });
 
 test("model-facing OCR geometry is compressed into visual rows without losing structured tokens", () => {
@@ -2122,7 +2160,7 @@ test("agent-computer-use-mcp freezes the local MCP tool contract", () => {
   assert.deepEqual(act.inputSchema.properties.action.properties.coordinateSpace.enum, ["window-local", "screen"]);
   assert.deepEqual(
     act.inputSchema.properties.action.properties.inputBehavior.enum,
-    ["incremental", "commit"],
+    ["incremental"],
   );
   assert.deepEqual(
     act.inputSchema.properties.action.allOf[2].then.required,

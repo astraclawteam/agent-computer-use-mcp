@@ -90,6 +90,7 @@ export function createPlatformOcrSession(platformRuntime, options = {}) {
 }
 
 export async function callTool(router, name, args, requestContext) {
+  if (name === "computer.act") args = normalizeComputerActArgs(args);
   let structuredContent;
   try {
     if (name === "computer.health") {
@@ -1281,9 +1282,7 @@ export async function acquireComputer(router, args, requestContext) {
     access = await router.requestAccess({ ...args, requestContext });
   } catch (error) {
     if (error instanceof ComputerUseMcpError && error.code === "application.token_invalid") {
-      return freshAcquisitionTargets(router, {
-        staleApplicationToken: args.applicationToken,
-      });
+      return freshAcquisitionTargets(router);
     }
     throw error;
   }
@@ -1310,7 +1309,7 @@ export async function acquireComputer(router, args, requestContext) {
   }
 }
 
-async function freshAcquisitionTargets(router, detail = {}) {
+async function freshAcquisitionTargets(router) {
   if (typeof router.listState !== "function") {
     throw new ComputerUseMcpError(
       "window.selector_required",
@@ -1327,13 +1326,25 @@ async function freshAcquisitionTargets(router, detail = {}) {
     foregroundWindow: state?.foregroundWindow ?? null,
     windows: Array.isArray(state?.windows) ? state.windows : [],
     applications: Array.isArray(state?.applications) ? state.applications : [],
-    ...(detail.staleApplicationToken === undefined ? {} : {
-      staleApplicationToken: detail.staleApplicationToken,
-      recoveryReason: "application-token-stale",
-    }),
     nextAction: "Select the matching fresh applicationToken or windowId from this result, then call computer.acquire again.",
     startsDesktopControl: false,
     includeUserOverlay: false,
+  };
+}
+
+function normalizeComputerActArgs(args = {}) {
+  const outerAction = args?.action;
+  const nestedAction = outerAction?.action;
+  if (!outerAction || typeof outerAction !== "object" || Array.isArray(outerAction)
+    || typeof outerAction.kind === "string"
+    || !nestedAction || typeof nestedAction !== "object" || Array.isArray(nestedAction)
+    || typeof nestedAction.kind !== "string"
+    || Object.keys(outerAction).some((key) => key !== "action")) {
+    return args;
+  }
+  return {
+    ...args,
+    action: nestedAction,
   };
 }
 
