@@ -498,7 +498,10 @@ test("CuaDriverMcpDriver reasserts foreground immediately before a pixel click",
   ]);
 });
 
-test("CuaDriverMcpDriver captures the exact screenshot coordinate source used by pixel actions", async () => {
+test("CuaDriverMcpDriver captures the exact screenshot coordinate source used by pixel actions", async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), "cua-driver-coordinate-png-"));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const outputPath = join(directory, "window.png");
   const calls = [];
   const driver = new CuaDriverMcpDriver({
     session: "screenshot-coordinate-session",
@@ -507,6 +510,12 @@ test("CuaDriverMcpDriver captures the exact screenshot coordinate source used by
       async callTool(name, args) {
         calls.push({ name, args });
         if (name === "get_window_state") {
+          const header = Buffer.alloc(24);
+          Buffer.from("89504e470d0a1a0a", "hex").copy(header, 0);
+          header.write("IHDR", 12, "ascii");
+          header.writeUInt32BE(954, 16);
+          header.writeUInt32BE(704, 20);
+          await writeFile(args.screenshot_out_file, header);
           return {
             screenshot_file_path: args.screenshot_out_file,
             window: {
@@ -529,7 +538,7 @@ test("CuaDriverMcpDriver captures the exact screenshot coordinate source used by
       pid: 1234,
       bounds: { x: 0, y: 0, width: 1, height: 1 },
     },
-    outputPath: "C:\\controlled\\window.png",
+    outputPath,
   });
 
   assert.deepEqual(calls, [
@@ -540,7 +549,7 @@ test("CuaDriverMcpDriver captures the exact screenshot coordinate source used by
         pid: 1234,
         window_id: 42,
         include_screenshot: true,
-        screenshot_out_file: "C:\\controlled\\window.png",
+        screenshot_out_file: outputPath,
         max_elements: 1,
         max_depth: 1,
         session: "screenshot-coordinate-session",
@@ -552,7 +561,7 @@ test("CuaDriverMcpDriver captures the exact screenshot coordinate source used by
     provider: "cua-driver",
     source: "cua-driver-window-state",
     title: "微信",
-    path: "C:\\controlled\\window.png",
+    path: outputPath,
     method: "cua-driver-get_window_state",
     hwnd: 42,
     x: 447,
@@ -571,7 +580,7 @@ test("CuaDriverMcpDriver captures the exact screenshot coordinate source used by
     },
     coordinateScale: {
       schemaVersion: 1,
-      sourceSpace: "window-local",
+      sourceSpace: "screenshot-pixel",
       actionSpace: "window-local",
       actionTransform: { scaleX: 1, scaleY: 1, offsetX: 0, offsetY: 0 },
       observationPixels: { width: 954, height: 704 },
@@ -750,6 +759,96 @@ test("CuaDriverMcpDriver waits for a bounded delayed screenshot handoff", async 
   assert.equal(capture.width, 640);
   assert.equal(capture.height, 480);
   assert.equal(Buffer.isBuffer(capture.artifactBytes), true);
+});
+
+test("CuaDriverMcpDriver retries once when the driver omits the screenshot artifact", async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), "cua-driver-retry-png-"));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const outputPath = join(directory, "window.png");
+  let screenshotCalls = 0;
+  const driver = new CuaDriverMcpDriver({
+    session: "screenshot-retry-session",
+    client: {
+      async start() {},
+      async callTool(name, args) {
+        if (name !== "get_window_state") return { status: "ok" };
+        screenshotCalls += 1;
+        if (screenshotCalls === 2) {
+          const header = Buffer.alloc(24);
+          Buffer.from("89504e470d0a1a0a", "hex").copy(header, 0);
+          header.write("IHDR", 12, "ascii");
+          header.writeUInt32BE(640, 16);
+          header.writeUInt32BE(480, 20);
+          await writeFile(args.screenshot_out_file, header);
+        }
+        return {
+          screenshot_file_path: args.screenshot_out_file,
+          window: {
+            id: 42,
+            title: "Retry",
+            pid: 1234,
+            bounds: { x: 10, y: 20, width: 642, height: 482 },
+          },
+        };
+      },
+    },
+  });
+
+  const capture = await driver.captureScreenshot({
+    window: {
+      windowId: 42,
+      title: "Retry",
+      pid: 1234,
+      bounds: { x: 10, y: 20, width: 642, height: 482 },
+    },
+    outputPath,
+  });
+
+  assert.equal(screenshotCalls, 2);
+  assert.equal(capture.width, 640);
+  assert.equal(capture.height, 480);
+  assert.equal(Buffer.isBuffer(capture.artifactBytes), true);
+});
+
+test("CuaDriverMcpDriver reports a capture error instead of exposing a missing path", async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), "cua-driver-missing-png-"));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  let screenshotCalls = 0;
+  const driver = new CuaDriverMcpDriver({
+    session: "screenshot-missing-session",
+    client: {
+      async start() {},
+      async callTool(name, args) {
+        if (name !== "get_window_state") return { status: "ok" };
+        screenshotCalls += 1;
+        return {
+          screenshot_file_path: args.screenshot_out_file,
+          window: {
+            id: 42,
+            title: "Missing",
+            pid: 1234,
+            bounds: { x: 10, y: 20, width: 642, height: 482 },
+          },
+        };
+      },
+    },
+  });
+
+  await assert.rejects(
+    driver.captureScreenshot({
+      window: {
+        windowId: 42,
+        title: "Missing",
+        pid: 1234,
+        bounds: { x: 10, y: 20, width: 642, height: 482 },
+      },
+      outputPath: join(directory, "window.png"),
+    }),
+    (error) => error.code === "capture.artifact_missing"
+      && error.detail?.attempts === 2
+      && error.detail?.retryable === true,
+  );
+  assert.equal(screenshotCalls, 2);
 });
 
 test("CuaDriverMcpDriver lists launchable apps and restores one through its private launch path", async () => {

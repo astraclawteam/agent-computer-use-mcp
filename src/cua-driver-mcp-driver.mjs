@@ -440,7 +440,7 @@ export class CuaDriverMcpDriver {
   captureScreenshot({ window, outputPath, timeoutMs = DEFAULT_SCREENSHOT_TIMEOUT_MS }) {
     return this.runWork(async (ticket) => {
       await this.ensureStartedResources(ticket);
-      const result = await this.client.callTool("get_window_state", {
+      const request = {
         pid: window.pid,
         window_id: window.windowId,
         include_screenshot: true,
@@ -451,14 +451,34 @@ export class CuaDriverMcpDriver {
         max_elements: 1,
         max_depth: 1,
         session: this.session,
-      }, { timeoutMs });
-      this.assertWorkTicket(ticket);
+      };
+      let result;
+      let screenshot;
+      for (let attempt = 0; attempt < 2; attempt += 1) {
+        result = await this.client.callTool("get_window_state", request, { timeoutMs });
+        this.assertWorkTicket(ticket);
+        verifyCaptureWindowIdentity(window, result.window ?? {});
+        screenshot = await readPngArtifact(outputPath, {
+          attempts: attempt === 0 ? 20 : 40,
+        });
+        this.assertWorkTicket(ticket);
+        if (screenshot) break;
+      }
+      if (!screenshot) {
+        const error = new Error("The screenshot driver did not produce a readable PNG artifact after one bounded retry.");
+        error.code = "capture.artifact_missing";
+        error.detail = {
+          windowId: String(window.windowId),
+          processId: window.pid,
+          attempts: 2,
+          retryable: true,
+        };
+        throw error;
+      }
       const resultWindow = result.window ?? {};
       const surfaceProvenance = verifyCaptureWindowIdentity(window, resultWindow);
       const reconciledWindow = reconcileReportedWindow(window, resultWindow);
       const reportedBounds = reconciledWindow.bounds;
-      const screenshot = await readPngArtifact(outputPath);
-      this.assertWorkTicket(ticket);
       const bounds = reportedBounds && screenshot
         ? {
             ...reportedBounds,
@@ -1139,14 +1159,17 @@ function positiveRatio(numerator, denominator) {
     : 1;
 }
 
-async function readPngArtifact(filePath) {
-  for (let attempt = 0; attempt < 50; attempt += 1) {
+async function readPngArtifact(filePath, options = {}) {
+  const attempts = Number.isInteger(options.attempts) && options.attempts > 0
+    ? options.attempts
+    : 50;
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
     try {
       const bytes = await readFile(filePath);
       if (bytes.byteLength < 24
         || bytes.toString("hex", 0, 8) !== "89504e470d0a1a0a"
         || bytes.toString("ascii", 12, 16) !== "IHDR") {
-        if (attempt === 49) return undefined;
+        if (attempt === attempts - 1) return undefined;
         await new Promise((resolve) => setTimeout(resolve, 50));
         continue;
       }
@@ -1154,13 +1177,13 @@ async function readPngArtifact(filePath) {
       const height = bytes.readUInt32BE(20);
       if (!Number.isSafeInteger(width) || width <= 0
         || !Number.isSafeInteger(height) || height <= 0) {
-        if (attempt === 49) return undefined;
+        if (attempt === attempts - 1) return undefined;
         await new Promise((resolve) => setTimeout(resolve, 50));
         continue;
       }
       return { width, height, bytes };
     } catch {
-      if (attempt === 49) return undefined;
+      if (attempt === attempts - 1) return undefined;
       await new Promise((resolve) => setTimeout(resolve, 50));
     }
   }
