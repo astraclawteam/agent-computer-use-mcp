@@ -12,7 +12,7 @@ test("sendWindowsUnicodeText keeps text off process arguments and delivers it th
     return fakeChild({
       onStdin(value, child) {
         stdinText = value;
-        child.stdout.end('{"status":"ok","utf16CodeUnits":5,"clipboardRestored":true,"changeSignalDelivered":true,"focusVerified":true,"deliveryPath":"windows_sendinput_unicode_incremental"}');
+        child.stdout.end('{"status":"ok","utf16CodeUnits":5,"clipboardRestored":true,"changeSignalDelivered":true,"focusVerified":true,"deliveryPath":"windows_sendinput_unicode_ime_neutral"}');
         child.emit("close", 0, null);
       },
     });
@@ -33,7 +33,7 @@ test("sendWindowsUnicodeText keeps text off process arguments and delivers it th
     clipboardRestored: true,
     changeSignalDelivered: true,
     focusVerified: true,
-    deliveryPath: "windows_sendinput_unicode_incremental",
+    deliveryPath: "windows_sendinput_unicode_ime_neutral",
   });
   const payload = JSON.parse(stdinText);
   assert.deepEqual(payload, {
@@ -53,20 +53,21 @@ test("sendWindowsUnicodeText keeps text off process arguments and delivers it th
   assert.equal(bridgeScript.split("[AgentComputerUseIncrementalInput]::Send(").length - 1, 1);
   assert.match(bridgeScript, /SendInput\(/);
   assert.match(bridgeScript, /private const uint KEYEVENTF_UNICODE = 0x0004;/);
+  assert.match(bridgeScript, /ImmAssociateContext\(focusedWindow, IntPtr\.Zero\)/);
+  assert.match(bridgeScript, /finally[\s\S]*ImmAssociateContext\(focusedWindow, previousInputContext\)/);
   assert.match(bridgeScript, /SendChord\(0x11, 0x41\);[\s\S]*SendKey\(0x08\);[\s\S]*foreach \(char codeUnit in text\)/);
-  assert.match(bridgeScript, /SendKey\(0x20\);[\s\S]*SendKey\(0x08\);/);
   assert.equal(JSON.stringify(spawnCalls[0].options).includes("Hello"), false);
   assert.equal(spawnCalls[0].options.windowsHide, true);
   assert.deepEqual(spawnCalls[0].options.stdio, ["pipe", "pipe", "pipe"]);
 });
 
-test("sendWindowsUnicodeText bypasses active IME composition for non-ASCII incremental text", async () => {
+test("sendWindowsUnicodeText suspends active IME composition for non-ASCII incremental text", async () => {
   let encodedBridge = "";
   const spawnProcess = (_command, args) => {
     encodedBridge = args.at(-1);
     return fakeChild({
       onStdin(_value, child) {
-        child.stdout.end('{"status":"ok","utf16CodeUnits":1,"clipboardRestored":true,"changeSignalDelivered":true,"focusVerified":true,"deliveryPath":"windows_clipboard_transaction"}');
+        child.stdout.end('{"status":"ok","utf16CodeUnits":1,"clipboardRestored":true,"changeSignalDelivered":true,"focusVerified":true,"deliveryPath":"windows_sendinput_unicode_ime_neutral"}');
         child.emit("close", 0, null);
       },
     });
@@ -82,12 +83,12 @@ test("sendWindowsUnicodeText bypasses active IME composition for non-ASCII incre
     spawnProcess,
   });
 
-  assert.equal(result.deliveryPath, "windows_clipboard_transaction");
+  assert.equal(result.deliveryPath, "windows_sendinput_unicode_ime_neutral");
   const bridgeScript = Buffer.from(encodedBridge, "base64").toString("utf16le");
-  assert.match(bridgeScript, /PasteUnicode\(/);
-  assert.match(bridgeScript, /foreground != expected/);
+  assert.match(bridgeScript, /AgentComputerUseIncrementalInput/);
   assert.match(bridgeScript, /GetGUIThreadInfo\(/);
-  assert.doesNotMatch(bridgeScript, /AgentComputerUseIncrementalInput/);
+  assert.match(bridgeScript, /ImmAssociateContext\(/);
+  assert.doesNotMatch(bridgeScript, /PasteUnicode\(/);
 });
 
 test("sendWindowsUnicodeText sends replace-all intent through the private stdin payload", async () => {

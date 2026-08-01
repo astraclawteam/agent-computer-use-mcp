@@ -81,6 +81,8 @@ public static class AgentComputerUseIncrementalInput
     [DllImport("user32.dll")] private static extern void keybd_event(byte key, byte scan, uint flags, UIntPtr extraInfo);
     [DllImport("user32.dll", SetLastError = true)]
     private static extern uint SendInput(uint inputCount, INPUT[] inputs, int inputSize);
+	[DllImport("imm32.dll")]
+	private static extern IntPtr ImmAssociateContext(IntPtr window, IntPtr inputContext);
 
     public static int Send(string text, long expectedWindow, uint expectedProcess, bool replaceAll)
     {
@@ -99,23 +101,29 @@ public static class AgentComputerUseIncrementalInput
         if (focusProcess != expectedProcess)
             throw new InvalidOperationException("The focused window does not belong to the approved target process.");
 
-        if (replaceAll)
+        IntPtr focusedWindow = info.hwndFocus;
+        IntPtr previousInputContext = ImmAssociateContext(focusedWindow, IntPtr.Zero);
+        try
         {
-            SendChord(0x11, 0x41);
-            Thread.Sleep(30);
-            SendKey(0x08);
-            Thread.Sleep(50);
+            if (replaceAll)
+            {
+                SendChord(0x11, 0x41);
+                Thread.Sleep(30);
+                SendKey(0x08);
+                Thread.Sleep(50);
+            }
+            foreach (char codeUnit in text)
+            {
+                SendUnicode(codeUnit);
+                Thread.Sleep(18);
+            }
+            Thread.Sleep(350);
         }
-        foreach (char codeUnit in text)
+        finally
         {
-            SendUnicode(codeUnit);
-            Thread.Sleep(8);
+            if (previousInputContext != IntPtr.Zero)
+                ImmAssociateContext(focusedWindow, previousInputContext);
         }
-        Thread.Sleep(75);
-        SendKey(0x20);
-        Thread.Sleep(75);
-        SendKey(0x08);
-        Thread.Sleep(250);
         return text.Length;
     }
 
@@ -162,7 +170,7 @@ $utf16CodeUnits = [AgentComputerUseIncrementalInput]::Send(
     clipboardRestored = $true
     changeSignalDelivered = $true
     focusVerified = $true
-    deliveryPath = "windows_sendinput_unicode_incremental"
+    deliveryPath = "windows_sendinput_unicode_ime_neutral"
 } | ConvertTo-Json -Compress
 `;
 
@@ -484,12 +492,12 @@ export async function sendWindowsUnicodeText(options = {}) {
     );
   }
 
-  // KEYEVENTF_UNICODE is normally ideal for incremental text, but an active
-  // Windows IME can still retain or transform non-ASCII composition in
-  // custom-drawn edit controls. The clipboard transaction bypasses that IME
-  // state while still producing a native paste event and a reversible change
-  // boundary for search, filter, autocomplete, and draft controls.
-  const bridgeScript = inputBehavior === "incremental" && isAsciiText(text)
+  // Incremental text must produce real per-character edit events for search,
+  // filter, and autocomplete controls. Temporarily detach only the verified
+  // focused window's IME context so KEYEVENTF_UNICODE cannot be retained or
+  // transformed as composition, then restore that exact context in finally.
+  // Commit-mode text keeps the clipboard transaction for whole-value drafts.
+  const bridgeScript = inputBehavior === "incremental"
     ? WINDOWS_INCREMENTAL_INPUT_SCRIPT
     : WINDOWS_UNICODE_INPUT_SCRIPT;
   const encodedScript = Buffer.from(bridgeScript, "utf16le").toString("base64");
@@ -559,7 +567,7 @@ export async function sendWindowsUnicodeText(options = {}) {
           || typeof result.clipboardRestored !== "boolean"
           || typeof result.changeSignalDelivered !== "boolean"
           || typeof result.focusVerified !== "boolean"
-          || !["windows_sendinput_unicode_incremental", "windows_clipboard_transaction"].includes(result.deliveryPath)) {
+          || !["windows_sendinput_unicode_ime_neutral", "windows_clipboard_transaction"].includes(result.deliveryPath)) {
           throw new Error("invalid bridge response");
         }
         finish(resolve, {
@@ -608,13 +616,6 @@ function isValidWindowId(value) {
 function isValidProcessId(value) {
   const numeric = Number(value);
   return Number.isSafeInteger(numeric) && numeric > 0 && numeric <= 0xffff_ffff;
-}
-
-function isAsciiText(value) {
-  for (let index = 0; index < value.length; index += 1) {
-    if (value.charCodeAt(index) > 0x7f) return false;
-  }
-  return true;
 }
 
 function unicodeInputError(code, message) {
