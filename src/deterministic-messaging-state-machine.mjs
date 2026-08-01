@@ -2,6 +2,8 @@ import { setTimeout as delay } from "node:timers/promises";
 
 const DEFAULT_TIMEOUT_MS = 5_000;
 const RELEASE_TIMEOUT_MS = 2_000;
+const FAILURE_DECISION_TIMEOUT_MS = 2_000;
+const FAILURE_REOBSERVE_TIMEOUT_MS = 2_000;
 const ACTION_OUTCOMES = new Set(["committed", "not-applied", "indeterminate"]);
 const MUTATING_STEPS = new Set([
   "restore-main-window",
@@ -105,8 +107,16 @@ export class DeterministicMessagingStateMachine {
   #stableCandidateKeys = [];
   #baselineMatchingBubbleCount = 0;
   #sendObservationVersion = null;
+  #decisionPort = null;
 
-  constructor({ host, goal, stepTimeouts = {}, pollIntervalMs = 25, signal } = {}) {
+  constructor({
+    host,
+    goal,
+    decisionPort = null,
+    stepTimeouts = {},
+    pollIntervalMs = 25,
+    signal,
+  } = {}) {
     if (!host || typeof host.observe !== "function" || typeof host.act !== "function"
       || typeof host.release !== "function") {
       throw workflowError({
@@ -139,11 +149,21 @@ export class DeterministicMessagingStateMachine {
         });
       }
     }
+    if (decisionPort !== null
+      && (typeof decisionPort.selectCandidate !== "function"
+        || typeof decisionPort.decideFailure !== "function")) {
+      throw workflowError({
+        code: "workflow.invalid_decision_port",
+        message: "The optional LLM boundary must expose selectCandidate and decideFailure.",
+        outcome: "not-applied",
+      });
+    }
 
     this.#host = host;
     this.#goal = Object.freeze({ query: goal.query, message: goal.message });
     this.#pollIntervalMs = pollIntervalMs;
     this.#stepTimeouts = Object.freeze({ ...stepTimeouts });
+    this.#decisionPort = decisionPort;
     this.#externalSignal = signal;
     if (signal) {
       this.#externalAbortListener = () => this.stop("external-cancel");
@@ -194,6 +214,13 @@ export class DeterministicMessagingStateMachine {
         outcome: this.#inFlightMutation ? "indeterminate" : "not-applied",
       });
       this.#status = error.code === "workflow.cancelled" ? "cancelled" : "failed";
+      if (this.#canAskForFailureDecision(error)) {
+        try {
+          error.recovery = await this.#decideFailure(error);
+        } catch (decisionError) {
+          error.decisionError = serializableError(decisionError);
+        }
+      }
       try {
         await this.#release({ cleanup: true, reason: error.code });
       } catch (releaseError) {
@@ -364,14 +391,41 @@ export class DeterministicMessagingStateMachine {
       ownerId: surface.id,
     });
     const stable = candidates.filter((candidate) => this.#stableCandidateKeys.includes(candidateIdentity(candidate)));
-    const matching = stable.filter((candidate) => normalizeText(elementText(candidate)) === normalizeText(this.#goal.query));
-    if (matching.length !== 1) {
-      throw preconditionError(
-        "select-result",
-        `Expected one stable exact semantic result, observed ${matching.length}.`,
-      );
+    let selected;
+    if (this.#decisionPort) {
+      const candidateMap = new Map(stable.map((candidate, index) => [`candidate:${index}`, candidate]));
+      const selection = await this.#decisionPort.selectCandidate({
+        intent: this.#goal.query,
+        sceneId: before.id,
+        observationVersion: before.observationVersion,
+        candidates: [...candidateMap.entries()].map(([candidateId, candidate]) => ({
+          candidateId,
+          label: elementText(candidate),
+          role: candidate.role,
+          parentRole: surface.role,
+          evidenceSources: uniqueEvidenceSources(candidate),
+        })),
+        signal,
+      });
+      selected = candidateMap.get(selection?.candidateId);
+      if (!selected) {
+        throw preconditionError(
+          "select-result",
+          "The bounded LLM decision did not identify a current stable Host candidate.",
+        );
+      }
+    } else {
+      const matching = stable.filter((candidate) => (
+        normalizeText(elementText(candidate)) === normalizeText(this.#goal.query)
+      ));
+      if (matching.length !== 1) {
+        throw preconditionError(
+          "select-result",
+          `Expected one stable exact semantic result, observed ${matching.length}.`,
+        );
+      }
+      [selected] = matching;
     }
-    const selected = matching[0];
     this.#selectedIdentity = typeof selected.semanticKey === "string" ? selected.semanticKey : null;
     this.#selectedLabel = elementText(selected);
     await this.#act("select-result", {
@@ -622,6 +676,60 @@ export class DeterministicMessagingStateMachine {
     this.#released = true;
     this.#history.push({ step: "release", status: "committed", ...(cleanup ? { cleanup: true } : {}) });
   }
+
+  #canAskForFailureDecision(error) {
+    return this.#decisionPort !== null
+      && error?.name !== "BoundedLlmInteractionError"
+      && error?.code !== "workflow.cancelled"
+      && error?.step !== "release";
+  }
+
+  async #decideFailure(error) {
+    const decision = await abortableStandaloneTimeout(
+      (signal) => this.#decisionPort.decideFailure({
+        failure: {
+          code: error.code,
+          step: error.step ?? this.#currentStep,
+          outcome: error.outcome,
+        },
+        canReobserve: true,
+        signal,
+      }),
+      FAILURE_DECISION_TIMEOUT_MS,
+      () => workflowError({
+        code: "workflow.failure_decision_timeout",
+        message: "The bounded failure decision timed out.",
+        step: error.step,
+        outcome: "not-applied",
+      }),
+      this.#runController.signal,
+    );
+    if (decision?.decision !== "reobserve") {
+      return Object.freeze({ decision: "report", actionReplayed: false });
+    }
+    const scene = await abortableStandaloneTimeout(
+      (signal) => this.#host.observe({
+        step: "failure-reobserve",
+        recoveryFor: error.step,
+        signal,
+      }),
+      FAILURE_REOBSERVE_TIMEOUT_MS,
+      () => workflowError({
+        code: "workflow.failure_reobserve_timeout",
+        message: "The Host failure re-observation timed out.",
+        step: error.step,
+        outcome: "not-applied",
+      }),
+      this.#runController.signal,
+    );
+    validateScene(scene, "failure-reobserve");
+    return Object.freeze({
+      decision: "reobserve",
+      sceneId: scene.id,
+      observationVersion: scene.observationVersion,
+      actionReplayed: false,
+    });
+  }
 }
 
 function textAction(elementId, value) {
@@ -719,6 +827,12 @@ function candidateIdentity(element) {
     : `label:${normalizeText(elementText(element))}`;
 }
 
+function uniqueEvidenceSources(element) {
+  return [...new Set((Array.isArray(element?.evidence) ? element.evidence : [])
+    .map((item) => item?.source)
+    .filter((source) => typeof source === "string" && source.length > 0))];
+}
+
 function elementText(element) {
   if (typeof element.name === "string") return element.name;
   if (typeof element.value === "string") return element.value;
@@ -781,6 +895,28 @@ async function standaloneTimeout(operation, timeoutMs, errorFactory) {
   }
 }
 
+async function abortableStandaloneTimeout(operation, timeoutMs, errorFactory, parentSignal) {
+  const controller = new AbortController();
+  const onParentAbort = () => controller.abort(parentSignal?.reason);
+  if (parentSignal?.aborted) onParentAbort();
+  else parentSignal?.addEventListener?.("abort", onParentAbort, { once: true });
+  let timer;
+  const timeout = new Promise((resolve, reject) => {
+    timer = setTimeout(() => {
+      const error = errorFactory();
+      reject(error);
+      controller.abort(error);
+    }, timeoutMs);
+    timer.unref?.();
+  });
+  try {
+    return await Promise.race([operation(controller.signal), timeout]);
+  } finally {
+    clearTimeout(timer);
+    parentSignal?.removeEventListener?.("abort", onParentAbort);
+  }
+}
+
 function workflowError({ code, message, step = null, outcome }) {
   const error = new Error(message);
   error.name = "DeterministicWorkflowError";
@@ -793,6 +929,12 @@ function workflowError({ code, message, step = null, outcome }) {
 
 function asWorkflowError(error, defaults) {
   if (error?.name === "DeterministicWorkflowError") return error;
+  if (error?.name === "BoundedLlmInteractionError") {
+    error.step = defaults.step;
+    error.outcome = "not-applied";
+    error.replayAllowed = false;
+    return error;
+  }
   return workflowError({
     code: error?.name === "AbortError" ? "workflow.cancelled" : "workflow.host_failure",
     message: error instanceof Error ? error.message : "The deterministic Host workflow failed.",

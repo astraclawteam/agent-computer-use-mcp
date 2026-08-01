@@ -80,7 +80,8 @@ metadata, precondition failure without skipping, title/body ownership isolation,
 terminal `not-applied` and `indeterminate` receipts, action timeout, active Stop,
 fresh self-authored bubble ownership, and release-on-all-terminal-paths.
 
-Fuzzy semantic choice is intentionally not guessed here. It remains a Phase 5
-LLM responsibility limited to selecting among Host-provided candidates. Real
-application acceptance and the staged foreground/tray/multi-window matrix remain
-Phase 6 work and must not be inferred from these deterministic fixtures.
+Fuzzy semantic choice is intentionally not guessed here. Phase 5 now supplies a
+bounded LLM decision port limited to selecting among Host-provided candidates;
+see `computer-use-phase-5-llm-boundary.md`. Real application acceptance and the
+staged foreground/tray/multi-window matrix remain Phase 6 work and must not be
+inferred from these deterministic fixtures.

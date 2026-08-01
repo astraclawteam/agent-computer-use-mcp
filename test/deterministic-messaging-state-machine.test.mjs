@@ -6,6 +6,7 @@ import {
   DETERMINISTIC_MESSAGING_STEPS,
   DeterministicMessagingStateMachine,
 } from "../src/deterministic-messaging-state-machine.mjs";
+import { runLlmBoundedMessagingWorkflow } from "../src/llm-bounded-messaging-workflow.mjs";
 
 const QUERY = "林舟";
 const MESSAGE = "今晚七点见";
@@ -43,6 +44,151 @@ test("the Host-driven workflow commits the fixed role-based sequence and release
   assert.deepEqual(textActions.map(({ action }) => action.textMode), ["replace-all", "replace-all"]);
   assert.deepEqual(textActions.map(({ action }) => action.inputBehavior), ["incremental", "incremental"]);
   assert.equal(host.actions.every(({ action }) => action.x === undefined && action.y === undefined), true);
+});
+
+test("the bounded LLM understands the goal and selects only from current Host candidates", async () => {
+  const calls = [];
+  const host = createFixtureHost({ candidateName: "林舟" });
+  const result = await runLlmBoundedMessagingWorkflow({
+    host,
+    userGoal: "找到林先生并告诉他今晚七点见",
+    pollIntervalMs: 1,
+    complete: async (request) => {
+      calls.push(request);
+      if (request.kind === "understand-goal") {
+        return { query: "林先生", message: MESSAGE };
+      }
+      if (request.kind === "select-candidate") {
+        assert.equal(request.input.candidates[0].label, "林舟");
+        assert.equal(JSON.stringify(request.input).includes("elementId"), false);
+        assert.equal(JSON.stringify(request.input).includes("coordinate"), false);
+        return { candidateId: request.input.candidates[0].candidateId };
+      }
+      throw new Error(`Unexpected LLM decision: ${request.kind}`);
+    },
+  });
+
+  assert.equal(result.status, "committed");
+  assert.deepEqual(calls.map((call) => call.kind), ["understand-goal", "select-candidate"]);
+  assert.equal(host.actions.filter(({ step }) => step === "select-result").length, 1);
+  assert.equal(host.releaseCalls, 1);
+});
+
+test("an indeterminate action may trigger one LLM-chosen re-observation but never a replay", async () => {
+  const host = createFixtureHost({ failStep: "select-result", failOutcome: "indeterminate" });
+  const machine = new DeterministicMessagingStateMachine({
+    host,
+    goal: { query: QUERY, message: MESSAGE },
+    pollIntervalMs: 1,
+    decisionPort: {
+      async selectCandidate({ candidates }) {
+        return { candidateId: candidates[0].candidateId };
+      },
+      async decideFailure() {
+        return { decision: "reobserve" };
+      },
+    },
+  });
+
+  await assert.rejects(machine.run(), (error) => {
+    assert.equal(error.code, "workflow.action_indeterminate");
+    assert.deepEqual(error.recovery, {
+      decision: "reobserve",
+      sceneId: `scene:${host.observedSteps.length}`,
+      observationVersion: host.observedSteps.length,
+      actionReplayed: false,
+    });
+    return true;
+  });
+  assert.equal(host.observedSteps.filter((step) => step === "failure-reobserve").length, 1);
+  assert.equal(host.actions.filter(({ step }) => step === "select-result").length, 1);
+  assert.equal(host.releaseCalls, 1);
+});
+
+test("the LLM may report a failure without causing another observation or action", async () => {
+  const host = createFixtureHost({ failStep: "select-result", failOutcome: "indeterminate" });
+  const machine = new DeterministicMessagingStateMachine({
+    host,
+    goal: { query: QUERY, message: MESSAGE },
+    pollIntervalMs: 1,
+    decisionPort: {
+      async selectCandidate({ candidates }) {
+        return { candidateId: candidates[0].candidateId };
+      },
+      async decideFailure() {
+        return { decision: "report" };
+      },
+    },
+  });
+
+  await assert.rejects(machine.run(), (error) => {
+    assert.deepEqual(error.recovery, { decision: "report", actionReplayed: false });
+    return true;
+  });
+  assert.equal(host.observedSteps.includes("failure-reobserve"), false);
+  assert.equal(host.actions.filter(({ step }) => step === "select-result").length, 1);
+  assert.equal(host.releaseCalls, 1);
+});
+
+test("an over-privileged LLM selection cannot reach computer.act and Host still releases", async () => {
+  const host = createFixtureHost();
+
+  await assert.rejects(runLlmBoundedMessagingWorkflow({
+    host,
+    userGoal: "发送一条消息",
+    pollIntervalMs: 1,
+    complete: async ({ kind, input }) => {
+      if (kind === "understand-goal") return { query: QUERY, message: MESSAGE };
+      if (kind === "select-candidate") {
+        return { candidateId: input.candidates[0].candidateId, action: "click" };
+      }
+      return { decision: "report" };
+    },
+  }), (error) => {
+    assert.equal(error.code, "llm.output_contract_violation");
+    assert.equal(error.step, "select-result");
+    assert.equal(error.replayAllowed, false);
+    return true;
+  });
+  assert.equal(host.actions.some(({ step }) => step === "select-result"), false);
+  assert.equal(host.releaseCalls, 1);
+});
+
+test("Stop cancels an in-flight LLM selection before any candidate action and Host releases", async () => {
+  const host = createFixtureHost();
+  const controller = new AbortController();
+  let selectionStarted;
+  const started = new Promise((resolve) => { selectionStarted = resolve; });
+  const running = runLlmBoundedMessagingWorkflow({
+    host,
+    userGoal: "发送一条消息",
+    pollIntervalMs: 1,
+    signal: controller.signal,
+    complete: async ({ kind, input, signal }) => {
+      if (kind === "understand-goal") return { query: QUERY, message: MESSAGE };
+      if (kind === "select-candidate") {
+        selectionStarted();
+        return new Promise((resolve, reject) => {
+          signal.addEventListener("abort", () => {
+            const error = new Error("model selection aborted");
+            error.name = "AbortError";
+            reject(error);
+          }, { once: true });
+        });
+      }
+      return { candidateId: input.candidates[0].candidateId };
+    },
+  });
+
+  await started;
+  controller.abort("operator-stop");
+  await assert.rejects(running, (error) => {
+    assert.equal(error.code, "workflow.cancelled");
+    assert.equal(error.step, "select-result");
+    return true;
+  });
+  assert.equal(host.actions.some(({ step }) => step === "select-result"), false);
+  assert.equal(host.releaseCalls, 1);
 });
 
 test("every step publishes explicit conditions, timeout, and only one allowed successor", () => {
@@ -233,13 +379,16 @@ function createFixtureHost(options = {}) {
   const actions = [];
   let releaseCalls = 0;
   let abortedActions = 0;
+  const observedSteps = [];
 
   return {
     actions,
+    observedSteps,
     get releaseCalls() { return releaseCalls; },
     get abortedActions() { return abortedActions; },
 
-    async observe() {
+    async observe({ step } = {}) {
+      observedSteps.push(step ?? "unspecified");
       version += 1;
       return fixtureScene({
         version,
@@ -253,6 +402,7 @@ function createFixtureHost(options = {}) {
         omitSearch: options.omitSearch === true,
         wrongTitleWithMatchingBody: options.wrongTitleWithMatchingBody === true,
         placeNewBubbleOutsideTranscript: options.placeNewBubbleOutsideTranscript === true,
+        candidateName: options.candidateName ?? QUERY,
       });
     },
 
@@ -316,6 +466,7 @@ function fixtureScene({
   omitSearch,
   wrongTitleWithMatchingBody,
   placeNewBubbleOutsideTranscript,
+  candidateName,
 }) {
   const elements = [];
   const add = (element) => {
@@ -327,6 +478,7 @@ function fixtureScene({
       parentId: element.parentKey ? `scene:${version}:${element.parentKey}` : null,
       observationVersion: version,
       evidenceConsistency: "consistent",
+      evidence: [{ source: "structure" }],
       actions: element.actions ?? [],
       actionable: (element.actions?.length ?? 0) > 0,
       state: element.state ?? {},
@@ -364,7 +516,7 @@ function fixtureScene({
       role: "search-result",
       parentKey: "results",
       actions: ["click"],
-      name: QUERY,
+      name: candidateName,
       semanticKey: "contact:fixture",
     });
   }
@@ -375,7 +527,7 @@ function fixtureScene({
       type: "ActionableItem",
       role: "conversation-title",
       parentKey: "conversation",
-      name: wrongTitleWithMatchingBody ? "其他会话" : QUERY,
+      name: wrongTitleWithMatchingBody ? "其他会话" : candidateName,
       semanticKey: wrongTitleWithMatchingBody ? "contact:other" : "contact:fixture",
     });
     add({ key: "transcript", type: "Container", role: "transcript", parentKey: "conversation" });
