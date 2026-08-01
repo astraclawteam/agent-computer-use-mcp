@@ -5,7 +5,6 @@ import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js"
 import { normalizeCuaObservation } from "./computer-observation.mjs";
 import { checkCuaDriverHealth, resolveCuaDriverCandidate } from "./driver-health.mjs";
 import { DEFAULT_AGENT_CURSOR_STYLE } from "./overlay-theme-cursor-tokens.mjs";
-import { sendWindowsUnicodeText } from "./windows-unicode-input.mjs";
 import { activateWindowsForeground } from "./windows-foreground-activation.mjs";
 import { queryWindowsForegroundWindowId } from "./windows-foreground-probe.mjs";
 import { queryWindowsProcessApplications } from "./windows-process-application-probe.mjs";
@@ -22,7 +21,6 @@ export class CuaDriverMcpDriver {
     this.client = options.client ?? new CuaDriverMcpClient({
       driverPath: options.driverPath,
     });
-    this.unicodeInput = options.unicodeInput ?? sendWindowsUnicodeText;
     this.foregroundWindowActivator = options.foregroundWindowActivator ?? activateWindowsForeground;
     this.foregroundWindowProbe = options.foregroundWindowProbe ?? queryWindowsForegroundWindowId;
     this.processApplicationProbe = options.processApplicationProbe ?? queryWindowsProcessApplications;
@@ -658,60 +656,26 @@ export class CuaDriverMcpDriver {
         const activation = await this.ensureForegroundActionResources(ticket, window);
         if (!activation) return foregroundActionNotApplied("type_text");
       }
-      if (shouldUseWindowsUnicodeInput({
-        elementToken,
-        elementIndex,
-        x,
-        y,
-        value,
-        deliveryMode,
-      })) {
-        await this.client.callTool("click", {
+      if (textMode === "replace-all") {
+        await this.client.callTool("press_key", {
           pid: window.pid,
           window_id: window.windowId,
-          x,
-          y,
-          delivery_mode: "foreground",
+          ...actionAddress({ elementToken, elementIndex, x, y }),
+          key: "a",
+          modifiers: ["ctrl"],
+          delivery_mode: deliveryMode,
           session: this.session,
         });
         this.assertWorkTicket(ticket);
-        const unicodeResult = await this.unicodeInput({
-          windowId: window.windowId,
-          processId: window.pid,
-          text: value,
-          replaceAll: textMode === "replace-all",
-          inputBehavior,
+        await this.client.callTool("press_key", {
+          pid: window.pid,
+          window_id: window.windowId,
+          ...actionAddress({ elementToken, elementIndex, x, y }),
+          key: "backspace",
+          delivery_mode: deliveryMode,
+          session: this.session,
         });
         this.assertWorkTicket(ticket);
-        const foregroundWindowId = await this.foregroundWindowProbe();
-        this.assertWorkTicket(ticket);
-        const windowForegroundVerified = sameNativeWindowId(foregroundWindowId, window.windowId);
-        return {
-          status: unicodeResult.status ?? "ok",
-          path: unicodeResult.deliveryPath ?? "windows_unicode_send_input",
-          characters: [...value].length,
-          utf16CodeUnits: unicodeResult.utf16CodeUnits,
-          ...(typeof unicodeResult.clipboardRestored === "boolean"
-            ? { clipboardRestored: unicodeResult.clipboardRestored }
-            : {}),
-          ...(typeof unicodeResult.changeSignalDelivered === "boolean"
-            ? { changeSignalDelivered: unicodeResult.changeSignalDelivered }
-            : {}),
-          textMode,
-          inputBehavior,
-          effect: "possibly_applied",
-          verified: false,
-          // The Windows bridge verifies the exact approved top-level window is
-          // foreground and GetGUIThreadInfo reports a focused window owned by
-          // the approved process immediately after the grounded target click.
-          focusVerified: unicodeResult.focusVerified === true,
-          foregroundWindow: windowForegroundVerified
-            ? {
-                ...window,
-                isForeground: true,
-              }
-            : null,
-        };
       }
       const result = await this.client.callTool("type_text", {
         pid: window.pid,
@@ -864,30 +828,6 @@ function actionAddress({ elementToken, elementIndex, x, y }) {
   if (elementToken !== undefined) address.element_token = elementToken;
   if (elementIndex !== undefined) address.element_index = elementIndex;
   return address;
-}
-
-function shouldUseWindowsUnicodeInput({
-  elementToken,
-  elementIndex,
-  x,
-  y,
-  value,
-  deliveryMode,
-}) {
-  return deliveryMode === "foreground"
-    && elementToken === undefined
-    && elementIndex === undefined
-    && Number.isFinite(x)
-    && Number.isFinite(y)
-    && containsNonAsciiCodeUnit(value);
-}
-
-function containsNonAsciiCodeUnit(value) {
-  if (typeof value !== "string") return false;
-  for (let index = 0; index < value.length; index += 1) {
-    if (value.charCodeAt(index) > 0x7f) return true;
-  }
-  return false;
 }
 
 function sameNativeWindowId(left, right) {

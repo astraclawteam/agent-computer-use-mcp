@@ -211,23 +211,11 @@ test("CuaDriverMcpDriver maps request/capture/action to cua-driver MCP tools", a
   ]);
 });
 
-test("CuaDriverMcpDriver propagates bridge-verified grounded editable focus", async () => {
+test("CuaDriverMcpDriver keeps coordinate Unicode text on the native driver path", async () => {
   const calls = [];
-  const unicodeCalls = [];
   const driver = new CuaDriverMcpDriver({
     session: "unicode-session",
     foregroundWindowProbe: async () => "42",
-    unicodeInput: async (args) => {
-      unicodeCalls.push(args);
-      return {
-        status: "ok",
-        utf16CodeUnits: args.text.length,
-        clipboardRestored: true,
-        changeSignalDelivered: true,
-        focusVerified: true,
-        deliveryPath: "windows_clipboard_transaction",
-      };
-    },
     client: {
       async start() {
         calls.push({ method: "start" });
@@ -254,42 +242,46 @@ test("CuaDriverMcpDriver propagates bridge-verified grounded editable focus", as
     { method: "callTool", name: "start_session", args: { session: "unicode-session" } },
     {
       method: "callTool",
-      name: "click",
+      name: "press_key",
       args: {
         pid: 1234,
         window_id: 42,
         x: 160,
         y: 55,
+        key: "a",
+        modifiers: ["ctrl"],
+        delivery_mode: "foreground",
+        session: "unicode-session",
+      },
+    },
+    {
+      method: "callTool",
+      name: "press_key",
+      args: {
+        pid: 1234,
+        window_id: 42,
+        x: 160,
+        y: 55,
+        key: "backspace",
+        delivery_mode: "foreground",
+        session: "unicode-session",
+      },
+    },
+    {
+      method: "callTool",
+      name: "type_text",
+      args: {
+        pid: 1234,
+        window_id: 42,
+        x: 160,
+        y: 55,
+        text: "宋鹏",
         delivery_mode: "foreground",
         session: "unicode-session",
       },
     },
   ]);
-  assert.deepEqual(unicodeCalls, [{
-    windowId: 42,
-    processId: 1234,
-    text: "宋鹏",
-    replaceAll: true,
-    inputBehavior: "incremental",
-  }]);
-  assert.deepEqual(result, {
-    status: "ok",
-    path: "windows_clipboard_transaction",
-    characters: 2,
-    utf16CodeUnits: 2,
-    clipboardRestored: true,
-    changeSignalDelivered: true,
-    textMode: "replace-all",
-    inputBehavior: "incremental",
-    effect: "possibly_applied",
-    verified: false,
-    focusVerified: true,
-    foregroundWindow: {
-      windowId: 42,
-      pid: 1234,
-      isForeground: true,
-    },
-  });
+  assert.deepEqual(result, { status: "ok" });
 });
 
 test("CuaDriverMcpDriver activates a window and verifies the foreground result", async () => {
