@@ -1722,7 +1722,7 @@ test("provider router issues and consumes a short-lived verified focus receipt",
     driver: {
       async click(args) {
         calls.push({ method: "click", args });
-        return { status: "ok", focus: { verified: true } };
+        return { status: "ok", verified: false, focus: { verified: true } };
       },
       async typeText(args) {
         calls.push({ method: "typeText", args });
@@ -1755,6 +1755,8 @@ test("provider router issues and consumes a short-lived verified focus receipt",
     action: { kind: "click", elementToken: "search-input" },
   });
   assert.equal(clicked.focusReceipt.status, "verified");
+  assert.equal(clicked.result.verified, true);
+  assert.equal(clicked.result.verification.status, "focused");
 
   const result = await router.act({
     action: {

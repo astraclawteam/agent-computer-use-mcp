@@ -740,10 +740,20 @@ export class CuaDriverMcpDriver {
     }, signal);
   }
 
-  click({ window, elementToken, elementIndex, x, y, deliveryMode = "background", signal }) {
+  click({
+    window,
+    elementToken,
+    elementIndex,
+    x,
+    y,
+    deliveryMode = "background",
+    interactionIntent,
+    signal,
+  }) {
     return this.runWork(async (ticket) => {
       await this.ensureStartedResources(ticket);
-      if (Number.isFinite(x) && Number.isFinite(y) && deliveryMode === "foreground") {
+      const coordinateGrounded = Number.isFinite(x) && Number.isFinite(y);
+      if (coordinateGrounded && deliveryMode === "foreground") {
         const activation = await this.ensureForegroundActionResources(ticket, window);
         if (!activation) return foregroundActionNotApplied("click");
       }
@@ -755,6 +765,36 @@ export class CuaDriverMcpDriver {
         session: this.session,
       }, { signal: ticket.signal });
       this.assertWorkTicket(ticket);
+      if (interactionIntent === "focus-editable"
+        && coordinateGrounded
+        && deliveryMode === "foreground"
+        && result?.status !== "error"
+        && result?.effect !== "not-applied"
+        && this.unicodeInput) {
+        try {
+          const focus = await this.unicodeInput({
+            windowId: window.windowId,
+            processId: window.pid,
+            text: "",
+            replaceAll: false,
+            inputBehavior: "incremental",
+            signal: ticket.signal,
+          });
+          this.assertWorkTicket(ticket);
+          return {
+            ...result,
+            focusVerified: focus?.focusVerified === true,
+            focusVerificationPath: focus?.deliveryPath ?? "windows-focused-process-boundary",
+          };
+        } catch (error) {
+          this.assertWorkTicket(ticket);
+          return {
+            ...result,
+            focusVerified: false,
+            focusVerificationError: error?.code ?? "focus.verification_failed",
+          };
+        }
+      }
       return result;
     }, signal);
   }

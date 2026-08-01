@@ -676,6 +676,39 @@ test("CuaDriverMcpDriver verifies foreground immediately before a pixel click", 
   ]);
 });
 
+test("CuaDriverMcpDriver verifies an editable focus click without entering text", async () => {
+  const unicodeCalls = [];
+  const driver = new CuaDriverMcpDriver({
+    session: "focus-editable-click-session",
+    foregroundWindowProbe: async () => "42",
+    unicodeInput: async (args) => {
+      unicodeCalls.push(args);
+      return {
+        status: "ok",
+        focusVerified: true,
+        deliveryPath: "windows_sendinput_unicode_ime_neutral",
+      };
+    },
+    client: {
+      async start() {},
+      async callTool() { return { status: "ok", path: "pixel" }; },
+    },
+  });
+
+  const result = await driver.click({
+    window: { windowId: 42, pid: 1234 },
+    x: 160,
+    y: 100,
+    deliveryMode: "foreground",
+    interactionIntent: "focus-editable",
+  });
+
+  assert.equal(result.focusVerified, true);
+  assert.equal(unicodeCalls.length, 1);
+  assert.equal(unicodeCalls[0].text, "");
+  assert.equal(unicodeCalls[0].replaceAll, false);
+});
+
 test("CuaDriverMcpDriver uses verified foreground fallback before delivering a pixel click", async () => {
   const calls = [];
   const driver = new CuaDriverMcpDriver({

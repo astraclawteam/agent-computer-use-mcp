@@ -251,3 +251,61 @@ test("Host Scene preserves structural ownership, semantic identity, and observab
   assert.deepEqual(editor.state, { focused: true });
   assert.equal(editor.semanticKey, "editor:primary");
 });
+
+test("consistent local fusion projects a search container and Editable without granting OCR authority", () => {
+  const shared = {
+    bounds: { x: 20, y: 20, width: 240, height: 40 },
+    sourceRegion: { x: 20, y: 20, width: 240, height: 40 },
+    confidence: 0.999,
+    source: "local-proposal-fusion",
+    modelIdentity: { provider: "local-proposal-fusion", model: "som-ocr-role-v1" },
+    support: [
+      { provider: "som-proposal", confidence: 0.94, proposalId: "visual-search" },
+      { provider: "ocr", confidence: 0.99, proposalId: "ocr-search" },
+    ],
+    pixelLimitedAction: true,
+    guessedAction: false,
+  };
+  const scene = buildHostScene({
+    observationVersion: 15,
+    observation: {
+      observationId: "observation-15",
+      coordinateSpace: "window-local",
+      coordinateBounds: { x: 0, y: 0, width: 800, height: 600 },
+      window: { id: "window-15", bounds: { width: 800, height: 600 } },
+      localObservation: {
+        elements: [{
+          ...shared,
+          elementToken: "search-parent",
+          role: "search-container",
+          actions: [],
+        }, {
+          ...shared,
+          elementToken: "search",
+          parentElementToken: "search-parent",
+          role: "search",
+          actions: ["click", "type_text"],
+          value: "",
+          state: { focused: false },
+        }, {
+          elementToken: "ocr-search",
+          role: "text",
+          name: "搜索",
+          source: "ocr",
+          bounds: { x: 40, y: 28, width: 42, height: 23 },
+          actions: ["click"],
+        }],
+      },
+    },
+  });
+
+  const parent = resolveHostSceneElement(scene, { elementToken: "search-parent" });
+  const search = resolveHostSceneElement(scene, { elementToken: "search" });
+  const ocr = resolveHostSceneElement(scene, { elementToken: "ocr-search" });
+  assert.equal(parent.type, "Container");
+  assert.equal(search.type, "Editable");
+  assert.equal(search.parentId, parent.id);
+  assert.deepEqual(search.actions, ["click", "type_text"]);
+  assert.equal(ocr.evidenceConsistency, "insufficient");
+  assert.deepEqual(ocr.actions, []);
+});

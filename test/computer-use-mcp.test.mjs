@@ -2807,6 +2807,22 @@ test("provider router activates the acquired window without perception coordinat
           },
         };
       },
+      async capture() {
+        return {
+          observationId: "background-app-after-activation",
+          source: "cua-driver",
+          mode: "semantic",
+          elements: [],
+        };
+      },
+      async listWindows() {
+        return [{
+          windowId: 42,
+          title: "Background App",
+          pid: 1234,
+          isForeground: true,
+        }];
+      },
     },
     overlayRuntime: {
       async start() {
@@ -2833,6 +2849,11 @@ test("provider router activates the acquired window without perception coordinat
   });
   assert.equal(activated.focusReceipt.status, "verified");
   assert.equal(activated.focusReceipt.target.kind, "activate_window");
+  assert.equal(
+    activated.result.observation.scene.elements.find((element) => element.type === "Window")
+      .state.foreground,
+    true,
+  );
   assert.deepEqual(calls, [{
     window: { windowId: 42, title: "Background App", pid: 1234 },
   }]);

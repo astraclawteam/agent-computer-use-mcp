@@ -25,6 +25,11 @@ import { cleanupRuntimeState } from "./runtime-cleanup.mjs";
 import { createComputerUseCapabilityHandshake } from "./computer-use-capability-handshake.mjs";
 import { MCP_RESULT_SCHEMA_VERSION } from "./computer-use-mcp-tools.mjs";
 import { buildHostScene, resolveHostSceneElement } from "./scene-region-ownership.mjs";
+import {
+  composeMessagingSceneElements,
+  detectMessagingVisualProposals,
+  stableCompositionOcrElements,
+} from "./messaging-scene-composition.mjs";
 
 function sameRequestContext(left, right) {
   if (!left || !right) return !left && !right;
@@ -83,6 +88,7 @@ export class ComputerUseProviderRouter {
     this.lastVisualUnderstanding = null;
     this.lastActionVisualCrop = null;
     this.lastFocusedObservationCrop = null;
+    this.messagingSceneControls = [];
     this.consecutivePublicObservations = 0;
     this.interactionStep = 0;
     this.pendingUnverifiedMutation = null;
@@ -110,6 +116,9 @@ export class ComputerUseProviderRouter {
     this.installCacheDoctor = options.installCacheDoctor ?? runInstallCacheDoctor;
     this.auditEvents = [];
     this.policy = options.policy ?? createComputerUsePolicy(options.policyOptions);
+    this.messagingSceneComposition = options.messagingSceneComposition ?? composeMessagingSceneElements;
+    this.messagingVisualProposalOperation = options.messagingVisualProposalOperation
+      ?? detectMessagingVisualProposals;
     this.actionPolicy = this.policy.describe();
   }
 
@@ -119,6 +128,7 @@ export class ComputerUseProviderRouter {
     this.lastVisualUnderstanding = null;
     this.lastActionVisualCrop = null;
     this.lastFocusedObservationCrop = null;
+    this.messagingSceneControls = [];
     this.consecutivePublicObservations = 0;
     this.interactionStep = 0;
     this.pendingUnverifiedMutation = null;
@@ -955,10 +965,17 @@ export class ComputerUseProviderRouter {
       fail("capture.mode_unsupported", `Unsupported capture mode: ${mode}`);
     }
 
+    const controlledWindowForeground = await this.observeControlledWindowForeground(ticket);
     this.lastCapture = this.createActionObservation({
       ...observation,
       observationId: observation.observationId ?? `capture-${Date.now()}`,
       provider: observation.provider ?? "gateway-managed",
+      ...(controlledWindowForeground === null ? {} : {
+        window: {
+          ...(observation.window ?? {}),
+          isForeground: controlledWindowForeground,
+        },
+      }),
     });
     this.reconcilePendingTextFocus(this.lastCapture);
     this.recordAudit("computer.capture.created", {
@@ -967,6 +984,24 @@ export class ComputerUseProviderRouter {
       observationId: this.lastCapture.observationId,
     });
     return this.lastCapture;
+  }
+
+  async observeControlledWindowForeground(ticket) {
+    if (!this.driver?.listWindows) return null;
+    try {
+      const windows = await this.awaitExternal(
+        ticket,
+        () => this.driver.listWindows({ onScreenOnly: false }),
+      );
+      const controlledWindowId = controllerWindowId(this.activeController?.window);
+      const controlled = windows.find(
+        (window) => String(controllerWindowId(window)) === String(controlledWindowId),
+      );
+      return controlled ? controlled.isForeground === true : null;
+    } catch (error) {
+      this.assertOperationTicket(ticket);
+      return null;
+    }
   }
 
   canReuseLatestScreenshotObservation() {
@@ -1177,6 +1212,47 @@ export class ComputerUseProviderRouter {
         };
       }
     }
+    let messagingCompositionError = null;
+    if (localObservation
+      && (explicitVisualQuestion || this.messagingSceneControls.length > 0)) {
+      try {
+        const compositionOcrElements = stableCompositionOcrElements({
+          currentElements: Array.isArray(localObservation.elements) ? localObservation.elements : [],
+          previousElements: previousOcrElements,
+          visualSceneStable,
+        });
+        const visualProposals = await this.awaitExternal(
+          ticket,
+          () => this.messagingVisualProposalOperation({
+            imagePath,
+            ocrElements: compositionOcrElements,
+          }),
+        );
+        const composition = this.messagingSceneComposition({
+          coordinateBounds: visualBounds,
+          ocrElements: compositionOcrElements,
+          visualProposals,
+          knownControls: this.messagingSceneControls,
+          focusedTarget: this.activeFocusReceipt?.target ?? null,
+        });
+        this.messagingSceneControls = [...composition.knownControls];
+        localObservation = {
+          ...localObservation,
+          elements: [
+            ...(Array.isArray(localObservation.elements) ? localObservation.elements : []),
+            ...composition.elements,
+          ],
+          messagingSceneComposition: {
+            status: composition.elements.length > 0 ? "composed" : "insufficient",
+            controlCount: composition.knownControls.length,
+          },
+        };
+      } catch (error) {
+        this.assertOperationTicket(ticket);
+        this.messagingSceneControls = [];
+        messagingCompositionError = serializeToolError(error);
+      }
+    }
     const localElements = Array.isArray(localObservation?.elements)
       ? localObservation.elements.length
       : 0;
@@ -1332,6 +1408,7 @@ export class ComputerUseProviderRouter {
                 : "no-explicit-visual-ambiguity",
         ...(noProgress ? { noProgress } : {}),
         ...(ocrError ? { ocrError } : {}),
+        ...(messagingCompositionError ? { messagingCompositionError } : {}),
       },
     };
   }
@@ -1512,8 +1589,22 @@ export class ComputerUseProviderRouter {
           window: this.activeController.window,
           ...driverTarget,
           deliveryMode: effectiveDeliveryMode,
+          ...(action.interactionIntent === "focus-editable"
+            ? { interactionIntent: action.interactionIntent }
+            : {}),
         }, signal)));
-        if (isExplicitlyUnverified(result)) {
+        if (hasVerifiedFocus(result)) {
+          result = {
+            ...result,
+            effect: "verified",
+            verified: true,
+            verification: {
+              status: "focused",
+              method: result.focusVerificationPath ?? "provider-focus-boundary",
+            },
+          };
+          this.activeFocusReceipt = this.createFocusReceipt({ action, element, driverTarget });
+        } else if (isExplicitlyUnverified(result)) {
           const verification = admission.pixelLimitedAction === false && element
             ? await this.verifySemanticStateTransition(actionObservation, args.requestContext, ticket)
             : null;
@@ -1534,8 +1625,6 @@ export class ComputerUseProviderRouter {
             };
             outcome = "indeterminate";
           }
-        } else if (hasVerifiedFocus(result)) {
-          this.activeFocusReceipt = this.createFocusReceipt({ action, element, driverTarget });
         }
       } else if (action.kind === "press_key") {
         if (!this.driver?.pressKey) fail("provider.unavailable", "press_key provider is not available");

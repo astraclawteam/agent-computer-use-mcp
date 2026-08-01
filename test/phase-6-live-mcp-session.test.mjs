@@ -56,3 +56,24 @@ test("an explicit release prevents a duplicate cleanup release", async () => {
 
   assert.deepEqual(calls, ["computer.acquire", "computer.release"]);
 });
+
+test("the live session can retain raw MCP media for visual acceptance diagnostics", async () => {
+  const calls = [];
+  const rawResult = {
+    structuredContent: { status: "ok" },
+    content: [{ type: "image", data: "fixture", mimeType: "image/png" }],
+  };
+  const session = createPhase6LiveSession({
+    client: {
+      async callTool(request) {
+        calls.push(request.name);
+        return rawResult;
+      },
+      async close() {},
+    },
+  });
+
+  assert.equal(await session.callToolRaw("computer.observe", { mode: "screenshot" }), rawResult);
+  assert.deepEqual(calls, ["computer.observe"]);
+  await session.close();
+});

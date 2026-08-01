@@ -1,8 +1,11 @@
 # Computer Use Phase 6: staged real-application acceptance
 
-Status: Level 1 blocked at its first actionable precondition on `main`.
-No message was entered or sent, no later level was started, and no candidate
-artifact was generated.
+Status: the Level 1 composition blocker is repaired on `main`; attempt 1 has
+restarted and passed `restore-main-window` plus `focus-search`. It is paused
+before `enter-query` because no explicit real test contact or message body was
+provided. The attempt is not counted as passed or failed. No message was
+entered or sent, no later level was started, and no candidate artifact was
+generated.
 
 ## Gate contract
 
@@ -53,14 +56,28 @@ The lease was cancelled and a fresh server session reported `status=idle` and
 `activeController=null`. No click, text input, send action, or external message
 occurred.
 
-## Required repair before retrying Level 1
+## Composition repair and Level 1 restart
 
-The production observation path must project a search editable and its parent
-container from consistent structure plus independent visual evidence. OCR text
-alone must remain insufficient. The resulting Scene element must retain the
-current screenshot id, window id, coordinate space, crop offset, scale, bounds,
-evidence sources, consistency, actions, and invalidation conditions. Only then
-may Level 1 restart from attempt 1; Levels 2–7 remain closed.
+The production observation path now composes one `Container/search-container`
+and child `Editable/search` from the same-frame pixel surface plus OCR role
+evidence. OCR text alone remains insufficient and non-actionable. Stable-frame
+composition may use retained full-window OCR only as evidence input; it does
+not expose retained OCR as a current action target. Filled and focused-outline
+control surfaces are handled separately, and conflicting independent evidence
+still removes actions.
+
+The real WeChat restart proved that both elements retained the current
+screenshot id, window id, window-local coordinate space, crop offset, scale,
+bounds, evidence sources, consistency, actions, and parent relationship. The
+foreground fact is refreshed from native window state before Scene projection.
+The real `focus-search` action then returned `committed`, issued a verified
+focus receipt, and produced a newer consistent Scene where the search editable
+reported `focused=true` and still authorized `type_text`.
+
+No contact or message content is retained in this evidence. Because the
+operator has not supplied an explicit full-contact test goal and message body,
+the workflow released the controller before `enter-query`; a fresh connector
+reported `status=idle` with no active controller. Levels 2–7 remain closed.
 
 Focused contract verification:
 

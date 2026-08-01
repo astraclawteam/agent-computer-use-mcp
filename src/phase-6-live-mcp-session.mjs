@@ -1,4 +1,5 @@
 import { readFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
 import { resolve } from "node:path";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
@@ -12,6 +13,7 @@ export async function openPhase6LiveMcpSession({
   env,
   nodeExecutable,
   driverPath,
+  driverSha256,
 } = {}) {
   const runtimeProcess = globalThis.process;
   packageRoot ??= runtimeProcess?.cwd?.();
@@ -22,15 +24,18 @@ export async function openPhase6LiveMcpSession({
   }
   const root = resolve(packageRoot);
   const packageJson = JSON.parse(await readFile(resolve(root, "package.json"), "utf8"));
+  const resolvedDriverPath = driverPath ? resolve(driverPath) : null;
   const effectiveEnv = {
     ...(env ?? {}),
-    ...(driverPath ? { AGENT_COMPUTER_USE_CUA_DRIVER: resolve(driverPath) } : {}),
+    ...(resolvedDriverPath ? { AGENT_COMPUTER_USE_CUA_DRIVER: resolvedDriverPath } : {}),
   };
-  const driver = await resolvePhase14Driver({
-    packageRoot: root,
-    packageVersion: packageJson.version,
-    env: effectiveEnv,
-  });
+  const driver = resolvedDriverPath && driverSha256
+    ? await verifyExplicitDriver(resolvedDriverPath, driverSha256)
+    : await resolvePhase14Driver({
+      packageRoot: root,
+      packageVersion: packageJson.version,
+      env: effectiveEnv,
+    });
   const client = new Client({
     name: "phase-6-live-acceptance",
     version: "0.0.1",
@@ -52,6 +57,21 @@ export async function openPhase6LiveMcpSession({
   return createPhase6LiveSession({ client, driver, stderrText: () => stderr });
 }
 
+async function verifyExplicitDriver(path, expectedSha256) {
+  if (!/^[a-f0-9]{64}$/u.test(expectedSha256)) {
+    throw new Error("phase6.live_driver_sha256_invalid");
+  }
+  const actualSha256 = createHash("sha256").update(await readFile(path)).digest("hex");
+  if (actualSha256 !== expectedSha256) {
+    throw new Error("phase6.live_driver_sha256_mismatch");
+  }
+  return {
+    path,
+    source: "verified-explicit",
+    version: null,
+  };
+}
+
 export function createPhase6LiveSession({ client, driver = null, stderrText = () => "" } = {}) {
   if (!client || typeof client.callTool !== "function" || typeof client.close !== "function") {
     throw new TypeError("A connected official MCP client is required.");
@@ -64,12 +84,16 @@ export function createPhase6LiveSession({ client, driver = null, stderrText = ()
     stderrText,
     async callTool(name, args = {}) {
       if (closed) throw new Error("phase6.live_session_closed");
-      const result = await client.callTool({ name, arguments: args });
+      const result = await callClientTool(client, name, args);
       const value = result.structuredContent ?? result;
-      if (name === "computer.acquire" && value?.status === "granted") acquired = true;
-      if (name === "computer.release"
-        && (value?.status === "released" || value?.status === "cancelled")) acquired = false;
+      acquired = updateAcquiredState(acquired, name, value);
       return value;
+    },
+    async callToolRaw(name, args = {}) {
+      if (closed) throw new Error("phase6.live_session_closed");
+      const result = await callClientTool(client, name, args);
+      acquired = updateAcquiredState(acquired, name, result.structuredContent ?? result);
+      return result;
     },
     async close(reason = "phase-6-session-close") {
       if (closed) return;
@@ -84,4 +108,15 @@ export function createPhase6LiveSession({ client, driver = null, stderrText = ()
       await client.close();
     },
   });
+}
+
+function callClientTool(client, name, args) {
+  return client.callTool({ name, arguments: args });
+}
+
+function updateAcquiredState(acquired, name, value) {
+  if (name === "computer.acquire" && value?.status === "granted") return true;
+  if (name === "computer.release"
+    && (value?.status === "released" || value?.status === "cancelled")) return false;
+  return acquired;
 }

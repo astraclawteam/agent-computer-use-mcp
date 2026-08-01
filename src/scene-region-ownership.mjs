@@ -15,12 +15,14 @@ const TRANSIENT_ROLES = new Set([
   "list",
   "menu",
   "popup",
+  "search-results",
   "tooltip",
 ]);
 const EDITABLE_ROLES = new Set([
   "editable",
   "edit",
   "input",
+  "search",
   "search-box",
   "textbox",
   "text-field",
@@ -561,9 +563,9 @@ function providerEvidenceSufficient(raw, source) {
 
 function hostTypeFor(raw, source) {
   const role = String(raw.role ?? "").trim().toLowerCase();
-  if (source === "structure" && EDITABLE_ROLES.has(role)) return "Editable";
-  if (source === "structure" && TRANSIENT_ROLES.has(role)) return "TransientSurface";
-  if (source === "structure" && (!Array.isArray(raw.actions) || raw.actions.length === 0)) {
+  if (EDITABLE_ROLES.has(role)) return "Editable";
+  if (TRANSIENT_ROLES.has(role)) return "TransientSurface";
+  if (!Array.isArray(raw.actions) || raw.actions.length === 0) {
     return "Container";
   }
   return "ActionableItem";
