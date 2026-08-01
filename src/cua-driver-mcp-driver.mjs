@@ -652,15 +652,32 @@ export class CuaDriverMcpDriver {
   }) {
     return this.runWork(async (ticket) => {
       await this.ensureStartedResources(ticket);
-      if (deliveryMode === "foreground" && Number.isFinite(x) && Number.isFinite(y)) {
+      const coordinateGrounded = Number.isFinite(x) && Number.isFinite(y);
+      if (deliveryMode === "foreground" && coordinateGrounded) {
         const activation = await this.ensureForegroundActionResources(ticket, window);
         if (!activation) return foregroundActionNotApplied("type_text");
+        await this.client.callTool("click", {
+          pid: window.pid,
+          window_id: window.windowId,
+          x,
+          y,
+          delivery_mode: "foreground",
+          session: this.session,
+        });
+        this.assertWorkTicket(ticket);
       }
+      // Coordinates establish editable focus, but keyboard delivery must target
+      // the focused window. Passing the same point into cua-driver's text tool
+      // selects a different injection path that custom-drawn editors can accept
+      // without emitting their live text-change event.
+      const keyboardAddress = coordinateGrounded
+        ? {}
+        : actionAddress({ elementToken, elementIndex, x, y });
       if (textMode === "replace-all") {
         await this.client.callTool("press_key", {
           pid: window.pid,
           window_id: window.windowId,
-          ...actionAddress({ elementToken, elementIndex, x, y }),
+          ...keyboardAddress,
           key: "a",
           modifiers: ["ctrl"],
           delivery_mode: deliveryMode,
@@ -670,7 +687,7 @@ export class CuaDriverMcpDriver {
         await this.client.callTool("press_key", {
           pid: window.pid,
           window_id: window.windowId,
-          ...actionAddress({ elementToken, elementIndex, x, y }),
+          ...keyboardAddress,
           key: "backspace",
           delivery_mode: deliveryMode,
           session: this.session,
@@ -680,7 +697,7 @@ export class CuaDriverMcpDriver {
       const result = await this.client.callTool("type_text", {
         pid: window.pid,
         window_id: window.windowId,
-        ...actionAddress({ elementToken, elementIndex, x, y }),
+        ...keyboardAddress,
         text: value,
         delivery_mode: deliveryMode,
         session: this.session,

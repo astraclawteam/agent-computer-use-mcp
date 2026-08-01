@@ -292,7 +292,7 @@ test("computer.acquire falls back to screenshot OCR inside the same transaction 
     async capture(args) {
       captureModes.push(args.mode);
       if (args.mode === "semantic") {
-        return { status: "ok", observationId: "semantic-empty", elementCount: 0, elements: [] };
+        return { status: "ok", observationId: "semantic-empty", elements: [] };
       }
       return {
         status: "ok",

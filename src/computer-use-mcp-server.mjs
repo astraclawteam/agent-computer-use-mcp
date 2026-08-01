@@ -1308,7 +1308,10 @@ export async function acquireComputer(router, args, requestContext) {
       mode: "semantic",
       ...(requestContext === undefined ? {} : { requestContext }),
     });
-    if (initialObservation?.elementCount === 0) {
+    if (
+      initialObservation?.elementCount === 0
+      || (Array.isArray(initialObservation?.elements) && initialObservation.elements.length === 0)
+    ) {
       initialObservation = await router.capture({
         mode: "screenshot",
         ...(requestContext === undefined ? {} : { requestContext }),

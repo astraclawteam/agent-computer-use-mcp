@@ -169,12 +169,22 @@ test("CuaDriverMcpDriver maps request/capture/action to cua-driver MCP tools", a
     },
     {
       method: "callTool",
-      name: "type_text",
+      name: "click",
       args: {
         pid: 1234,
         window_id: 42,
         x: 160,
         y: 180,
+        delivery_mode: "foreground",
+        session: "test-session",
+      },
+    },
+    {
+      method: "callTool",
+      name: "type_text",
+      args: {
+        pid: 1234,
+        window_id: 42,
         text: "Pixel text",
         delivery_mode: "foreground",
         session: "test-session",
@@ -242,12 +252,22 @@ test("CuaDriverMcpDriver keeps coordinate Unicode text on the native driver path
     { method: "callTool", name: "start_session", args: { session: "unicode-session" } },
     {
       method: "callTool",
-      name: "press_key",
+      name: "click",
       args: {
         pid: 1234,
         window_id: 42,
         x: 160,
         y: 55,
+        delivery_mode: "foreground",
+        session: "unicode-session",
+      },
+    },
+    {
+      method: "callTool",
+      name: "press_key",
+      args: {
+        pid: 1234,
+        window_id: 42,
         key: "a",
         modifiers: ["ctrl"],
         delivery_mode: "foreground",
@@ -260,8 +280,6 @@ test("CuaDriverMcpDriver keeps coordinate Unicode text on the native driver path
       args: {
         pid: 1234,
         window_id: 42,
-        x: 160,
-        y: 55,
         key: "backspace",
         delivery_mode: "foreground",
         session: "unicode-session",
@@ -273,8 +291,6 @@ test("CuaDriverMcpDriver keeps coordinate Unicode text on the native driver path
       args: {
         pid: 1234,
         window_id: 42,
-        x: 160,
-        y: 55,
         text: "宋鹏",
         delivery_mode: "foreground",
         session: "unicode-session",
