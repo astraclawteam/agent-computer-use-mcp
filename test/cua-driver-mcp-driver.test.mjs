@@ -503,7 +503,7 @@ test("CuaDriverMcpDriver keeps semantic Unicode text on the cua-driver path", as
   });
 });
 
-test("CuaDriverMcpDriver uses the verified clipboard change boundary for coordinate Unicode text", async () => {
+test("CuaDriverMcpDriver commits coordinate Unicode text after exact native read-back", async () => {
   const calls = [];
   const unicodeCalls = [];
   const driver = new CuaDriverMcpDriver({
@@ -517,6 +517,7 @@ test("CuaDriverMcpDriver uses the verified clipboard change boundary for coordin
         clipboardRestored: true,
         changeSignalDelivered: true,
         focusVerified: true,
+        exactValueVerified: true,
         deliveryPath: "windows_clipboard_transaction",
       };
     },
@@ -538,16 +539,17 @@ test("CuaDriverMcpDriver uses the verified clipboard change boundary for coordin
     y: 56,
     value: "宋鹏",
     textMode: "replace-all",
-    inputBehavior: "incremental",
+    inputBehavior: "commit",
     deliveryMode: "foreground",
   });
 
   assert.equal(unicodeCalls.length, 1);
-  assert.equal(unicodeCalls[0].inputBehavior, "incremental");
+  assert.equal(unicodeCalls[0].inputBehavior, "commit");
   assert.equal(unicodeCalls[0].replaceAll, true);
-  assert.equal(result.providerPath, "windows-native-clipboard-change-boundary");
+  assert.equal(result.providerPath, "windows_clipboard_transaction");
   assert.equal(result.changeSignalDelivered, true);
   assert.equal(result.focusVerified, true);
+  assert.equal(result.verified, true);
   assert.deepEqual(calls.filter((call) => call.name === "type_text"), []);
 });
 
@@ -607,6 +609,7 @@ test("CuaDriverMcpDriver uses the native clipboard transaction for coordinate AS
         clipboardRestored: true,
         changeSignalDelivered: true,
         focusVerified: true,
+        deliveryPath: "windows_sendinput_unicode_ime_neutral",
       };
     },
     client: {
@@ -631,7 +634,7 @@ test("CuaDriverMcpDriver uses the native clipboard transaction for coordinate AS
   assert.equal(nativeInputCalls.length, 1);
   assert.equal(nativeInputCalls[0].text, "message-123");
   assert.equal(nativeInputCalls[0].replaceAll, true);
-  assert.equal(result.providerPath, "windows-native-clipboard-change-boundary");
+  assert.equal(result.providerPath, "windows_sendinput_unicode_ime_neutral");
   assert.deepEqual(calls.filter((call) => call.name === "press_key"), []);
   assert.deepEqual(calls.filter((call) => call.name === "type_text"), []);
 });
@@ -677,16 +680,16 @@ test("CuaDriverMcpDriver verifies foreground immediately before a pixel click", 
 });
 
 test("CuaDriverMcpDriver verifies an editable focus click without entering text", async () => {
-  const unicodeCalls = [];
+  const focusCalls = [];
   const driver = new CuaDriverMcpDriver({
     session: "focus-editable-click-session",
     foregroundWindowProbe: async () => "42",
-    unicodeInput: async (args) => {
-      unicodeCalls.push(args);
+    focusVerifier: async (args) => {
+      focusCalls.push(args);
       return {
         status: "ok",
         focusVerified: true,
-        deliveryPath: "windows_sendinput_unicode_ime_neutral",
+        verificationPath: "windows-focused-process-boundary",
       };
     },
     client: {
@@ -704,9 +707,12 @@ test("CuaDriverMcpDriver verifies an editable focus click without entering text"
   });
 
   assert.equal(result.focusVerified, true);
-  assert.equal(unicodeCalls.length, 1);
-  assert.equal(unicodeCalls[0].text, "");
-  assert.equal(unicodeCalls[0].replaceAll, false);
+  assert.deepEqual(focusCalls, [{
+    windowId: 42,
+    processId: 1234,
+    signal: focusCalls[0].signal,
+  }]);
+  assert.equal("text" in focusCalls[0], false);
 });
 
 test("CuaDriverMcpDriver uses verified foreground fallback before delivering a pixel click", async () => {

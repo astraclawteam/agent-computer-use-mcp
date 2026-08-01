@@ -4,6 +4,7 @@ import { test } from "node:test";
 import {
   ComputerUseProviderRouter,
   observedCompositeTextElementAtTarget,
+  observedExactDecoratedEditableTextAtTarget,
   planPostActionEffectRegion,
   planPostActionObservationCrop,
 } from "../src/computer-use-provider-router.mjs";
@@ -107,6 +108,25 @@ test("post-write verification accepts compact OCR adornments only inside the gro
     ),
     false,
   );
+});
+
+test("exact replace-all verification accepts only the known leading search decoration", () => {
+  const target = { x: 77, y: 42, width: 170, height: 26 };
+  assert.equal(observedExactDecoratedEditableTextAtTarget({
+    source: "ocr",
+    name: "Q Example-用户",
+    bounds: { x: 74, y: 42, width: 112, height: 24 },
+  }, "Example-用户", target), true);
+  assert.equal(observedExactDecoratedEditableTextAtTarget({
+    source: "ocr",
+    name: "prefix Example-用户",
+    bounds: { x: 74, y: 42, width: 160, height: 24 },
+  }, "Example-用户", target), false);
+  assert.equal(observedExactDecoratedEditableTextAtTarget({
+    source: "ocr",
+    name: "Q Example-用户 suffix",
+    bounds: { x: 74, y: 42, width: 170, height: 24 },
+  }, "Example-用户", target), false);
 });
 
 test("computer.release aborts an admitted external desktop action before a late effect", async (t) => {
@@ -631,6 +651,45 @@ test("provider router resolves an elementId only through the current Host Scene 
   assert.equal(result.outcome, "committed");
   assert.equal(calls[0].elementToken, "provider-button");
   assert.equal(calls[0].elementId, undefined);
+});
+
+test("Host binds a pixel Scene elementId to its private screenshot geometry before policy", async (t) => {
+  const router = new ComputerUseProviderRouter();
+  t.after(() => router.close());
+  router.activeController = {
+    controllerId: "controller-1",
+    tier: "full",
+    window: { id: "window-1", windowId: "window-1", title: "Fixture", bounds: { width: 960, height: 720 } },
+    expiresAtMs: Date.now() + 10_000,
+  };
+  router.lastCapture = router.createActionObservation({
+    observationId: "pixel-scene-action-1",
+    source: "window-capture",
+    coordinateSpace: "window-local",
+    coordinateBounds: { x: 0, y: 0, width: 960, height: 720 },
+    capture: { width: 960, height: 720 },
+    window: { id: "window-1", bounds: { width: 960, height: 720 } },
+    elements: [fusedElement({
+      elementToken: "private-search",
+      role: "search",
+      bounds: { x: 76, y: 38, width: 178, height: 36 },
+      sourceRegion: { x: 76, y: 38, width: 178, height: 36 },
+      actions: ["click", "type_text"],
+    })],
+  });
+  const target = router.lastCapture.scene.elements.find((element) => element.role === "search");
+
+  const bound = router.bindCurrentActionReceipts({
+    kind: "type_text",
+    elementId: target.id,
+    value: "Example-用户",
+    textMode: "replace-all",
+  });
+
+  assert.equal(bound.elementId, target.id);
+  assert.equal(bound.observationId, "pixel-scene-action-1");
+  assert.equal(bound.coordinateSpace, "window-local");
+  assert.deepEqual(bound.targetBounds, { x: 76, y: 38, width: 178, height: 36 });
 });
 
 test("explicitly unverified pixel clicks are indeterminate and require observation", async (t) => {

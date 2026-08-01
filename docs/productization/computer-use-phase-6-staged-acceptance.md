@@ -1,10 +1,14 @@
 # Computer Use Phase 6: staged real-application acceptance
 
-Status: the Level 1 composition blocker is repaired on `main`; attempt 1 has
-restarted and passed `restore-main-window` plus `focus-search`. It is paused
-before `enter-query` because no explicit real test contact or message body was
-provided. The attempt is not counted as passed or failed. No message was
-entered or sent, no later level was started, and no candidate artifact was
+Status: the initial Level 1 search-surface blocker is repaired on `main`, but
+Level 1 remains open. Real preflights proved foreground restoration, focused
+search ownership, one exact committed query, and current-over-stale OCR cache
+ownership. The real result dropdown and contact preview are separate owned
+transient windows: desktop-composited observation can see them, while the
+current main-window capture excludes them. Host therefore has no consistent
+`TransientSurface/search-results` or owned `ActionableItem/search-result`. No
+preflight is counted as passed or failed, no result was selected, no message
+was entered or sent, no later level was started, and no candidate artifact was
 generated.
 
 ## Gate contract
@@ -32,7 +36,7 @@ The recorder rejects unknown fields so contact names, message bodies, OCR text,
 screenshots, and local paths cannot enter retained Phase 6 evidence. Local
 candidate generation remains locked until all seven levels are 10/10.
 
-## First real Level 1 attempt
+## Historical blocked Level 1 baseline
 
 The attempt used the official MCP SDK client, the current source server, and
 the configured real Windows driver. It selected exactly one returned WeChat
@@ -74,10 +78,35 @@ The real `focus-search` action then returned `committed`, issued a verified
 focus receipt, and produced a newer consistent Scene where the search editable
 reported `focused=true` and still authorized `type_text`.
 
-No contact or message content is retained in this evidence. Because the
-operator has not supplied an explicit full-contact test goal and message body,
-the workflow released the controller before `enter-query`; a fresh connector
-reported `status=idle` with no active controller. Levels 2–7 remain closed.
+No contact or message content is retained in this evidence. The workflow
+released the controller before `enter-query`; a fresh connector reported
+`status=idle` with no active controller. Levels 2–7 remain closed.
+
+## Current Level 1 restart blocker
+
+The current source can recover a populated search role after a connector
+restart from a pixel-grounded control surface plus a separately recognized
+search decoration. Host now maps Scene ids to private screenshot geometry
+before action policy, performs a full-window OCR retry when a tight crop cannot
+prove replace-all text, and treats overlapping same-target OCR disagreement as
+a conflict instead of concatenating values. One real query reached
+`committed` through the exact grounded-target postcondition.
+
+The latest restart corrected punctuation-shaped search icons, let current OCR
+supersede stale OCR at the same region, and made current specific control
+geometry outrank a wider remembered boundary. The deterministic state machine
+now uses the exact commit primitive instead of the obsolete incremental path
+for replace-all text. One real query returned `committed` with exact local
+postcondition verification; an earlier indeterminate incremental write was not
+replayed.
+
+The matching contact does appear in the application's owned transient result
+window. It is absent from the Host's current main-window capture, so composing
+an actionable row from main-window OCR would assign the wrong window and region
+owner. `select-result` therefore remains closed until the capture layer imports
+owned transient windows with their own window ids, screenshot ids, coordinate
+spaces, and parent relationship. Every preflight released its controller, and
+no private query or message body is retained here.
 
 Focused contract verification:
 

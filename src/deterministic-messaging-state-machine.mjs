@@ -738,7 +738,7 @@ function textAction(elementId, value) {
     elementId,
     value,
     textMode: "replace-all",
-    inputBehavior: "incremental",
+    inputBehavior: "commit",
   };
 }
 

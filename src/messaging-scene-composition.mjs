@@ -1,6 +1,9 @@
 import { proposeSomFromImageFile } from "./som-proposal-provider.mjs";
 import { normalizeRecognizedUiText } from "./ui-text-normalization.mjs";
-import { createCanvas, loadImage } from "ppu-ocv";
+import {
+  detectControlSurfaceFromPixels,
+  readImagePixels,
+} from "./control-surface-detection.mjs";
 
 const SEARCH_LABELS = new Set(["search", "find", "搜索", "查找"]);
 const VISUAL_THRESHOLDS = Object.freeze([8, 24]);
@@ -14,8 +17,9 @@ export function stableCompositionOcrElements({
   if (!visualSceneStable) return current;
   const merged = [...current];
   for (const previous of previousElements.filter(isOcrElement)) {
+    const superseded = current.some((candidate) => sameOcrRegion(candidate, previous));
     const duplicate = merged.some((candidate) => sameOcrOccurrence(candidate, previous));
-    if (!duplicate) merged.push(previous);
+    if (!superseded && !duplicate) merged.push(previous);
   }
   return merged;
 }
@@ -34,10 +38,10 @@ export async function detectMessagingVisualProposals({
     maxProposals: 128,
     minConfidence: 0.7,
   })));
-  const pixels = await readPixels(imagePath);
+  const pixels = await readImagePixels(imagePath);
   const semanticSurfaces = ocrElements.flatMap((element, index) => {
     if (!isOcrElement(element) || semanticControlRole(elementText(element)) === null) return [];
-    const surface = detectControlSurfaceFromPixels(pixels, element.bounds);
+    const surface = detectControlSurfaceFromPixels(pixels, semanticLabelBounds(element));
     if (!surface) return [];
     return [{
       proposalId: `semantic-surface-${index + 1}`,
@@ -53,119 +57,7 @@ export async function detectMessagingVisualProposals({
     ...observations.flatMap((observation) => observation?.proposals ?? []),
     ...semanticSurfaces,
   ];
-  const deduplicated = deduplicateVisualProposals(proposals);
-  Object.defineProperty(deduplicated, "diagnostics", {
-    value: Object.freeze({
-      somProposalCount: proposals.length - semanticSurfaces.length,
-      semanticSurfaceCount: semanticSurfaces.length,
-      retainedSemanticSurfaceCount: deduplicated.filter(isSemanticSurface).length,
-    }),
-    enumerable: false,
-  });
-  return deduplicated;
-}
-
-export function detectControlSurfaceFromPixels(image, textBounds, { tolerance = 6 } = {}) {
-  if (!isPixelImage(image) || !isBox(textBounds)) return null;
-  const centerY = Math.floor(textBounds.y + (textBounds.height / 2));
-  const rowCandidates = [...new Set([
-    -3, -2, -1, 0,
-    textBounds.height - 1,
-    textBounds.height, textBounds.height + 1, textBounds.height + 2, textBounds.height + 3,
-  ].map((offset) => Math.max(
-    0,
-    Math.min(image.height - 1, Math.floor(textBounds.y + offset)),
-  )))];
-  const seedCandidates = [
-    Math.max(0, Math.floor(textBounds.x - 6)),
-    Math.min(image.width - 1, Math.ceil(textBounds.x + textBounds.width + 6)),
-  ];
-  const horizontalCandidates = rowCandidates.flatMap((y) => seedCandidates.map((x) => (
-    scanHorizontal(image, x, y, tolerance)
-  ))).filter((segment) => segment.x <= textBounds.x
-    && segment.x + segment.width >= textBounds.x + textBounds.width
-    && segment.width <= Math.min(image.width * 0.6, textBounds.width * 12));
-  const outline = detectOutlinedSurface(horizontalCandidates, textBounds, image);
-  if (outline) return outline;
-  const horizontal = horizontalCandidates.sort((left, right) => left.width - right.width)[0];
-  if (!horizontal) return null;
-
-  const verticalSeeds = [
-    Math.max(horizontal.x, Math.floor(textBounds.x - 8)),
-    Math.min(horizontal.x + horizontal.width - 1, Math.ceil(textBounds.x + textBounds.width + 8)),
-  ];
-  const vertical = verticalSeeds.map((x) => scanVertical(image, x, centerY, tolerance))
-    .filter((segment) => segment.y <= textBounds.y
-      && segment.y + segment.height >= textBounds.y + textBounds.height)
-    .sort((left, right) => right.height - left.height)[0];
-  if (!vertical) return null;
-
-  const candidate = {
-    x: horizontal.x,
-    y: vertical.y,
-    width: horizontal.width,
-    height: vertical.height,
-  };
-  const horizontalPadding = candidate.width - textBounds.width;
-  const verticalPadding = candidate.height - textBounds.height;
-  const areaRatio = area(candidate) / area(textBounds);
-  if (!contains(candidate, textBounds)
-    || horizontalPadding < 8 || verticalPadding < 3
-    || candidate.width > Math.min(image.width * 0.6, textBounds.width * 12)
-    || candidate.height > Math.min(image.height * 0.5, Math.max(80, textBounds.height * 4))
-    || areaRatio > 80) return null;
-  return candidate;
-}
-
-function detectOutlinedSurface(segments, textBounds, image) {
-  const top = segments
-    .filter((segment) => segment.y < textBounds.y)
-    .sort((left, right) => right.y - left.y || left.width - right.width)[0];
-  const bottom = segments
-    .filter((segment) => segment.y >= textBounds.y + textBounds.height - 1)
-    .sort((left, right) => left.y - right.y || left.width - right.width)[0];
-  if (!top || !bottom || bottom.y <= top.y) return null;
-  const left = Math.max(top.x, bottom.x);
-  const right = Math.min(top.x + top.width, bottom.x + bottom.width);
-  const candidate = {
-    x: left,
-    y: top.y,
-    width: right - left,
-    height: bottom.y - top.y + 1,
-  };
-  if (!isBox(candidate) || !contains(candidate, textBounds)) return null;
-  const horizontalPadding = candidate.width - textBounds.width;
-  const verticalPadding = candidate.height - textBounds.height;
-  const areaRatio = area(candidate) / area(textBounds);
-  const interiorColor = pixelAt(
-    image,
-    Math.floor(candidate.x + candidate.width / 2),
-    Math.floor(candidate.y + candidate.height / 2),
-  );
-  if (horizontalPadding < 8 || verticalPadding < 1
-    || candidate.width > Math.min(image.width * 0.6, textBounds.width * 12)
-    || candidate.height > Math.min(image.height * 0.5, Math.max(80, textBounds.height * 4))
-    || horizontalOverlapBySmallerWidth(top, bottom) < 0.8
-    || colorDistance(top.color, interiorColor) <= 12
-    || colorDistance(bottom.color, interiorColor) <= 12
-    || areaRatio > 80) return null;
-  return candidate;
-}
-
-function colorDistance(left, right) {
-  return Math.max(
-    Math.abs(left.r - right.r),
-    Math.abs(left.g - right.g),
-    Math.abs(left.b - right.b),
-  );
-}
-
-function horizontalOverlapBySmallerWidth(left, right) {
-  const overlap = Math.max(
-    0,
-    Math.min(left.x + left.width, right.x + right.width) - Math.max(left.x, right.x),
-  );
-  return overlap / Math.min(left.width, right.width);
+  return deduplicateVisualProposals(proposals);
 }
 
 export function composeMessagingSceneElements({
@@ -175,31 +67,25 @@ export function composeMessagingSceneElements({
   knownControls = [],
   focusedTarget = null,
 } = {}) {
-  if (!isBox(coordinateBounds)) return frozenResult([], [], {
-    ocrCount: 0,
-    visualProposalCount: 0,
-    semanticControlLabelCount: 0,
-    matchedControlCount: 0,
-    conflictCount: 0,
-  });
+  if (!isBox(coordinateBounds)) return frozenResult([], []);
   const ocr = ocrElements.filter(isOcrElement);
   const visual = visualProposals.filter((proposal) => isBox(proposal?.bounds));
   const elements = [];
   const nextKnownControls = [];
   const consumedOcr = new Set();
-  let conflictCount = 0;
 
   for (const control of normalizeKnownControls(knownControls, coordinateBounds)) {
     const owners = visualOwnersForKnownControl(control, visual);
     if (owners.length === 0) continue;
-    const text = ocr.filter((element) => contains(owners[0].bounds, element.bounds));
-    const conflict = materiallyDifferentOwners(owners);
-    if (conflict) conflictCount += 1;
+    const text = ocr.filter((element) => ocrBelongsToEditable(owners[0].bounds, element.bounds));
+    const evidence = editableEvidenceForKnownControl(text, owners[0].bounds);
+    if (!evidence.support) continue;
+    const conflict = materiallyDifferentOwners(owners) || evidence.conflict;
     const composition = searchComposition({
-      ocr: text[0] ?? null,
+      ocr: evidence.support,
       owners,
       conflict,
-      value: text.map(elementText).filter(Boolean).join(" "),
+      value: evidence.value,
       focusedTarget,
     });
     elements.push(...composition.elements);
@@ -209,28 +95,88 @@ export function composeMessagingSceneElements({
 
   for (const item of ocr) {
     if (consumedOcr.has(item) || semanticControlRole(elementText(item)) !== "search") continue;
-    const owners = visualOwnersForOcr(item, visual);
+    const owners = visualOwnersForOcr({ ...item, bounds: semanticLabelBounds(item) }, visual);
     if (owners.length === 0) continue;
     const conflict = materiallyDifferentOwners(owners);
-    if (conflict) conflictCount += 1;
     const composition = searchComposition({
       ocr: item,
       owners,
       conflict,
-      value: "",
+      value: semanticSearchValue(item),
       focusedTarget,
     });
     elements.push(...composition.elements);
     if (!conflict) nextKnownControls.push(composition.knownControl);
   }
 
-  return frozenResult(elements, uniqueKnownControls(nextKnownControls), {
-    ocrCount: ocr.length,
-    visualProposalCount: visual.length,
-    semanticControlLabelCount: ocr.filter((item) => semanticControlRole(elementText(item)) !== null).length,
-    matchedControlCount: elements.filter((element) => element.role === "search").length,
-    conflictCount,
-  });
+  return frozenResult(elements, uniqueKnownControls(nextKnownControls));
+}
+
+function editableEvidenceForKnownControl(elements, bounds) {
+  const contentLeft = bounds.x + (bounds.width * 0.1);
+  const contentRight = bounds.x + (bounds.width * 0.9);
+  const content = elements
+    .filter((element) => {
+      const centerX = element.bounds.x + (element.bounds.width / 2);
+      return centerX >= contentLeft && centerX <= contentRight;
+    })
+    .sort((left, right) => left.bounds.y - right.bounds.y || left.bounds.x - right.bounds.x);
+  const textByElement = new Map(content.map((element) => [
+    element,
+    editableElementText(element, bounds),
+  ]));
+  const placeholder = content.find(
+    (element) => semanticControlRole(textByElement.get(element)) === "search",
+  );
+  const valueElements = content.filter(
+    (element) => semanticControlRole(textByElement.get(element)) !== "search",
+  );
+  const conflictingValues = valueElements.some((left, index) => valueElements
+    .slice(index + 1)
+    .some((right) => intersectionOverUnion(left.bounds, right.bounds) >= 0.6
+      && normalizeControlLabel(textByElement.get(left))
+        !== normalizeControlLabel(textByElement.get(right))));
+  return {
+    support: valueElements[0] ?? placeholder ?? null,
+    value: valueElements.map((element) => textByElement.get(element)).filter(Boolean).join(""),
+    conflict: conflictingValues,
+  };
+}
+
+function editableElementText(element, bounds) {
+  const characters = [...elementText(element)];
+  let removedLeadingDecoration = false;
+  if (characters.length > 1
+    && element.bounds.x < bounds.x + (bounds.width * 0.1)
+    && isOcrDecorationCharacter(characters[0])) {
+    characters.shift();
+    removedLeadingDecoration = true;
+  }
+  if (characters.length > 1
+    && element.bounds.x + element.bounds.width > bounds.x + (bounds.width * 0.9)
+    && isOcrDecorationCharacter(characters.at(-1))) characters.pop();
+  return removedLeadingDecoration ? characters.join("").trimStart() : characters.join("");
+}
+
+function semanticLabelBounds(element) {
+  const characters = [...elementText(element)];
+  if (isSearchIconDecoratedText(characters.join(""))) {
+    return {
+      ...element.bounds,
+      x: element.bounds.x + (element.bounds.width / characters.length),
+      width: element.bounds.width * ((characters.length - 1) / characters.length),
+    };
+  }
+  const normalized = normalizeControlLabel(characters.join(""));
+  const label = [...SEARCH_LABELS].find((candidate) => normalized.endsWith(candidate));
+  if (!label || normalized === label || characters.length <= [...label].length) return element.bounds;
+  const labelLength = [...label].length;
+  const prefixLength = characters.length - labelLength;
+  return {
+    ...element.bounds,
+    x: element.bounds.x + (element.bounds.width * (prefixLength / characters.length)),
+    width: element.bounds.width * (labelLength / characters.length),
+  };
 }
 
 function searchComposition({ ocr, owners, conflict, value, focusedTarget }) {
@@ -267,7 +213,7 @@ function searchComposition({ ocr, owners, conflict, value, focusedTarget }) {
       role: "search",
       actions: conflict ? [] : ["click", "type_text"],
       name: "Search",
-      value,
+      value: conflict ? null : value,
       semanticKey: "control:search",
       state: { focused: targetOverlapsBounds(focusedTarget, bounds) },
     }],
@@ -292,19 +238,26 @@ function visualOwnersForOcr(ocr, visual) {
   });
 }
 
+function ocrBelongsToEditable(editableBounds, ocrBounds) {
+  return intersectionArea(editableBounds, ocrBounds) / area(ocrBounds) >= 0.8;
+}
+
 function visualOwnersForKnownControl(control, visual) {
-  const ranked = visual
-    .filter((proposal) => overlapBySmallerArea(control.bounds, proposal.bounds) >= 0.75)
-    .map((proposal) => ({
-      proposal,
-      score: intersectionOverUnion(control.bounds, proposal.bounds),
-    }))
-    .sort((left, right) => right.score - left.score);
-  if (ranked.length === 0) return [];
-  const bestScore = ranked[0].score;
-  return ranked
-    .filter((candidate) => bestScore - candidate.score <= 0.05)
-    .map((candidate) => candidate.proposal);
+  const controlArea = area(control.bounds);
+  const candidates = visual
+    .filter((proposal) => {
+      const areaRatio = area(proposal.bounds) / controlArea;
+      return overlapBySmallerArea(control.bounds, proposal.bounds) >= 0.75
+        && areaRatio >= 0.5
+        && areaRatio <= 1.5;
+    })
+    .sort(compareArea);
+  if (candidates.length === 0) return [];
+  const smallestArea = area(candidates[0].bounds);
+  const semanticPeer = candidates.find((candidate) => (
+    isSemanticSurface(candidate) && area(candidate.bounds) <= smallestArea * 1.15
+  ));
+  return [semanticPeer ?? candidates[0]];
 }
 
 function materiallyDifferentOwners(owners) {
@@ -314,15 +267,17 @@ function materiallyDifferentOwners(owners) {
 }
 
 function independentSupport(owner, ocr) {
-  return [{
+  const support = [{
     provider: "som-proposal",
     confidence: finiteConfidence(owner.confidence, 0.7),
     proposalId: String(owner.proposalId ?? `visual:${stableBoxId(owner.bounds)}`),
-  }, {
-    provider: "ocr",
-    confidence: finiteConfidence(ocr?.confidence, 0.9),
-    proposalId: String(ocr?.proposalId ?? ocr?.elementToken ?? "ocr-owned-label"),
   }];
+  if (ocr) support.push({
+    provider: "ocr",
+    confidence: finiteConfidence(ocr.confidence, 0.9),
+    proposalId: String(ocr.proposalId ?? ocr.elementToken ?? "ocr-owned-label"),
+  });
+  return support;
 }
 
 function normalizeKnownControls(controls, coordinateBounds) {
@@ -361,9 +316,35 @@ function isSemanticSurface(proposal) {
 }
 
 function semanticControlRole(value) {
-  const normalized = normalizeRecognizedUiText(String(value ?? ""), { languageClass: "mixed" })
+  if (isSearchIconDecoratedText(value)) return "search";
+  const normalized = normalizeControlLabel(value);
+  if (SEARCH_LABELS.has(normalized)) return "search";
+  const label = [...SEARCH_LABELS].find((candidate) => normalized.endsWith(candidate));
+  if (!label) return null;
+  const prefix = normalized.slice(0, -label.length).trim();
+  return prefix.length === 1 && isOcrDecorationCharacter(prefix) ? "search" : null;
+}
+
+function semanticSearchValue(element) {
+  const text = elementText(element);
+  if (!isSearchIconDecoratedText(text)) return "";
+  const value = [...text].slice(1).join("").trimStart();
+  return SEARCH_LABELS.has(normalizeControlLabel(value)) ? "" : value;
+}
+
+function normalizeControlLabel(value) {
+  return normalizeRecognizedUiText(String(value ?? ""), { languageClass: "mixed" })
     .toLocaleLowerCase();
-  return SEARCH_LABELS.has(normalized) ? "search" : null;
+}
+
+function isOcrDecorationCharacter(value) {
+  return /^[a-z0-9.·•]$/iu.test(value);
+}
+
+function isSearchIconDecoratedText(value) {
+  return /^Q(?=[^a-z])/u.test(normalizeRecognizedUiText(String(value ?? ""), {
+    languageClass: "mixed",
+  }));
 }
 
 function isOcrElement(element) {
@@ -388,6 +369,10 @@ function sameOcrOccurrence(left, right) {
     && intersectionOverUnion(left.bounds, right.bounds) >= 0.8;
 }
 
+function sameOcrRegion(left, right) {
+  return overlapBySmallerArea(left.bounds, right.bounds) >= 0.8;
+}
+
 function targetOverlapsBounds(target, bounds) {
   if (isBox(target?.bounds)) return overlapBySmallerArea(target.bounds, bounds) >= 0.5;
   if (Number.isFinite(target?.x) && Number.isFinite(target?.y)) {
@@ -405,11 +390,10 @@ function finiteConfidence(value, fallback) {
   return Number.isFinite(value) && value >= 0 && value <= 1 ? value : fallback;
 }
 
-function frozenResult(elements, knownControls, diagnostics) {
+function frozenResult(elements, knownControls) {
   return Object.freeze({
     elements: Object.freeze(elements.map((element) => Object.freeze({ ...element }))),
     knownControls: Object.freeze(knownControls),
-    diagnostics: Object.freeze({ ...diagnostics }),
   });
 }
 
@@ -456,59 +440,4 @@ function intersectionArea(left, right) {
 
 function stableBoxId(value) {
   return `${value.x}:${value.y}:${value.width}:${value.height}`;
-}
-
-function scanHorizontal(image, x, y, tolerance) {
-  const color = pixelAt(image, x, y);
-  let left = x;
-  let right = x;
-  while (left > 0 && similarColor(pixelAt(image, left - 1, y), color, tolerance)) left -= 1;
-  while (right < image.width - 1 && similarColor(pixelAt(image, right + 1, y), color, tolerance)) right += 1;
-  return { x: left, y, width: right - left + 1, color };
-}
-
-function scanVertical(image, x, y, tolerance) {
-  const color = pixelAt(image, x, y);
-  let top = y;
-  let bottom = y;
-  while (top > 0 && similarColor(pixelAt(image, x, top - 1), color, tolerance)) top -= 1;
-  while (bottom < image.height - 1 && similarColor(pixelAt(image, x, bottom + 1), color, tolerance)) bottom += 1;
-  return { x, y: top, height: bottom - top + 1 };
-}
-
-function pixelAt(image, x, y) {
-  const offset = (y * image.width + x) * 4;
-  return {
-    r: image.data[offset] ?? 0,
-    g: image.data[offset + 1] ?? 0,
-    b: image.data[offset + 2] ?? 0,
-  };
-}
-
-function similarColor(left, right, tolerance) {
-  return Math.max(
-    Math.abs(left.r - right.r),
-    Math.abs(left.g - right.g),
-    Math.abs(left.b - right.b),
-  ) <= tolerance;
-}
-
-function isPixelImage(value) {
-  return value !== null && typeof value === "object"
-    && Number.isInteger(value.width) && value.width > 0
-    && Number.isInteger(value.height) && value.height > 0
-    && value.data?.length >= value.width * value.height * 4;
-}
-
-async function readPixels(path) {
-  const image = await loadImage(path);
-  const canvas = createCanvas(image.width, image.height);
-  const context = canvas.getContext("2d");
-  context.drawImage(image, 0, 0);
-  const imageData = context.getImageData(0, 0, image.width, image.height);
-  return {
-    width: image.width,
-    height: image.height,
-    data: imageData.data,
-  };
 }

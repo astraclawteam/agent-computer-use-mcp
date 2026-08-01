@@ -42,7 +42,7 @@ test("the Host-driven workflow commits the fixed role-based sequence and release
   );
   const textActions = host.actions.filter(({ action }) => action.kind === "type_text");
   assert.deepEqual(textActions.map(({ action }) => action.textMode), ["replace-all", "replace-all"]);
-  assert.deepEqual(textActions.map(({ action }) => action.inputBehavior), ["incremental", "incremental"]);
+  assert.deepEqual(textActions.map(({ action }) => action.inputBehavior), ["commit", "commit"]);
   assert.equal(host.actions.every(({ action }) => action.x === undefined && action.y === undefined), true);
 });
 

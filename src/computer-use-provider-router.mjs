@@ -1212,7 +1212,6 @@ export class ComputerUseProviderRouter {
         };
       }
     }
-    let messagingCompositionError = null;
     if (localObservation
       && (explicitVisualQuestion || this.messagingSceneControls.length > 0)) {
       try {
@@ -1242,15 +1241,13 @@ export class ComputerUseProviderRouter {
             ...(Array.isArray(localObservation.elements) ? localObservation.elements : []),
             ...composition.elements,
           ],
-          messagingSceneComposition: {
-            status: composition.elements.length > 0 ? "composed" : "insufficient",
-            controlCount: composition.knownControls.length,
-          },
         };
       } catch (error) {
         this.assertOperationTicket(ticket);
         this.messagingSceneControls = [];
-        messagingCompositionError = serializeToolError(error);
+        this.recordAudit("computer.scene.composition_failed", {
+          errorCode: safeAuditErrorCode(error, "scene.composition_failed"),
+        });
       }
     }
     const localElements = Array.isArray(localObservation?.elements)
@@ -1408,7 +1405,6 @@ export class ComputerUseProviderRouter {
                 : "no-explicit-visual-ambiguity",
         ...(noProgress ? { noProgress } : {}),
         ...(ocrError ? { ocrError } : {}),
-        ...(messagingCompositionError ? { messagingCompositionError } : {}),
       },
     };
   }
@@ -1769,9 +1765,17 @@ export class ComputerUseProviderRouter {
           ticket,
           () => new Promise((resolve) => setTimeout(resolve, POST_TEXT_DEPENDENT_UI_RETRY_MS)),
         );
+        const {
+          crop: _targetCrop,
+          includeChangedRegionAlongsideCrop: _includeChangedRegion,
+          ...fullWindowVerificationArgs
+        } = postActionCaptureArgs;
         actionResult.capture = await this.awaitExternal(
           ticket,
-          () => this.captureOperation(postActionCaptureArgs, ticket),
+          () => this.captureOperation({
+            ...fullWindowVerificationArgs,
+            crop: actionObservation.coordinateBounds,
+          }, ticket),
         );
       }
       if (automaticLocalPostActionObservation) {
@@ -2752,6 +2756,20 @@ export class ComputerUseProviderRouter {
   bindCurrentActionReceipts(action = {}) {
     if (!action || typeof action !== "object" || Array.isArray(action)) return action;
     let normalized = { ...action };
+    const sceneElement = resolveHostSceneElement(this.lastCapture?.scene, normalized);
+    const providerElement = sceneElement
+      ? resolveProviderElementBinding(this.lastCapture, sceneElement)
+      : null;
+    if (providerElement?.pixelLimitedAction === true
+      && isCoordinateBox(sceneElement?.coordinate?.bounds)
+      && typeof sceneElement.coordinate.screenshotId === "string") {
+      normalized = {
+        ...normalized,
+        observationId: normalized.observationId ?? sceneElement.coordinate.screenshotId,
+        coordinateSpace: normalized.coordinateSpace ?? sceneElement.coordinate.space,
+        targetBounds: normalized.targetBounds ?? { ...sceneElement.coordinate.bounds },
+      };
+    }
     const surfaceReceipt = this.lastCapture?.surfaceReceipt;
     if (typeof normalized.observationId !== "string"
       && typeof normalized.surfaceReceiptId === "string"
@@ -3534,12 +3552,22 @@ function resolveProviderElementBinding(observation, sceneElement) {
 }
 
 function observationElements(observation) {
-  const direct = observation?.elements;
-  if (Array.isArray(direct)) return direct;
-  const nested = observation?.observation?.elements;
-  if (Array.isArray(nested)) return nested;
-  const local = observation?.localObservation?.elements;
-  return Array.isArray(local) ? local : [];
+  const sources = [
+    observation?.elements,
+    observation?.observation?.elements,
+    observation?.localObservation?.elements,
+  ].filter(Array.isArray);
+  const seen = new Set();
+  return sources.flatMap((elements) => elements.filter((element) => {
+    if (seen.has(element)) return false;
+    seen.add(element);
+    return true;
+  }));
+}
+
+function safeAuditErrorCode(error, fallback) {
+  const candidate = typeof error?.code === "string" ? error.code : "";
+  return /^[a-z][a-z0-9._-]{1,100}$/u.test(candidate) ? candidate : fallback;
 }
 
 function semanticStateFingerprint(observation) {
@@ -4229,13 +4257,11 @@ function findObservedTextAtTarget(
   const horizontalTolerance = Number.isFinite(width) ? Math.max(96, width * 0.22) : 176;
   const verticalTolerance = Number.isFinite(height) ? Math.max(96, height * 0.16) : 112;
 
-  const compositeTargetMatches = exactOnly
-    ? []
-    : elements.filter((element) => observedCompositeTextElementAtTarget(
-      element,
-      intendedText,
-      target?.bounds,
-    ));
+  const compositeTargetMatches = elements.filter((element) => (
+    exactOnly
+      ? observedExactDecoratedEditableTextAtTarget(element, intendedText, target?.bounds)
+      : observedCompositeTextElementAtTarget(element, intendedText, target?.bounds)
+  ));
   return [...collectObservedTextElements(observation, intendedText), ...compositeTargetMatches]
     .filter((element) => {
       const bounds = observedElementBounds(element);
@@ -4363,6 +4389,32 @@ export function observedCompositeTextElementAtTarget(element, intendedValue, tar
   );
   const elementArea = elementBounds.width * elementBounds.height;
   return elementArea > 0 && (intersectionWidth * intersectionHeight) / elementArea >= 0.6;
+}
+
+export function observedExactDecoratedEditableTextAtTarget(element, intendedValue, targetBounds) {
+  if (element?.source !== "ocr" || !isCoordinateBox(targetBounds)) return false;
+  const elementBounds = observedElementBounds(element);
+  if (!elementBounds) return false;
+  const intendedText = normalizeRecognizedUiText(intendedValue, { languageClass: "mixed" });
+  const observedValue = typeof element?.value === "string"
+    ? element.value
+    : typeof element?.name === "string"
+      ? element.name
+      : "";
+  const observedText = normalizeRecognizedUiText(observedValue, { languageClass: "mixed" });
+  if (!intendedText || ![`Q${intendedText}`, `Q ${intendedText}`].includes(observedText)) return false;
+  if (elementBounds.x > targetBounds.x + (targetBounds.width * 0.1)) return false;
+  const intersectionWidth = Math.max(
+    0,
+    Math.min(elementBounds.x + elementBounds.width, targetBounds.x + targetBounds.width)
+      - Math.max(elementBounds.x, targetBounds.x),
+  );
+  const intersectionHeight = Math.max(
+    0,
+    Math.min(elementBounds.y + elementBounds.height, targetBounds.y + targetBounds.height)
+      - Math.max(elementBounds.y, targetBounds.y),
+  );
+  return (intersectionWidth * intersectionHeight) / (elementBounds.width * elementBounds.height) >= 0.6;
 }
 
 function collectObservedTextOccurrences(observation, intendedValue) {

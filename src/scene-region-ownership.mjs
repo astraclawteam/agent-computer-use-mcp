@@ -23,7 +23,6 @@ const EDITABLE_ROLES = new Set([
   "edit",
   "input",
   "search",
-  "search-box",
   "textbox",
   "text-field",
 ]);

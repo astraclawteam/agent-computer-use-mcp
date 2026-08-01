@@ -192,6 +192,7 @@ public static class AgentComputerUseUnicodeInput
     private const ushort VK_CONTROL = 0x11;
     private const ushort VK_A = 0x41;
     private const ushort VK_BACK = 0x08;
+    private const ushort VK_RIGHT = 0x27;
     private const ushort VK_SPACE = 0x20;
     private const uint WM_CHAR = 0x0102;
     private const uint SMTO_ABORTIFHUNG = 0x0002;
@@ -288,6 +289,10 @@ public static class AgentComputerUseUnicodeInput
         public bool ClipboardRestored { get; set; }
         public bool ChangeSignalDelivered { get; set; }
         public bool FocusVerified { get; set; }
+        public bool ExactValueVerified { get; set; }
+        public string ReadBackStatus { get; set; }
+        public string ReadBackComparison { get; set; }
+        public int ReadBackUtf16CodeUnits { get; set; }
     }
 
     public static PasteResult PasteUnicode(
@@ -327,6 +332,10 @@ public static class AgentComputerUseUnicodeInput
 
         bool pasted = false;
         bool clipboardRestored = false;
+        bool exactValueVerified = false;
+        bool readBackAvailable = false;
+        string readBackComparison = "unavailable";
+        int readBackUtf16CodeUnits = 0;
         try
         {
             if (replaceAll)
@@ -340,6 +349,13 @@ public static class AgentComputerUseUnicodeInput
             pasted = true;
             Thread.Sleep(50);
             EmitChangeBoundary(inputSize);
+            exactValueVerified = TryVerifyFocusedValue(
+                text,
+                inputSize,
+                out readBackAvailable,
+                out readBackComparison,
+                out readBackUtf16CodeUnits
+            );
         }
         finally
         {
@@ -366,8 +382,70 @@ public static class AgentComputerUseUnicodeInput
             Utf16CodeUnits = text.Length,
             ClipboardRestored = clipboardRestored,
             ChangeSignalDelivered = true,
-            FocusVerified = true
+            FocusVerified = true,
+            ExactValueVerified = exactValueVerified,
+            ReadBackStatus = readBackAvailable ? "available" : "unavailable",
+            ReadBackComparison = readBackComparison,
+            ReadBackUtf16CodeUnits = readBackUtf16CodeUnits
         };
+    }
+
+    private static bool TryVerifyFocusedValue(
+        string expected,
+        int inputSize,
+        out bool readBackAvailable,
+        out string comparison,
+        out int readBackUtf16CodeUnits
+    )
+    {
+        readBackAvailable = false;
+        comparison = "unavailable";
+        readBackUtf16CodeUnits = 0;
+        string sentinel = "agent-computer-use-" + Guid.NewGuid().ToString("N");
+        try
+        {
+            DataObject marker = new DataObject();
+            marker.SetData(DataFormats.UnicodeText, true, sentinel);
+            Clipboard.SetDataObject(marker, true);
+            SendChord(VK_CONTROL, VK_A, inputSize, "read-back selection");
+            SendChord(VK_CONTROL, 0x43, inputSize, "read-back copy");
+            for (int attempt = 0; attempt < 10; attempt++)
+            {
+                try
+                {
+                    string readBack = Clipboard.GetText(TextDataFormat.UnicodeText);
+                    if (readBack != sentinel && (readBack.Length > 0 || expected.Length == 0))
+                    {
+                        readBackAvailable = true;
+                        readBackUtf16CodeUnits = readBack.Length;
+                        if (readBack == expected)
+                        {
+                            comparison = "exact";
+                            return true;
+                        }
+                        if (readBack.Trim() == expected)
+                            comparison = "whitespace-only-difference";
+                        else if (readBack.Normalize() == expected.Normalize())
+                            comparison = "unicode-normalization-only-difference";
+                        else
+                            comparison = "different";
+                        return false;
+                    }
+                }
+                catch (System.Runtime.InteropServices.ExternalException) {}
+                Thread.Sleep(25);
+            }
+            return false;
+        }
+        catch
+        {
+            return false;
+        }
+        finally
+        {
+            try { SendKey(VK_RIGHT, inputSize, "read-back selection collapse"); }
+            catch {}
+        }
     }
 
     private static void SendKey(ushort key, int inputSize, string label)
@@ -435,6 +513,10 @@ $result = [AgentComputerUseUnicodeInput]::PasteUnicode(
     clipboardRestored = $result.ClipboardRestored
     changeSignalDelivered = $result.ChangeSignalDelivered
     focusVerified = $result.FocusVerified
+    exactValueVerified = $result.ExactValueVerified
+    readBackStatus = $result.ReadBackStatus
+    readBackComparison = $result.ReadBackComparison
+    readBackUtf16CodeUnits = $result.ReadBackUtf16CodeUnits
     deliveryPath = "windows_clipboard_transaction"
 } | ConvertTo-Json -Compress
 `;
@@ -538,6 +620,7 @@ export async function sendWindowsUnicodeText(options = {}) {
   return new Promise((resolve, reject) => {
     let settled = false;
     let stdout = "";
+    let stderr = "";
     let outputOverflow = false;
     const timer = setTimeout(() => {
       child.kill();
@@ -566,7 +649,7 @@ export async function sendWindowsUnicodeText(options = {}) {
       stdout = appendOutput(stdout, chunk);
     });
     child.stderr.on("data", (chunk) => {
-      appendOutput("", chunk);
+      stderr = appendOutput(stderr, chunk);
     });
     child.once("error", () => {
       finish(reject, unicodeInputError(
@@ -588,6 +671,7 @@ export async function sendWindowsUnicodeText(options = {}) {
             ...executionFailureDetail({ inputBehavior, replaceAll }),
             exitCode: Number.isInteger(code) ? code : null,
             outputOverflow,
+            bridgeFailure: classifyPowerShellBridgeFailure(stderr),
           },
         ));
         return;
@@ -608,6 +692,18 @@ export async function sendWindowsUnicodeText(options = {}) {
           clipboardRestored: result.clipboardRestored,
           changeSignalDelivered: result.changeSignalDelivered,
           focusVerified: result.focusVerified,
+          ...(typeof result.exactValueVerified === "boolean"
+            ? { exactValueVerified: result.exactValueVerified }
+            : {}),
+          ...(typeof result.readBackStatus === "string"
+            ? { readBackStatus: result.readBackStatus }
+            : {}),
+          ...(typeof result.readBackComparison === "string"
+            ? { readBackComparison: result.readBackComparison }
+            : {}),
+          ...(Number.isInteger(result.readBackUtf16CodeUnits)
+            ? { readBackUtf16CodeUnits: result.readBackUtf16CodeUnits }
+            : {}),
           deliveryPath: result.deliveryPath,
         });
       } catch {
@@ -649,6 +745,17 @@ export async function sendWindowsUnicodeText(options = {}) {
       settle(value);
     }
   });
+}
+
+function classifyPowerShellBridgeFailure(value) {
+  const text = String(value ?? "");
+  const compilerCode = text.match(/\berror\s+(CS\d{4})\b/iu)?.[1];
+  if (compilerCode) return `powershell-add-type-${compilerCode.toLocaleLowerCase()}`;
+  if (/clipboard/iu.test(text)) return "clipboard-operation-failed";
+  if (/foreground/iu.test(text)) return "foreground-verification-failed";
+  if (/focused window|no verified focused/iu.test(text)) return "focus-verification-failed";
+  if (/MethodInvocationException/iu.test(text)) return "powershell-method-invocation-failed";
+  return "bridge-process-rejected";
 }
 
 function unicodeInputAbortError(detail) {

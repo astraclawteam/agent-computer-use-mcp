@@ -11,7 +11,10 @@ import { ComputerUseProviderRouter } from "./computer-use-provider-router.mjs";
 import { CuaDriverMcpDriver } from "./cua-driver-mcp-driver.mjs";
 import { startGatewayManagedOverlay, stopGatewayManagedOverlay } from "./gateway-overlay-session.mjs";
 import { createPlatformOcrEnvironment, OcrSidecarSession } from "./ocr-sidecar.mjs";
-import { sendWindowsUnicodeText } from "./windows-unicode-input.mjs";
+import {
+  sendWindowsUnicodeText,
+} from "./windows-unicode-input.mjs";
+import { verifyWindowsFocusedProcess } from "./windows-focus-verification.mjs";
 
 export async function runComputerUseMcpServer(options = {}) {
   const router = new ComputerUseProviderRouter({
@@ -19,6 +22,7 @@ export async function runComputerUseMcpServer(options = {}) {
     driver: new CuaDriverMcpDriver({
       driverPath: options.platformRuntime?.paths?.cuaDriverExecutable,
       unicodeInput: sendWindowsUnicodeText,
+      focusVerifier: verifyWindowsFocusedProcess,
     }),
     overlayRuntime: {
       start: (args) => startGatewayManagedOverlay({

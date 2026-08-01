@@ -93,15 +93,19 @@ test("sendWindowsUnicodeText suspends active IME composition for non-ASCII incre
 
 test("sendWindowsUnicodeText sends replace-all intent through the private stdin payload", async () => {
   let stdinText = "";
-  const spawnProcess = () => fakeChild({
+  let encodedBridge = "";
+  const spawnProcess = (_command, args) => {
+    encodedBridge = args.at(-1);
+    return fakeChild({
     onStdin(value, child) {
       stdinText = value;
-      child.stdout.end('{"status":"ok","utf16CodeUnits":2,"clipboardRestored":true,"changeSignalDelivered":true,"focusVerified":true,"deliveryPath":"windows_clipboard_transaction"}');
+      child.stdout.end('{"status":"ok","utf16CodeUnits":2,"clipboardRestored":true,"changeSignalDelivered":true,"focusVerified":true,"exactValueVerified":true,"readBackStatus":"available","readBackComparison":"exact","readBackUtf16CodeUnits":2,"deliveryPath":"windows_clipboard_transaction"}');
       child.emit("close", 0, null);
     },
-  });
+    });
+  };
 
-  await sendWindowsUnicodeText({
+  const result = await sendWindowsUnicodeText({
     windowId: 42,
     processId: 1234,
     text: "宋鹏",
@@ -115,6 +119,14 @@ test("sendWindowsUnicodeText sends replace-all intent through the private stdin 
   const payload = JSON.parse(stdinText);
   assert.equal(payload.replaceAll, true);
   assert.equal(payload.inputBehavior, "commit");
+  assert.equal(result.exactValueVerified, true);
+  assert.equal(result.readBackStatus, "available");
+  assert.equal(result.readBackComparison, "exact");
+  assert.equal(result.readBackUtf16CodeUnits, 2);
+  const bridgeScript = Buffer.from(encodedBridge, "base64").toString("utf16le");
+  assert.match(bridgeScript, /read-back selection/);
+  assert.match(bridgeScript, /readBack == expected/);
+  assert.match(bridgeScript, /read-back selection collapse/);
   assert.equal(Buffer.from(payload.textBase64, "base64").toString("utf8"), "宋鹏");
 });
 

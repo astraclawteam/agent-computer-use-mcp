@@ -29,6 +29,7 @@ export class CuaDriverMcpDriver {
       ?? queryWindowsWindowRelationships;
     this.desktopSessionProbe = options.desktopSessionProbe ?? queryWindowsDesktopSession;
     this.unicodeInput = options.unicodeInput ?? null;
+    this.focusVerifier = options.focusVerifier ?? null;
     this.clientStarted = false;
     this.clientStartAttempted = false;
     this.sessionStarted = false;
@@ -683,11 +684,12 @@ export class CuaDriverMcpDriver {
         this.assertWorkTicket(ticket);
         return {
           ...result,
+          ...(result.exactValueVerified === true ? { verified: true } : {}),
           characters: value.length,
           textMode,
           inputBehavior,
           ...(coordinateFocusVerified ? { focusVerified: true } : {}),
-          providerPath: "windows-native-clipboard-change-boundary",
+          providerPath: result.deliveryPath ?? "windows-native-text-input",
         };
       }
       // Coordinates establish editable focus, but keyboard delivery must target
@@ -770,21 +772,18 @@ export class CuaDriverMcpDriver {
         && deliveryMode === "foreground"
         && result?.status !== "error"
         && result?.effect !== "not-applied"
-        && this.unicodeInput) {
+        && this.focusVerifier) {
         try {
-          const focus = await this.unicodeInput({
+          const focus = await this.focusVerifier({
             windowId: window.windowId,
             processId: window.pid,
-            text: "",
-            replaceAll: false,
-            inputBehavior: "incremental",
             signal: ticket.signal,
           });
           this.assertWorkTicket(ticket);
           return {
             ...result,
             focusVerified: focus?.focusVerified === true,
-            focusVerificationPath: focus?.deliveryPath ?? "windows-focused-process-boundary",
+            focusVerificationPath: focus?.verificationPath ?? "windows-focused-process-boundary",
           };
         } catch (error) {
           this.assertWorkTicket(ticket);

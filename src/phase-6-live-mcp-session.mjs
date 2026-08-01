@@ -89,12 +89,6 @@ export function createPhase6LiveSession({ client, driver = null, stderrText = ()
       acquired = updateAcquiredState(acquired, name, value);
       return value;
     },
-    async callToolRaw(name, args = {}) {
-      if (closed) throw new Error("phase6.live_session_closed");
-      const result = await callClientTool(client, name, args);
-      acquired = updateAcquiredState(acquired, name, result.structuredContent ?? result);
-      return result;
-    },
     async close(reason = "phase-6-session-close") {
       if (closed) return;
       closed = true;
