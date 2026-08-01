@@ -344,7 +344,7 @@ export function projectComputerUseModelResult(value, contextKey = "") {
   const projected = contextKey === ""
       ? {
         ...(value.initialObservation ? {
-          initialObservationGuidance: "A fresh semantic observation is already included. Do not call computer.observe again unless required evidence is absent.",
+          initialObservationGuidance: "A fresh initial observation is already included. Use its semantic or screenshot/OCR evidence directly; do not call computer.observe again unless required evidence is absent.",
         } : {}),
         ...(value?.perceptionRouting?.suggestedVisualRegion
           && value?.perceptionRouting?.visualRegion == null
@@ -1279,6 +1279,12 @@ export async function observeComputer(router, args, requestContext) {
 }
 
 export async function acquireComputer(router, args, requestContext) {
+  if (typeof args.applicationName === "string" && args.applicationName.trim() !== "") {
+    const resolved = await resolveFreshApplicationName(router, args.applicationName);
+    if (!resolved.applicationToken) return resolved;
+    const { applicationName: _applicationName, ...remainingArgs } = args;
+    args = { ...remainingArgs, applicationToken: resolved.applicationToken };
+  }
   if (acquisitionSelectorCount(args) === 0) {
     return freshAcquisitionTargets(router);
   }
@@ -1298,10 +1304,16 @@ export async function acquireComputer(router, args, requestContext) {
     return access;
   }
   try {
-    const initialObservation = await router.capture({
+    let initialObservation = await router.capture({
       mode: "semantic",
       ...(requestContext === undefined ? {} : { requestContext }),
     });
+    if (initialObservation?.elementCount === 0) {
+      initialObservation = await router.capture({
+        mode: "screenshot",
+        ...(requestContext === undefined ? {} : { requestContext }),
+      });
+    }
     return {
       ...access,
       initialObservation,
@@ -1312,6 +1324,23 @@ export async function acquireComputer(router, args, requestContext) {
     // replaying or abandoning the controller acquisition.
     return access;
   }
+}
+
+async function resolveFreshApplicationName(router, requestedName) {
+  const discovery = await freshAcquisitionTargets(router);
+  const normalizedRequestedName = requestedName.trim().normalize("NFC");
+  const matches = discovery.applications.filter((application) => (
+    typeof application?.name === "string"
+    && application.name.trim().normalize("NFC") === normalizedRequestedName
+  ));
+  if (matches.length === 1) return matches[0];
+  return {
+    ...discovery,
+    requestedApplicationName: requestedName,
+    nextAction: matches.length === 0
+      ? "No exact current application name matched. Select a fresh applicationToken or windowId from this result."
+      : "The exact application name is ambiguous. Select the intended fresh applicationToken or windowId from this result.",
+  };
 }
 
 async function freshAcquisitionTargets(router) {
@@ -1362,6 +1391,7 @@ function acquisitionSelectorCount(args = {}) {
     args.windowId !== undefined,
     typeof args.titlePart === "string" && args.titlePart.trim() !== "",
     typeof args.applicationToken === "string" && args.applicationToken.trim() !== "",
+    typeof args.applicationName === "string" && args.applicationName.trim() !== "",
   ].filter(Boolean).length;
 }
 

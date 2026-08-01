@@ -281,7 +281,10 @@ const LEGACY_COMPUTER_USE_MCP_TOOLS = [
         anyOf: [
           { required: ["windowId", "target"] },
           { required: ["windowId", "applicationToken"] },
+          { required: ["windowId", "applicationName"] },
           { required: ["target", "applicationToken"] },
+          { required: ["target", "applicationName"] },
+          { required: ["applicationToken", "applicationName"] },
         ],
       },
       properties: {
@@ -297,7 +300,12 @@ const LEGACY_COMPUTER_USE_MCP_TOOLS = [
         applicationToken: {
           type: "string",
           minLength: 1,
-          description: "Opaque application token returned by computer.observe mode=\"state\". Prefer this for every application-level request. It restores a minimized or tray application and selects its primary window without substituting an already-open auxiliary surface.",
+          description: "Fresh opaque token from state discovery. Restores and selects the application's primary window.",
+        },
+        applicationName: {
+          type: "string",
+          minLength: 1,
+          description: "Exact product name. Host resolves one unique exact match from fresh state; no fuzzy or pattern matching.",
         },
         tier: { type: "string", enum: ["observe", "full", "admin"] },
         agentId: { type: "string" },
@@ -829,7 +837,7 @@ const acquireTool = {
   ...byLegacyName("computer.request_access"),
   name: "computer.acquire",
   title: "Acquire Computer Access",
-  description: "Acquire a bounded lease and return an initial semantic observation. With no selector, the Host returns fresh discovery; retry with applicationToken or windowId. If initialObservation resolves the decision, act or release without another observe. For application tasks use applicationToken to restore a tray-minimized primary window instead of an auxiliary window. Use target=\"foreground\" only when intended. An equivalent lease is reused.",
+  description: "Acquire a bounded lease and useful initial evidence. Pass applicationName for one fresh unique exact match, or an observed applicationToken. Missing or ambiguous names fail closed to discovery. Host restores the primary window, including from tray, instead of an auxiliary window. Use target=\"foreground\" only when intended. Equivalent leases are reused.",
   _meta: Object.freeze({
     ...semanticCapabilityMeta({
     summary: "Establish bounded control of a local graphical application window so it can be observed or operated for the user's requested outcome.",

@@ -246,9 +246,67 @@ test("computer.acquire returns one initial semantic observation in the same tool
   assert.equal(calls[1].args.mode, "semantic");
   assert.equal(calls[1].args.requestContext.sessionId, "session");
   assert.equal(result.structuredContent.initialObservation.observationId, "initial-observation");
-  assert.match(result.content[0].text, /fresh semantic observation is already included/u);
+  assert.match(result.content[0].text, /fresh initial observation is already included/u);
   assert.match(result.content[0].text, /## initialObservation/u);
   assert.match(result.content[0].text, /Sign in required/u);
+});
+
+test("computer.acquire resolves one exact fresh application name without a second model round", async () => {
+  const calls = [];
+  const result = await callTool({
+    async listState() {
+      calls.push({ method: "listState" });
+      return {
+        foregroundWindow: null,
+        windows: [],
+        applications: [
+          { applicationToken: "application-target", name: "微信", state: "recoverable" },
+          { applicationToken: "application-other", name: "Other App", state: "visible" },
+        ],
+      };
+    },
+    async requestAccess(args) {
+      calls.push({ method: "requestAccess", args });
+      return { status: "granted", controller: { status: "active" } };
+    },
+    async capture(args) {
+      calls.push({ method: "capture", args });
+      return { status: "ok", observationId: "semantic-1", elementCount: 1, elements: [{}] };
+    },
+  }, "computer.acquire", { applicationName: "微信", tier: "full" });
+
+  assert.equal(result.isError, false);
+  assert.equal(calls[0].method, "listState");
+  assert.equal(calls[1].method, "requestAccess");
+  assert.equal(calls[1].args.applicationToken, "application-target");
+  assert.equal(calls[1].args.applicationName, undefined);
+  assert.equal(calls[2].args.mode, "semantic");
+});
+
+test("computer.acquire falls back to screenshot OCR inside the same transaction when semantics are empty", async () => {
+  const captureModes = [];
+  const result = await callTool({
+    async requestAccess() {
+      return { status: "granted", controller: { status: "active" } };
+    },
+    async capture(args) {
+      captureModes.push(args.mode);
+      if (args.mode === "semantic") {
+        return { status: "ok", observationId: "semantic-empty", elementCount: 0, elements: [] };
+      }
+      return {
+        status: "ok",
+        observationId: "screenshot-ocr-1",
+        source: "cua-driver-window-state",
+        localObservation: { source: "ocr", elements: [{ name: "visible" }] },
+      };
+    },
+  }, "computer.acquire", { applicationToken: "application-target", tier: "full" });
+
+  assert.equal(result.isError, false);
+  assert.deepEqual(captureModes, ["semantic", "screenshot"]);
+  assert.equal(result.structuredContent.initialObservation.observationId, "screenshot-ocr-1");
+  assert.match(result.content[0].text, /visible/u);
 });
 
 test("computer.acquire without a selector returns fresh target discovery without a tool error", async () => {
@@ -2186,10 +2244,13 @@ test("agent-computer-use-mcp freezes the local MCP tool contract", () => {
   const validateAcquire = new Ajv({ strict: false }).compile(acquire.inputSchema);
   assert.equal(validateAcquire({}), true, JSON.stringify(validateAcquire.errors));
   assert.equal(validateAcquire({ applicationToken: "fresh" }), true, JSON.stringify(validateAcquire.errors));
+  assert.equal(validateAcquire({ applicationName: "Exact App" }), true, JSON.stringify(validateAcquire.errors));
   assert.equal(validateAcquire({ applicationToken: "fresh", target: "foreground" }), false);
+  assert.equal(validateAcquire({ applicationToken: "fresh", applicationName: "Exact App" }), false);
   assert.equal(acquire.inputSchema.properties.titlePart, undefined);
   assert.deepEqual(acquire.inputSchema.properties.target.enum, ["foreground"]);
   assert.equal(acquire.inputSchema.properties.applicationToken.type, "string");
+  assert.equal(acquire.inputSchema.properties.applicationName.type, "string");
   assert.ok(acquire.outputSchema.properties.initialObservation);
   assert.deepEqual(acquire._meta["xiaozhiclaw/resourceLifecycle"], {
     schemaVersion: 1,
