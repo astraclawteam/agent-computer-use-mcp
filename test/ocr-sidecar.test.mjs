@@ -12,8 +12,27 @@ import {
   resolveOcrSidecarPath,
   selectOcrRuntime,
 } from "../src/ocr-sidecar.mjs";
+import {
+  selectRecognitionScale,
+  translateBounds,
+} from "../ocr-sidecar/xiaozhiclaw_ocr_sidecar_native.mjs";
 
 const execFileAsync = promisify(execFile);
+
+test("bounded region OCR upscales compact surfaces and maps geometry back", () => {
+  assert.equal(selectRecognitionScale({ x: 0, y: 0, width: 280, height: 700 }), 2);
+  assert.equal(selectRecognitionScale({ x: 0, y: 0, width: 1200, height: 700 }), 1);
+  assert.equal(selectRecognitionScale({ x: 0, y: 0, width: 800, height: 800 }), 1);
+
+  assert.deepEqual(
+    translateBounds(
+      { x: 40, y: 60, width: 200, height: 48 },
+      { x: 70, y: 30, width: 280, height: 700 },
+      2,
+    ),
+    { x: 90, y: 60, width: 100, height: 24 },
+  );
+});
 
 test("OCR sidecar path prefers explicit and protected release paths", () => {
   assert.equal(resolveOcrSidecarPath({

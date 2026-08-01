@@ -28,6 +28,7 @@ export class CuaDriverMcpDriver {
     this.windowRelationshipProbe = options.windowRelationshipProbe
       ?? queryWindowsWindowRelationships;
     this.desktopSessionProbe = options.desktopSessionProbe ?? queryWindowsDesktopSession;
+    this.unicodeInput = options.unicodeInput ?? null;
     this.clientStarted = false;
     this.clientStartAttempted = false;
     this.sessionStarted = false;
@@ -521,8 +522,8 @@ export class CuaDriverMcpDriver {
     });
   }
 
-  activateWindow({ window }) {
-    return this.runWork((ticket) => this.activateWindowResources(ticket, window));
+  activateWindow({ window, signal }) {
+    return this.runWork((ticket) => this.activateWindowResources(ticket, window), signal);
   }
 
   async activateWindowResources(ticket, window) {
@@ -532,7 +533,7 @@ export class CuaDriverMcpDriver {
       activation = await this.client.callTool("bring_to_front", {
         pid: window.pid,
         window_id: window.windowId,
-      });
+      }, { signal: ticket.signal });
       this.assertWorkTicket(ticket);
       const foregroundWindowId = await this.foregroundWindowProbe();
       this.assertWorkTicket(ticket);
@@ -623,7 +624,7 @@ export class CuaDriverMcpDriver {
     return null;
   }
 
-  setValue({ window, elementToken, elementIndex, value }) {
+  setValue({ window, elementToken, elementIndex, value, signal }) {
     return this.runWork(async (ticket) => {
       await this.ensureStartedResources(ticket);
       const result = await this.client.callTool("set_value", {
@@ -633,10 +634,10 @@ export class CuaDriverMcpDriver {
         element_token: elementToken,
         value,
         session: this.session,
-      });
+      }, { signal: ticket.signal });
       this.assertWorkTicket(ticket);
       return result;
-    });
+    }, signal);
   }
 
   typeText({
@@ -649,22 +650,45 @@ export class CuaDriverMcpDriver {
     textMode = "insert",
     inputBehavior = "incremental",
     deliveryMode = "background",
+    signal,
   }) {
     return this.runWork(async (ticket) => {
       await this.ensureStartedResources(ticket);
       const coordinateGrounded = Number.isFinite(x) && Number.isFinite(y);
+      let coordinateFocusVerified = false;
       if (deliveryMode === "foreground" && coordinateGrounded) {
         const activation = await this.ensureForegroundActionResources(ticket, window);
         if (!activation) return foregroundActionNotApplied("type_text");
-        await this.client.callTool("click", {
+        const focusClick = await this.client.callTool("click", {
           pid: window.pid,
           window_id: window.windowId,
           x,
           y,
           delivery_mode: "foreground",
           session: this.session,
+        }, { signal: ticket.signal });
+        this.assertWorkTicket(ticket);
+        coordinateFocusVerified = focusClick?.status !== "error"
+          && focusClick?.effect !== "not-applied";
+      }
+      if (coordinateGrounded && this.unicodeInput && textMode === "replace-all") {
+        const result = await this.unicodeInput({
+          windowId: window.windowId,
+          processId: window.pid,
+          text: value,
+          replaceAll: textMode === "replace-all",
+          inputBehavior,
+          signal: ticket.signal,
         });
         this.assertWorkTicket(ticket);
+        return {
+          ...result,
+          characters: value.length,
+          textMode,
+          inputBehavior,
+          ...(coordinateFocusVerified ? { focusVerified: true } : {}),
+          providerPath: "windows-native-clipboard-change-boundary",
+        };
       }
       // Coordinates establish editable focus, but keyboard delivery must target
       // the focused window. Passing the same point into cua-driver's text tool
@@ -673,6 +697,12 @@ export class CuaDriverMcpDriver {
       const keyboardAddress = coordinateGrounded
         ? {}
         : actionAddress({ elementToken, elementIndex, x, y });
+      // Coordinate-grounded custom editors need cua-driver's foreground key
+      // route after the verified focus click. Omitting the delivery mode can
+      // report key-events delivered while custom search fields receive none.
+      const keyboardDelivery = coordinateGrounded
+        ? { delivery_mode: "foreground" }
+        : { delivery_mode: deliveryMode };
       if (textMode === "replace-all") {
         await this.client.callTool("press_key", {
           pid: window.pid,
@@ -680,18 +710,18 @@ export class CuaDriverMcpDriver {
           ...keyboardAddress,
           key: "a",
           modifiers: ["ctrl"],
-          delivery_mode: deliveryMode,
+          ...keyboardDelivery,
           session: this.session,
-        });
+        }, { signal: ticket.signal });
         this.assertWorkTicket(ticket);
         await this.client.callTool("press_key", {
           pid: window.pid,
           window_id: window.windowId,
           ...keyboardAddress,
           key: "backspace",
-          delivery_mode: deliveryMode,
+          ...keyboardDelivery,
           session: this.session,
-        });
+        }, { signal: ticket.signal });
         this.assertWorkTicket(ticket);
       }
       const result = await this.client.callTool("type_text", {
@@ -699,15 +729,18 @@ export class CuaDriverMcpDriver {
         window_id: window.windowId,
         ...keyboardAddress,
         text: value,
-        delivery_mode: deliveryMode,
+        ...keyboardDelivery,
         session: this.session,
-      });
+      }, { signal: ticket.signal });
       this.assertWorkTicket(ticket);
-      return result;
-    });
+      return {
+        ...result,
+        ...(coordinateFocusVerified ? { focusVerified: true } : {}),
+      };
+    }, signal);
   }
 
-  click({ window, elementToken, elementIndex, x, y, deliveryMode = "background" }) {
+  click({ window, elementToken, elementIndex, x, y, deliveryMode = "background", signal }) {
     return this.runWork(async (ticket) => {
       await this.ensureStartedResources(ticket);
       if (Number.isFinite(x) && Number.isFinite(y) && deliveryMode === "foreground") {
@@ -720,13 +753,13 @@ export class CuaDriverMcpDriver {
         ...actionAddress({ elementToken, elementIndex, x, y }),
         delivery_mode: deliveryMode,
         session: this.session,
-      });
+      }, { signal: ticket.signal });
       this.assertWorkTicket(ticket);
       return result;
-    });
+    }, signal);
   }
 
-  pressKey({ window, elementToken, elementIndex, x, y, key, modifiers, deliveryMode = "background" }) {
+  pressKey({ window, elementToken, elementIndex, x, y, key, modifiers, deliveryMode = "background", signal }) {
     return this.runWork(async (ticket) => {
       await this.ensureStartedResources(ticket);
       if (deliveryMode === "foreground") {
@@ -741,10 +774,10 @@ export class CuaDriverMcpDriver {
         ...(Array.isArray(modifiers) ? { modifiers } : {}),
         delivery_mode: deliveryMode,
         session: this.session,
-      });
+      }, { signal: ticket.signal });
       this.assertWorkTicket(ticket);
       return result;
-    });
+    }, signal);
   }
 
   close() {
@@ -816,8 +849,8 @@ export class CuaDriverMcpDriver {
     }
   }
 
-  runWork(operation) {
-    const ticket = this.acquireWorkTicket();
+  runWork(operation, signal) {
+    const ticket = this.acquireWorkTicket(signal);
     if (!ticket) return Promise.reject(lifecycleClosedError());
     return this.runLifecycle(async () => {
       this.assertWorkTicket(ticket);
@@ -827,12 +860,13 @@ export class CuaDriverMcpDriver {
     });
   }
 
-  acquireWorkTicket() {
+  acquireWorkTicket(signal) {
     if (this.lifecycleState !== "open") return null;
-    return { generation: this.lifecycleGeneration };
+    return { generation: this.lifecycleGeneration, signal };
   }
 
   assertWorkTicket(ticket) {
+    if (ticket.signal?.aborted === true) throw operationCancelledError(ticket.signal.reason);
     if (this.lifecycleState !== "open" || ticket.generation !== this.lifecycleGeneration) {
       throw lifecycleClosedError();
     }
@@ -935,13 +969,17 @@ export class CuaDriverMcpClient {
     const timeout = Number.isFinite(options.timeoutMs) && options.timeoutMs > 0
       ? options.timeoutMs
       : undefined;
+    const requestOptions = {
+      ...(timeout === undefined ? {} : {
+        timeout,
+        maxTotalTimeout: timeout,
+      }),
+      ...(options.signal ? { signal: options.signal } : {}),
+    };
     const result = await this.client.callTool(
       { name, arguments: args },
       undefined,
-      timeout === undefined ? undefined : {
-        timeout,
-        maxTotalTimeout: timeout,
-      },
+      Object.keys(requestOptions).length === 0 ? undefined : requestOptions,
     );
     this.assertCallTicket(ticket);
     return result;
@@ -1382,5 +1420,12 @@ function foregroundActionNotApplied(action) {
 function lifecycleClosedError() {
   const error = new Error("lifecycle.closed: cua-driver lifecycle is closing or closed");
   error.code = "lifecycle.closed";
+  return error;
+}
+
+function operationCancelledError(reason) {
+  const error = new Error("operation.cancelled: cua-driver operation was cancelled");
+  error.code = "operation.cancelled";
+  error.reason = reason;
   return error;
 }

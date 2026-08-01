@@ -41,6 +41,8 @@ const FOCUS_RECEIPT_TTL_MS = 30_000;
 const LOCAL_OCR_LATENCY_BUDGET_MS = 5_000;
 const SCREENSHOT_LATENCY_BUDGET_MS = 8_000;
 const POST_ACTION_UI_SETTLE_MS = 220;
+const POST_TEXT_ACTION_UI_SETTLE_MS = 650;
+const POST_TEXT_DEPENDENT_UI_RETRY_MS = 350;
 const STABLE_FRAME_OBSERVATION_LIMIT = 6;
 const PUBLIC_OBSERVATION_LIMIT = 7;
 const VISUAL_ATTEMPT_WINDOW_MS = 30_000;
@@ -1120,9 +1122,6 @@ export class ComputerUseProviderRouter {
       }
     }
 
-    const localElements = Array.isArray(localObservation?.elements)
-      ? localObservation.elements.length
-      : 0;
     const completedFullWindowOcr = shouldRunLocalOcr
       && ocrRegion === null
       && localObservation !== null;
@@ -1149,12 +1148,36 @@ export class ComputerUseProviderRouter {
       || isVisuallyImmaterialDirtyRegion(dirtyRegion, visualBounds)
       || nonSemanticSparseChange
       || dirtyRegionOutsideVisualRegion;
+    if (!localObservation && visualSceneStable && previousOcrElements.length > 0) {
+      const retainedElements = selectOcrEvidenceForRegion(
+        previousOcrElements,
+        visualRegion ?? visualBounds,
+      );
+      if (retainedElements.length > 0) {
+        localObservation = {
+          source: "ocr-cache",
+          status: "ok",
+          elements: retainedElements,
+          coordinateSpace: screenshot.coordinateSpace,
+          coordinateBounds: screenshot.coordinateBounds,
+          coordinateTransform: screenshot.coordinateTransform,
+          coordinateScale: screenshot.coordinateScale,
+          reusedFromStableFrame: true,
+        };
+      }
+    }
+    const localElements = Array.isArray(localObservation?.elements)
+      ? localObservation.elements.length
+      : 0;
     // Changed pixels are a low-latency OCR hint, not authority to crop an
     // explicit layout/icon question. Animations and live content can dominate
     // a diff while being unrelated to the requested ambiguity. Only a crop
     // explicitly supplied by the caller constrains Host vision.
     const sameVisualInteraction = this.lastVisualUnderstanding?.interactionStep === this.interactionStep;
-    const sameVisualRegion = regionsMateriallyOverlap(
+    const sameVisualRegion = (
+      this.lastVisualUnderstanding?.region == null
+      && visualRegion == null
+    ) || regionsMateriallyOverlap(
       this.lastVisualUnderstanding?.region,
       visualRegion,
     );
@@ -1209,12 +1232,21 @@ export class ComputerUseProviderRouter {
         : previousOcrElements,
     };
 
-    const noProgress = repeatedUnchangedObservation || stableFrameObservationBlocked
+    const repeatedStableVisualObservation = Boolean(
+      explicitVisualQuestion
+      && repeatedStableVisualRegion
+      && visualSceneStable,
+    );
+    const noProgress = repeatedStableVisualObservation
+      || repeatedUnchangedObservation
+      || stableFrameObservationBlocked
       ? {
           status: "blocked",
           unchangedObservations: unchangedObservationStreak,
           stableFrameObservations,
-          nextAction: stableFrameObservationBlocked
+          nextAction: repeatedStableVisualObservation
+            ? "Do not request visual understanding again for this stable region in the current interaction step. Act once from the retained OCR/structure evidence or release control and report the blocker."
+            : stableFrameObservationBlocked
             ? "Do not call computer.observe again on this unchanged frame. Act from existing evidence or release control and report the blocker."
             : "Do not call computer.observe again for this unchanged region. Act from the existing evidence, inspect a different bounded region, or release control and report the blocker.",
         }
@@ -1227,10 +1259,12 @@ export class ComputerUseProviderRouter {
         ? {
             executionControl: {
               status: "blocked",
-              scope: "turn",
+              scope: "interaction-step",
               retryable: false,
-              allowedNextTools: ["computer.release"],
-              reason: stableFrameObservationBlocked
+              allowedNextTools: ["computer.act", "computer.release"],
+              reason: repeatedStableVisualObservation
+                ? "repeated-stable-visual-observation-blocked"
+                : stableFrameObservationBlocked
                 ? "stable-frame-observation-budget-exhausted"
                 : "repeated-unchanged-observation-blocked",
               nextAction: noProgress.nextAction,
@@ -1270,7 +1304,9 @@ export class ComputerUseProviderRouter {
               },
             }
           : {}),
-        reason: stableFrameObservationBlocked
+        reason: repeatedStableVisualObservation
+          ? "repeated-stable-visual-observation-blocked"
+          : stableFrameObservationBlocked
           ? "stable-frame-observation-budget-exhausted"
           : repeatedUnchangedObservation
           ? "repeated-unchanged-observation-blocked"
@@ -1299,28 +1335,40 @@ export class ComputerUseProviderRouter {
   async actOperation(args = {}, ticket) {
     await this.awaitExternal(ticket, () => this.requireActiveController(ticket, args.requestContext));
     await this.assertDesktopInteractive(ticket, "act");
+    ticket.desktopMutation = true;
     args = {
       ...args,
       action: this.bindCurrentActionReceipts(args.action),
     };
     const actionObservation = this.lastCapture;
-    const action = normalizeActionCoordinates(
+    const requestedAction = normalizeActionCoordinates(
       args.action,
       this.lastCapture,
       this.activeController?.window,
     );
-    this.assertNoRepeatedUnconfirmedMutation(action);
+    const transientSelectionFallback = planTransientSelectionKeyboardCommit({
+      action: requestedAction,
+      observation: actionObservation,
+      focusReceipt: this.activeFocusReceipt,
+      now: this.clock.now(),
+    });
+    const action = transientSelectionFallback?.action ?? requestedAction;
     if (this.pendingUnverifiedMutation) {
-      fail(
-        "action.observation_required_after_unverified_mutation",
-        "A previous text mutation may already have changed the target. Observe the current window before any further action; never replay a possibly-applied write.",
-        {
-          actionKind: this.pendingUnverifiedMutation.actionKind,
-          replaySafe: false,
-          nextAction: "Call computer.observe with semantic, screenshot, or ocr-region mode, then decide from the fresh state.",
-        },
-      );
+      if (isCorrectiveEditableRefocus(action, this.pendingUnverifiedMutation)) {
+        this.pendingUnverifiedMutation = null;
+      } else {
+        fail(
+          "action.observation_required_after_unverified_mutation",
+          "A previous text mutation may already have changed the target. Observe the current window before any dependent action; never replay a possibly-applied write.",
+          {
+            actionKind: this.pendingUnverifiedMutation.actionKind,
+            replaySafe: false,
+            nextAction: "From a fresh screenshot, one focus-editable click on the same target is allowed as a corrective strategy. Do not send, submit, or activate dependent UI until the exact text or its bounded dependent transition is confirmed.",
+          },
+        );
+      }
     }
+    this.assertNoRepeatedUnconfirmedMutation(action);
     const surfaceReceipt = actionObservation?.surfaceReceipt;
     if (surfaceReceipt?.id && args.action?.surfaceReceiptId !== undefined
       && args.action.surfaceReceiptId !== surfaceReceipt.id) {
@@ -1374,9 +1422,9 @@ export class ComputerUseProviderRouter {
     try {
       if (action.kind === "activate_window") {
         if (!this.driver?.activateWindow) fail("provider.unavailable", "window activation provider is not available");
-        result = await this.awaitExternal(ticket, () => this.driver.activateWindow({
+        result = await this.awaitExternal(ticket, (signal) => this.driver.activateWindow(withAbortSignal({
           window: this.activeController.window,
-        }));
+        }, signal)));
         if (isExplicitlyUnverified(result)) {
           result = describeUnverifiedAction(result, action);
           outcome = "unverified";
@@ -1404,25 +1452,25 @@ export class ComputerUseProviderRouter {
         }
       } else if (action.kind === "set_value") {
         if (!this.driver?.setValue) fail("provider.unavailable", "set_value provider is not available");
-        result = await this.awaitExternal(ticket, () => this.driver.setValue({
+        result = await this.awaitExternal(ticket, (signal) => this.driver.setValue(withAbortSignal({
           window: this.activeController.window,
           ...driverTarget,
           value: action.value,
-        }));
+        }, signal)));
         if (isExplicitlyUnverified(result)) {
           result = describeUnverifiedAction(result, action);
           outcome = "unverified";
         }
       } else if (action.kind === "type_text") {
         if (!this.driver?.typeText) fail("provider.unavailable", "type_text provider is not available");
-        result = await this.awaitExternal(ticket, () => this.driver.typeText({
+        result = await this.awaitExternal(ticket, (signal) => this.driver.typeText(withAbortSignal({
           window: this.activeController.window,
           ...driverTarget,
           value: action.value,
           textMode: action.textMode,
           inputBehavior: action.inputBehavior ?? "incremental",
           deliveryMode: effectiveDeliveryMode,
-        }));
+        }, signal)));
         if (isCoordinateBox(action.targetBounds)) {
           this.recentEditableTarget = {
             controllerId: this.activeController.controllerId,
@@ -1455,11 +1503,11 @@ export class ComputerUseProviderRouter {
         }
       } else if (action.kind === "click") {
         if (!this.driver?.click) fail("provider.unavailable", "click provider is not available");
-        result = await this.awaitExternal(ticket, () => this.driver.click({
+        result = await this.awaitExternal(ticket, (signal) => this.driver.click(withAbortSignal({
           window: this.activeController.window,
           ...driverTarget,
           deliveryMode: effectiveDeliveryMode,
-        }));
+        }, signal)));
         if (isExplicitlyUnverified(result)) {
           const verification = admission.pixelLimitedAction === false && element
             ? await this.verifySemanticStateTransition(actionObservation, args.requestContext, ticket)
@@ -1486,13 +1534,13 @@ export class ComputerUseProviderRouter {
         }
       } else if (action.kind === "press_key") {
         if (!this.driver?.pressKey) fail("provider.unavailable", "press_key provider is not available");
-        result = await this.awaitExternal(ticket, () => this.driver.pressKey({
+        result = await this.awaitExternal(ticket, (signal) => this.driver.pressKey(withAbortSignal({
           window: this.activeController.window,
           ...driverTarget,
           key: action.key,
           modifiers: action.modifiers,
           deliveryMode: effectiveDeliveryMode,
-        }));
+        }, signal)));
         if (isExplicitlyUnverified(result)) {
           const verification = admission.pixelLimitedAction === false && (element || focusReceipt)
             ? await this.verifySemanticStateTransition(actionObservation, args.requestContext, ticket)
@@ -1533,9 +1581,17 @@ export class ComputerUseProviderRouter {
         windowId: controllerWindowId(this.activeController.window),
         observationId: this.lastCapture?.observationId,
         value: action.kind === "type_text" ? action.value : undefined,
+        textMode: action.kind === "type_text" ? action.textMode : undefined,
         preexistingTextOccurrences: action.kind === "type_text"
           ? collectObservedTextOccurrences(actionObservation, action.value)
           : [],
+        preActionOcrElements: action.kind === "type_text"
+          ? observationElements(actionObservation)
+            .map(cloneOcrElementSnapshot)
+          : [],
+        driverChangeBoundaryVerified: action.kind === "type_text"
+          && (result?.focusVerified === true || focusReceipt?.status === "verified")
+          && (result?.changeSignalDelivered === true || result?.path === "key_events"),
         target: describeActionTarget(action, element, driverTarget),
       };
     } else {
@@ -1565,6 +1621,18 @@ export class ComputerUseProviderRouter {
         postActionObservationRequired: true,
       } : {}),
     };
+    if (transientSelectionFallback) {
+      actionResult.requestedAction = requestedAction.kind;
+      actionResult.execution = {
+        ...actionResult.execution,
+        targetPath: "focus-receipt",
+        selectionReason: "transient-dependent-first-item",
+        fallback: {
+          used: true,
+          reason: transientSelectionFallback.reason,
+        },
+      };
+    }
     if (this.activeFocusReceipt) actionResult.focusReceipt = serializeFocusReceipt(this.activeFocusReceipt);
     const automaticLocalPostActionObservation = outcome === "unverified"
       && admission.pixelLimitedAction === true
@@ -1588,28 +1656,45 @@ export class ComputerUseProviderRouter {
       if (automaticLocalPostActionObservation) {
         await this.awaitExternal(
           ticket,
-          () => new Promise((resolve) => setTimeout(resolve, POST_ACTION_UI_SETTLE_MS)),
+          () => new Promise((resolve) => setTimeout(
+            resolve,
+            action.kind === "type_text" ? POST_TEXT_ACTION_UI_SETTLE_MS : POST_ACTION_UI_SETTLE_MS,
+          )),
         );
       }
-      actionResult.capture = await this.awaitExternal(
-        ticket,
-        () => this.captureOperation({
+      const postActionCaptureArgs = {
           mode: automaticLocalPostActionObservation ? "screenshot" : "semantic",
           ...(postActionVerificationCrop ? { crop: postActionVerificationCrop } : {}),
-          ...(automaticLocalPostActionObservation && action.kind === "click"
+          ...(automaticLocalPostActionObservation
             ? {
                 includeChangedRegionAlongsideCrop: true,
                 ...(postActionEffectHintRegion
                   ? { effectHintRegion: postActionEffectHintRegion }
                   : {}),
-              }
+            }
             : {}),
           requestContext: args.requestContext,
-        }, ticket),
+        };
+      actionResult.capture = await this.awaitExternal(
+        ticket,
+        () => this.captureOperation(postActionCaptureArgs, ticket),
       );
+      if (automaticLocalPostActionObservation
+        && action.kind === "type_text"
+        && actionResult.capture?.mutationVerification?.status === "not-confirmed"
+        && this.pendingUnverifiedMutation?.driverChangeBoundaryVerified === true) {
+        await this.awaitExternal(
+          ticket,
+          () => new Promise((resolve) => setTimeout(resolve, POST_TEXT_DEPENDENT_UI_RETRY_MS)),
+        );
+        actionResult.capture = await this.awaitExternal(
+          ticket,
+          () => this.captureOperation(postActionCaptureArgs, ticket),
+        );
+      }
       if (automaticLocalPostActionObservation) {
         const effectRegion = actionResult.capture?.perceptionRouting?.secondaryOcrRegion;
-        if (effectRegion && action.kind === "click") {
+        if (effectRegion) {
           this.lastActionVisualCrop = {
             windowId: controllerWindowId(this.activeController.window),
             crop: effectRegion,
@@ -1633,7 +1718,9 @@ export class ComputerUseProviderRouter {
               }
             : {}),
           freshSurfaceReceiptId: actionResult.capture?.surfaceReceipt?.id ?? null,
-          nextAction: "This capture is the fresh post-action observation; do not call computer.observe merely to refresh it. If a focused edit needs a separate commit or navigation key before dependent UI appears, use the returned verified focusReceipt for one press_key action without re-clicking or retyping. Request Host vision only for one remaining layout, icon, or complex-scene ambiguity.",
+          nextAction: effectRegion
+            ? "This capture already includes both the action target and the bounded dependent UI region in perceptionRouting.secondaryOcrRegion. Do not call computer.observe to refresh or rediscover either region. If the focused editable produced a transient result popup and the intended choice is the uniquely evidenced first result, press Enter once with the returned focusReceipt; prefer this stable keyboard commit over clicking popup geometry. Otherwise use the returned OCR evidence directly and ask at most one visual question on exactly secondaryOcrRegion before one action."
+            : "This capture is the fresh post-action observation; do not call computer.observe merely to refresh it. If a focused edit needs a separate commit or navigation key before dependent UI appears, use the returned verified focusReceipt for one press_key action without re-clicking or retyping. Request Host vision only for one remaining layout, icon, or complex-scene ambiguity.",
         };
         actionResult.postActionObservationRequired = false;
         actionResult.result = {
@@ -1656,8 +1743,24 @@ export class ComputerUseProviderRouter {
               observationId: actionResult.capture.observationId,
             },
           };
-          actionResult.postActionObservation.nextAction = "Text entry is already confirmed by a fresh exact OCR value that was absent before the action. Do not observe or type it again; continue with the next distinct action using the issued focus receipt when needed.";
+          actionResult.postActionObservation.nextAction = effectRegion
+            ? "Text entry is confirmed and the same capture includes the bounded dependent UI region. Do not observe or type again. If a transient popup shows the uniquely evidenced intended result first, press Enter once with the issued focusReceipt; prefer that stable commit over popup coordinates. Otherwise use its OCR evidence and ask at most one visual question on secondaryOcrRegion before one select-item action."
+            : "Text entry is already confirmed by a fresh exact OCR value that was absent before the action. Do not observe or type it again; continue with the next distinct action using the issued focus receipt when needed.";
           actionResult.result.nextAction = actionResult.postActionObservation.nextAction;
+        } else if (action.kind === "type_text"
+          && actionResult.capture?.mutationVerification?.status === "not-confirmed") {
+          const blockedNextAction = actionResult.capture.mutationVerification.nextAction;
+          actionResult.status = "indeterminate";
+          actionResult.outcome = "unverified";
+          actionResult.result = {
+            ...actionResult.result,
+            effect: "possibly_applied",
+            verified: false,
+            focusVerified: false,
+            nextAction: blockedNextAction,
+          };
+          actionResult.postActionObservation.nextAction = blockedNextAction;
+          delete actionResult.focusReceipt;
         }
       }
       if (this.activeFocusReceipt) {
@@ -1714,6 +1817,7 @@ export class ComputerUseProviderRouter {
 
   async cancelOperation(args = {}, ticket) {
     this.assertControllerRequestContext(args.requestContext);
+    this.abortAdmittedOperations(ticket, args.reason ?? "computer-release");
     this.invalidateControlGrant(
       "controller.cancelled",
       "The Gateway-managed Computer Use controller request was cancelled.",
@@ -1747,6 +1851,7 @@ export class ComputerUseProviderRouter {
   }
 
   async revokeOperation(args = {}, ticket) {
+    this.abortAdmittedOperations(ticket, args.reason ?? "computer-revoke");
     this.invalidateControlGrant(
       "controller.revoked",
       "The Gateway-managed Computer Use controller request was revoked.",
@@ -2585,7 +2690,7 @@ export class ComputerUseProviderRouter {
   }
 
   rememberSemanticElements(observation) {
-    const elements = observation?.elements ?? observation?.observation?.elements ?? [];
+    const elements = observationElements(observation);
     if (!Array.isArray(elements)) return;
     const current = new Map();
     for (const element of elements) {
@@ -2687,14 +2792,30 @@ export class ComputerUseProviderRouter {
       pending.value,
       pending.target,
       pending.preexistingTextOccurrences,
+      { exactOnly: pending.textMode === "replace-all" },
     );
-    if (!matchingElement) {
+    const dependentEvidence = matchingElement ? null : findDependentTextEntryEvidence(
+      observation,
+      pending.value,
+      pending.target,
+      pending.preexistingTextOccurrences,
+      {
+        textMode: pending.textMode,
+        driverChangeBoundaryVerified: pending.driverChangeBoundaryVerified,
+        preActionOcrElements: pending.preActionOcrElements,
+      },
+    );
+    if (!matchingElement && !dependentEvidence) {
       this.rememberUnconfirmedMutation(pending);
+      this.pendingUnverifiedMutation = pending;
+      this.activeFocusReceipt = null;
       observation.mutationVerification = {
         status: "not-confirmed",
         actionKind: "type_text",
+        requiredEffect: pending.textMode === "replace-all" ? "exact-replacement" : "text-entry",
         replaySafe: false,
         focusReceiptIssued: false,
+        nextAction: "Do not send, submit, or continue from this field. The intended text mutation was not confirmed; inspect the same target and correct it before any dependent action.",
       };
       return null;
     }
@@ -2702,7 +2823,7 @@ export class ComputerUseProviderRouter {
     this.unconfirmedMutationHistory = [];
     this.activeFocusReceipt = this.createFocusReceipt({
       action: { kind: "type_text" },
-      element: matchingElement,
+      element: dependentEvidence ? null : matchingElement,
       driverTarget: pending.target,
     });
     const serializedReceipt = serializeFocusReceipt(this.activeFocusReceipt);
@@ -2710,10 +2831,12 @@ export class ComputerUseProviderRouter {
     observation.mutationVerification = {
       status: "confirmed",
       actionKind: "type_text",
-      method: "exact-observed-value-near-grounded-target",
+      method: dependentEvidence
+        ? dependentEvidence.method
+        : "exact-observed-value-near-grounded-target",
       replaySafe: false,
       focusReceiptIssued: true,
-      matchedElementToken: matchingElement.elementToken,
+      matchedElementToken: (matchingElement ?? dependentEvidence?.element).elementToken,
     };
     return serializedReceipt;
   }
@@ -3089,6 +3212,7 @@ export class ComputerUseProviderRouter {
         return value;
       },
       (error) => {
+        if (ticket.signal.aborted === true) throw operationCancelledError(ticket.signal.reason);
         if (!this.isOperationTicketCurrent(ticket)) throw lifecycleClosedError();
         throw error;
       },
@@ -3100,7 +3224,7 @@ export class ComputerUseProviderRouter {
   async awaitExternal(ticket, start, { onInvalidResult } = {}) {
     this.assertOperationTicket(ticket);
     try {
-      const result = await start();
+      const result = await start(ticket.signal);
       if (!this.isOperationTicketCurrent(ticket)) {
         onInvalidResult?.(result);
         throw lifecycleClosedError();
@@ -3121,9 +3245,11 @@ export class ComputerUseProviderRouter {
     });
     const ticket = {
       generation: this.lifecycleGeneration,
+      controller: new AbortController(),
       settled,
       settle,
     };
+    ticket.signal = ticket.controller.signal;
     this.operationTickets.add(ticket);
     return ticket;
   }
@@ -3135,11 +3261,23 @@ export class ComputerUseProviderRouter {
 
   isOperationTicketCurrent(ticket) {
     return this.lifecycleState === "open"
-      && ticket.generation === this.lifecycleGeneration;
+      && ticket.generation === this.lifecycleGeneration
+      && ticket.signal.aborted !== true;
   }
 
   assertOperationTicket(ticket) {
+    if (ticket?.signal?.aborted === true) throw operationCancelledError(ticket.signal.reason);
     if (!this.isOperationTicketCurrent(ticket)) throw lifecycleClosedError();
+  }
+
+  abortAdmittedOperations(exceptTicket, reason) {
+    for (const ticket of this.operationTickets) {
+      if (ticket !== exceptTicket
+        && ticket.desktopMutation === true
+        && ticket.signal.aborted !== true) {
+        ticket.controller.abort(reason);
+      }
+    }
   }
 
   async waitForAdmittedOperations() {
@@ -3300,7 +3438,7 @@ function perceptionAdmissionMessage(admission) {
 }
 
 function resolveObservationElement(observation, action) {
-  const elements = observation?.elements ?? observation?.observation?.elements ?? [];
+  const elements = observationElements(observation);
   if (typeof action?.elementToken === "string") {
     return elements.find((element) => element.elementToken === action.elementToken) ?? null;
   }
@@ -3308,8 +3446,17 @@ function resolveObservationElement(observation, action) {
   return null;
 }
 
+function observationElements(observation) {
+  const direct = observation?.elements;
+  if (Array.isArray(direct)) return direct;
+  const nested = observation?.observation?.elements;
+  if (Array.isArray(nested)) return nested;
+  const local = observation?.localObservation?.elements;
+  return Array.isArray(local) ? local : [];
+}
+
 function semanticStateFingerprint(observation) {
-  const elements = observation?.elements ?? observation?.observation?.elements ?? [];
+  const elements = observationElements(observation);
   if (!Array.isArray(elements) || elements.length === 0) return null;
   return JSON.stringify(elements.map((element) => ({
     role: element?.role ?? null,
@@ -3346,7 +3493,7 @@ function semanticElementIdentity(element) {
 }
 
 function assessSemanticActionability(observation) {
-  const elements = observation?.elements ?? observation?.observation?.elements ?? [];
+  const elements = observationElements(observation);
   if (!Array.isArray(elements) || elements.length === 0) {
     return {
       sufficient: false,
@@ -3627,6 +3774,7 @@ function cloneOcrElementSnapshot(element) {
   if (!element || typeof element !== "object") return element;
   return {
     ...(typeof element.name === "string" ? { name: element.name } : {}),
+    ...(element.source === "ocr" ? { source: "ocr", role: "text" } : {}),
     ...(isCoordinateBox(element.bounds) ? { bounds: { ...element.bounds } } : {}),
   };
 }
@@ -3650,6 +3798,60 @@ function boxesIntersect(left, right) {
     && left.x + left.width > right.x
     && left.y < right.y + right.height
     && left.y + left.height > right.y;
+}
+
+function planTransientSelectionKeyboardCommit({ action, observation, focusReceipt, now }) {
+  if (action?.kind !== "click"
+    || action?.interactionIntent !== "select-item"
+    || action?.targetRole !== "list-item"
+    || focusReceipt?.status !== "verified"
+    || focusReceipt?.target?.kind !== "type_text"
+    || !Number.isFinite(focusReceipt?.expiresAtMs)
+    || focusReceipt.expiresAtMs <= now
+    || observation?.mutationVerification?.status !== "confirmed") {
+    return null;
+  }
+  const secondaryRegion = observation?.perceptionRouting?.secondaryOcrRegion;
+  const primaryLocalRegion = observation?.localObservation?.crop;
+  const dependentRegion = isCoordinateBox(secondaryRegion)
+    ? secondaryRegion
+    : isCoordinateBox(primaryLocalRegion)
+      ? primaryLocalRegion
+      : null;
+  if (!isCoordinateBox(dependentRegion)) return null;
+  const target = isCoordinateBox(action.targetBounds)
+    ? action.targetBounds
+    : Number.isFinite(action.x) && Number.isFinite(action.y)
+      ? { x: action.x - 1, y: action.y - 1, width: 2, height: 2 }
+      : null;
+  if (!target || !boxesIntersect(target, dependentRegion)) return null;
+
+  // A dependent popup's default keyboard selection is only equivalent to the
+  // requested click for its leading item. Keep this intentionally narrow: the
+  // declared list item must be centered in the leading half of the changed
+  // region and must not overlap the editable surface that produced the popup.
+  const targetCenterY = target.y + (target.height / 2);
+  const leadingBoundary = dependentRegion.y + (dependentRegion.height / 2);
+  if (targetCenterY > leadingBoundary || boxesIntersect(target, focusReceipt.target?.bounds)) {
+    return null;
+  }
+  return {
+    reason: "transient-popup-keyboard-commit",
+    action: {
+      kind: "press_key",
+      key: "enter",
+      focusReceiptId: focusReceipt.id,
+    },
+  };
+}
+
+function selectOcrEvidenceForRegion(elements, region) {
+  if (!Array.isArray(elements) || !isCoordinateBox(region)) return [];
+  return elements.filter((element) => (
+    element?.source === "ocr"
+    && isCoordinateBox(element.bounds)
+    && boxesIntersect(element.bounds, region)
+  )).slice(0, 64);
 }
 
 /**
@@ -3683,8 +3885,8 @@ export function planPostActionObservationCrop(action, observation) {
   const height = Math.min(
     bounds.height,
     Math.max(
-      isTextEntry ? 192 : 360,
-      Math.min(isTextEntry ? 288 : 480, Math.ceil(target.height + (isTextEntry ? 160 : 320))),
+      isTextEntry ? 128 : 360,
+      Math.min(isTextEntry ? 160 : 480, Math.ceil(target.height + (isTextEntry ? 80 : 320))),
     ),
   );
   const centerX = target.x + (target.width / 2);
@@ -3707,7 +3909,6 @@ export function planPostActionObservationCrop(action, observation) {
  * uses only the declared interaction intent and screenshot geometry.
  */
 export function planPostActionEffectRegion(action, observation) {
-  if (action?.interactionIntent !== "select-item") return null;
   const bounds = isCoordinateBox(observation?.coordinateBounds)
     ? observation.coordinateBounds
     : Number.isFinite(observation?.capture?.width) && Number.isFinite(observation?.capture?.height)
@@ -3719,6 +3920,26 @@ export function planPostActionEffectRegion(action, observation) {
       ? { x: action.x, y: action.y, width: 1, height: 1 }
       : null;
   if (!bounds || !target) return null;
+
+  if (action?.kind === "type_text") {
+    const targetBottom = Math.min(bounds.y + bounds.height, target.y + target.height);
+    const availableHeight = bounds.y + bounds.height - targetBottom;
+    if (availableHeight < 128) return null;
+    const width = Math.min(bounds.width, Math.max(384, Math.min(640, target.width + 128)));
+    const height = Math.min(availableHeight, 320);
+    const centerX = target.x + (target.width / 2);
+    return {
+      x: Math.min(
+        bounds.x + bounds.width - width,
+        Math.max(bounds.x, Math.floor(centerX - (width / 2))),
+      ),
+      y: targetBottom,
+      width,
+      height,
+    };
+  }
+
+  if (action?.interactionIntent !== "select-item") return null;
 
   const boundsRight = bounds.x + bounds.width;
   const boundsBottom = bounds.y + bounds.height;
@@ -3735,7 +3956,23 @@ export function planPostActionEffectRegion(action, observation) {
   candidates.sort((left, right) => (
     (right.width * right.height) - (left.width * left.height)
   ));
-  return candidates[0] ?? null;
+  const selected = candidates[0];
+  if (!selected) return null;
+  const width = Math.min(selected.width, 640);
+  const height = Math.min(selected.height, 320);
+  const isHorizontalComplement = selected.height === bounds.height;
+  const x = isHorizontalComplement
+    ? selected.x
+    : Math.min(
+        selected.x + selected.width - width,
+        Math.max(selected.x, Math.floor(target.x + (target.width / 2) - (width / 2))),
+      );
+  const y = isHorizontalComplement
+    ? selected.y
+    : selected.y === bounds.y
+      ? Math.max(selected.y, selected.y + selected.height - height)
+      : selected.y;
+  return { x, y, width, height };
 }
 
 function normalizeObservationCrop(crop, bounds) {
@@ -3887,7 +4124,7 @@ function describeActionTarget(action, element, driverTarget) {
     target.x = driverTarget.x;
     target.y = driverTarget.y;
   }
-  const bounds = action?.targetBounds ?? element?.sourceRegion ?? element?.bounds;
+  const bounds = action?.targetBounds ?? element?.sourceRegion ?? element?.bounds ?? driverTarget?.bounds;
   if (bounds) target.bounds = { ...bounds };
   return target;
 }
@@ -3932,20 +4169,29 @@ function findObservedTextAtTarget(
   intendedValue,
   target,
   preexistingOccurrences = [],
+  { exactOnly = false } = {},
 ) {
   const intendedText = normalizeRecognizedUiText(intendedValue, { languageClass: "mixed" });
   if (!intendedText || !Number.isFinite(target?.x) || !Number.isFinite(target?.y)) return null;
-  const elements = observation?.elements ?? observation?.observation?.elements ?? [];
+  const elements = observationElements(observation);
   if (!Array.isArray(elements)) return null;
   const width = Number(observation?.coordinateBounds?.width ?? observation?.window?.bounds?.width);
   const height = Number(observation?.coordinateBounds?.height ?? observation?.window?.bounds?.height);
   const horizontalTolerance = Number.isFinite(width) ? Math.max(96, width * 0.22) : 176;
   const verticalTolerance = Number.isFinite(height) ? Math.max(96, height * 0.16) : 112;
 
-  return collectObservedTextElements(observation, intendedText)
+  const compositeTargetMatches = exactOnly
+    ? []
+    : elements.filter((element) => observedCompositeTextElementAtTarget(
+      element,
+      intendedText,
+      target?.bounds,
+    ));
+  return [...collectObservedTextElements(observation, intendedText), ...compositeTargetMatches]
     .filter((element) => {
       const bounds = observedElementBounds(element);
-      return !preexistingOccurrences.some((occurrence) => (
+      return (!isCoordinateBox(target?.bounds) || boxesIntersect(bounds, target.bounds))
+        && !preexistingOccurrences.some((occurrence) => (
         sameObservedTextOccurrence(bounds, occurrence)
       ));
     })
@@ -3968,6 +4214,108 @@ function findObservedTextAtTarget(
     ))[0]?.element ?? null;
 }
 
+function findDependentTextEntryEvidence(
+  observation,
+  intendedValue,
+  target,
+  preexistingOccurrences = [],
+  {
+    textMode,
+    driverChangeBoundaryVerified = false,
+    preActionOcrElements = [],
+  } = {},
+) {
+  const intendedText = normalizeRecognizedUiText(intendedValue, { languageClass: "mixed" });
+  const secondaryRegion = observation?.perceptionRouting?.secondaryOcrRegion;
+  const primaryLocalRegion = observation?.localObservation?.crop;
+  const dependentRegion = isCoordinateBox(secondaryRegion)
+    ? secondaryRegion
+    : isCoordinateBox(primaryLocalRegion)
+      ? primaryLocalRegion
+      : null;
+  const targetBounds = isCoordinateBox(target?.bounds) ? target.bounds : null;
+  if (!intendedText || !targetBounds || !isCoordinateBox(dependentRegion)
+    || !boxesConnected(targetBounds, dependentRegion)) {
+    return null;
+  }
+  const exactEvidence = collectObservedTextElements(observation, intendedText)
+    .filter((element) => {
+      const bounds = observedElementBounds(element);
+      return bounds
+        && boxesIntersect(bounds, dependentRegion)
+        && !boxesIntersect(bounds, targetBounds)
+        && !preexistingOccurrences.some((occurrence) => sameObservedTextOccurrence(bounds, occurrence));
+    })[0] ?? null;
+  if (exactEvidence) {
+    return {
+      method: "bounded-dependent-ui-exact-text-after-entry",
+      element: exactEvidence,
+    };
+  }
+  if (textMode !== "insert" || driverChangeBoundaryVerified !== true) return null;
+  const currentElements = selectOcrEvidenceForRegion(
+    observationElements(observation),
+    dependentRegion,
+  );
+  const beforeFingerprint = ocrElementFingerprint(preActionOcrElements, dependentRegion);
+  const afterFingerprint = ocrElementFingerprint(currentElements, dependentRegion);
+  if (currentElements.length < 2 || !afterFingerprint || afterFingerprint === beforeFingerprint) return null;
+  return {
+    method: isCoordinateBox(secondaryRegion)
+      ? "bounded-dependent-ui-transition-after-verified-entry"
+      : "bounded-local-ui-transition-after-verified-entry",
+    element: currentElements[0],
+  };
+}
+
+function boxesConnected(left, right) {
+  if (!isCoordinateBox(left) || !isCoordinateBox(right)) return false;
+  const horizontalGap = Math.max(0, left.x - (right.x + right.width), right.x - (left.x + left.width));
+  const verticalGap = Math.max(0, left.y - (right.y + right.height), right.y - (left.y + left.height));
+  return horizontalGap <= Math.max(32, left.width * 0.2)
+    && verticalGap <= Math.max(48, left.height * 2);
+}
+
+function isCorrectiveEditableRefocus(action, pending) {
+  if (pending?.actionKind !== "type_text"
+    || action?.kind !== "click"
+    || action?.interactionIntent !== "focus-editable"
+    || action?.targetRole !== "editable") {
+    return false;
+  }
+  const actionTarget = describeActionTarget(action, null, action);
+  return actionTargetsOverlap(pending.target, actionTarget);
+}
+
+export function observedCompositeTextElementAtTarget(element, intendedValue, targetBounds) {
+  if (element?.source !== "ocr" || !isCoordinateBox(targetBounds)) return false;
+  const elementBounds = observedElementBounds(element);
+  if (!elementBounds) return false;
+  const intendedText = normalizeRecognizedUiText(intendedValue, { languageClass: "mixed" });
+  const observedValue = typeof element?.value === "string"
+    ? element.value
+    : typeof element?.name === "string"
+      ? element.name
+      : "";
+  const observedText = normalizeRecognizedUiText(observedValue, { languageClass: "mixed" });
+  if (!intendedText || observedText === intendedText || !observedText.includes(intendedText)) return false;
+  const intendedLength = Array.from(intendedText).length;
+  const observedLength = Array.from(observedText).length;
+  if (observedLength - intendedLength > Math.max(4, intendedLength)) return false;
+  const intersectionWidth = Math.max(
+    0,
+    Math.min(elementBounds.x + elementBounds.width, targetBounds.x + targetBounds.width)
+      - Math.max(elementBounds.x, targetBounds.x),
+  );
+  const intersectionHeight = Math.max(
+    0,
+    Math.min(elementBounds.y + elementBounds.height, targetBounds.y + targetBounds.height)
+      - Math.max(elementBounds.y, targetBounds.y),
+  );
+  const elementArea = elementBounds.width * elementBounds.height;
+  return elementArea > 0 && (intersectionWidth * intersectionHeight) / elementArea >= 0.6;
+}
+
 function collectObservedTextOccurrences(observation, intendedValue) {
   const intendedText = normalizeRecognizedUiText(intendedValue, { languageClass: "mixed" });
   if (!intendedText) return [];
@@ -3977,18 +4325,36 @@ function collectObservedTextOccurrences(observation, intendedValue) {
 }
 
 function collectObservedTextElements(observation, intendedText) {
-  const elements = observation?.elements ?? observation?.observation?.elements ?? [];
+  const elements = observationElements(observation);
   if (!Array.isArray(elements)) return [];
-  return elements.filter((element) => {
+  return elements.flatMap((element) => {
     const observedValue = typeof element?.value === "string"
       ? element.value
       : typeof element?.name === "string"
         ? element.name
         : "";
-    if (normalizeRecognizedUiText(observedValue, { languageClass: "mixed" }) !== intendedText) {
-      return false;
+    if (normalizeRecognizedUiText(observedValue, { languageClass: "mixed" }) === intendedText
+      && observedElementBounds(element) !== null) {
+      return [element];
     }
-    return observedElementBounds(element) !== null;
+
+    // Compact OCR rows may merge a text field value with a neighboring icon or
+    // affordance (for example, "value search-icon"). The row retains the exact
+    // recognized token and its geometry as representativeTextAnchor. Treat that
+    // anchor as the observed occurrence so post-write verification is not lost
+    // merely because the model-facing row was semantically compressed.
+    const anchor = element?.representativeTextAnchor;
+    const anchorValue = typeof anchor?.name === "string" ? anchor.name : "";
+    if (normalizeRecognizedUiText(anchorValue, { languageClass: "mixed" }) !== intendedText
+      || observedElementBounds(anchor) === null) {
+      return [];
+    }
+    return [{
+      ...anchor,
+      elementToken: element?.elementToken,
+      source: element?.source,
+      observationOnly: element?.observationOnly,
+    }];
   });
 }
 
@@ -4111,6 +4477,28 @@ function lifecycleClosedError() {
     "lifecycle.closed: The computer use provider is closing or closed.",
     { includeUserOverlay: false },
   );
+}
+
+function operationCancelledError(reason) {
+  return new ComputerUseMcpError(
+    "operation.cancelled",
+    "operation.cancelled: The in-flight Computer Use operation was cancelled before another desktop effect could be admitted.",
+    {
+      includeUserOverlay: false,
+      replaySafe: false,
+      reason: typeof reason === "string" ? reason : "cancelled",
+    },
+  );
+}
+
+function withAbortSignal(value, signal) {
+  Object.defineProperty(value, "signal", {
+    configurable: false,
+    enumerable: false,
+    value: signal,
+    writable: false,
+  });
+  return value;
 }
 
 function deriveDoctorStatus(statuses) {

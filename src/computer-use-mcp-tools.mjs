@@ -336,6 +336,7 @@ const LEGACY_COMPUTER_USE_MCP_TOOLS = [
       windows: ANY_ARRAY,
       applications: ANY_ARRAY,
       applicationCount: { type: "number" },
+      requestedApplicationName: { type: "string" },
       nextAction: { type: "string" },
       reused: { type: "boolean" },
     }, ["status", "controller"]),
@@ -423,7 +424,7 @@ const LEGACY_COMPUTER_USE_MCP_TOOLS = [
   {
     name: "computer.act",
     title: "Act On Computer",
-    description: "Act once from the latest single-use surfaceReceipt. Prefer semantic elementToken. Pixels require fresh screenshot targetBounds; OCR glyphs never ground actions. For text use one type_text (replace-all exact; insert intentional). Custom editable: screenshot-grounded focus-editable click, then verified focusReceipt. Text is incremental. Consume an embedded fresh post-action capture instead of observing again; use its verified focusReceipt for one commit or navigation key without re-click or retype. Exclude borders, icons, adjacent controls, and occlusions. Copy window-local coordinates unchanged; finish only after the requested transition is observed.",
+    description: "Act once from the latest single-use surfaceReceipt. Prefer semantic elementToken. Proven OCR target text: click its glyph bounds with activate-recognized-text, without vision for the parent row. Other pixels need fresh screenshot bounds. For text use one type_text. Custom editable: screenshot-grounded focus-editable click, then verified focusReceipt. For a transient result popup whose intended item is uniquely first, press Enter with that receipt instead of clicking popup coordinates. Consume embedded post-action capture without re-click or retype. Exclude borders, icons, adjacent controls, and occlusions. Keep window-local coordinates; finish only after the requested transition is observed.",
     annotations: { phase: "1.3", destructiveHint: true },
     inputSchema: {
       type: "object",
@@ -476,6 +477,21 @@ const LEGACY_COMPUTER_USE_MCP_TOOLS = [
                   required: ["kind"],
                 },
                 {
+                  required: ["targetBounds"],
+                },
+              ],
+            },
+            then: {
+              required: ["observationId"],
+            },
+          }, {
+            if: {
+              allOf: [
+                {
+                  properties: { kind: { const: "type_text" } },
+                  required: ["kind"],
+                },
+                {
                   anyOf: [
                     { required: ["x"] },
                     { required: ["y"] },
@@ -518,7 +534,7 @@ const LEGACY_COMPUTER_USE_MCP_TOOLS = [
             },
             observationId: {
               type: "string",
-              description: "Required with x/y and must identify the latest screenshot observation. OCR-only observations cannot ground keyboard actions.",
+              description: "Required with x/y or targetBounds and must identify the latest screenshot observation. OCR-only observations cannot ground keyboard actions.",
             },
             surfaceReceiptId: {
               type: "string",
@@ -563,7 +579,7 @@ const LEGACY_COMPUTER_USE_MCP_TOOLS = [
                 height: { type: "number", exclusiveMinimum: 0 },
               },
               additionalProperties: false,
-              description: "Full interactive rectangle from the same screenshot, excluding glyph-only bounds, borders, adjacent controls, and occlusions. Alone it grounds type_text at its center.",
+              description: "Full interactive rectangle from the same latest screenshot, excluding glyph-only bounds, borders, adjacent controls, and occlusions. Pair with that screenshot's observationId; Host uses its center for type_text.",
             },
             value: {
               type: "string",
@@ -837,7 +853,7 @@ const acquireTool = {
   ...byLegacyName("computer.request_access"),
   name: "computer.acquire",
   title: "Acquire Computer Access",
-  description: "Acquire a bounded lease and useful initial evidence. Pass applicationName for one fresh unique exact match, or an observed applicationToken. Missing or ambiguous names fail closed to discovery. Host restores the primary window, including from tray, instead of an auxiliary window. Use target=\"foreground\" only when intended. Equivalent leases are reused.",
+  description: "Acquire a lease and initial evidence. For a user-named application, pass applicationName immediately; Host exact-resolves the full fresh inventory and fails closed. Otherwise use an observed applicationToken. Host restores the primary window from tray instead of an auxiliary window. Use target=\"foreground\" only when intended.",
   _meta: Object.freeze({
     ...semanticCapabilityMeta({
     summary: "Establish bounded control of a local graphical application window so it can be observed or operated for the user's requested outcome.",
@@ -857,7 +873,7 @@ const acquireTool = {
 const observeTool = {
   name: "computer.observe",
   title: "Observe Computer",
-    description: "Discover desktop state or inspect the leased window using semantic, screenshot/OCR, changed-region, or visual evidence. State lists active, visible, and recoverable applications; include installed applications only to launch a stopped target. A locked input desktop is terminal. Reacquire from fresh state each new turn. Start semantic and stop observing when it already resolves the next decision. Use screenshot/OCR only for missing text or geometry. Use visual once only for a remaining layout, icon, or complex-scene ambiguity; ask all facts in one visualQuestion. Unchanged pixels do not prove failure, and proven state needs no reconfirmation. OCR elements are observationOnly glyph geometry, never action targets. Each observation returns a single-use surfaceReceipt; observe after every action. Copy image coordinates unchanged to computer.act. Artifact paths are private.",
+    description: "Discover compact desktop state or inspect the leased window. Include installed apps only to launch a stopped target. Never repeat identical state for omissions; acquire a user-named product by applicationName against the full fresh inventory. A locked desktop is terminal. Start semantic and stop observing when it already resolves the next decision. Use OCR for missing text/geometry. Use visual once only for remaining layout/icon ambiguity. OCR elements are observationOnly. Each observation returns a single-use surfaceReceipt; observe after every action. Copy image coordinates unchanged.",
   _meta: semanticCapabilityMeta({
     summary: "Inspect visible state in local graphical applications using window discovery, semantic elements, screenshots, OCR, or visual differences.",
     scenarios: [

@@ -5,6 +5,43 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { CuaDriverMcpClient, CuaDriverMcpDriver } from "../src/cua-driver-mcp-driver.mjs";
 
+test("CuaDriverMcpDriver forwards cancellation into the admitted native MCP action", async () => {
+  let clickOptions;
+  const client = {
+    async start() {},
+    async callTool(name, _args, options) {
+      if (name === "start_session" || name === "end_session") return { status: "ok" };
+      if (name !== "click") return { status: "ok" };
+      clickOptions = options;
+      return new Promise((resolve, reject) => {
+        const timer = setTimeout(() => resolve({ status: "ok" }), 100);
+        options.signal.addEventListener("abort", () => {
+          clearTimeout(timer);
+          const error = new Error("native MCP call aborted");
+          error.name = "AbortError";
+          reject(error);
+        }, { once: true });
+      });
+    },
+    async close() {},
+  };
+  const driver = new CuaDriverMcpDriver({ client });
+  const controller = new AbortController();
+  const action = driver.click({
+    window: { pid: 100, windowId: 200 },
+    x: 30,
+    y: 40,
+    deliveryMode: "background",
+    signal: controller.signal,
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+  controller.abort("turn-stopped");
+
+  await assert.rejects(action, (error) => error?.name === "AbortError");
+  assert.equal(clickOptions.signal, controller.signal);
+  await driver.close();
+});
+
 test("CuaDriverMcpDriver maps request/capture/action to cua-driver MCP tools", async () => {
   const calls = [];
   const driver = new CuaDriverMcpDriver({
@@ -297,7 +334,7 @@ test("CuaDriverMcpDriver keeps coordinate Unicode text on the native driver path
       },
     },
   ]);
-  assert.deepEqual(result, { status: "ok" });
+  assert.deepEqual(result, { status: "ok", focusVerified: true });
 });
 
 test("CuaDriverMcpDriver activates a window and verifies the foreground result", async () => {
@@ -464,6 +501,139 @@ test("CuaDriverMcpDriver keeps semantic Unicode text on the cua-driver path", as
       session: "semantic-unicode-session",
     },
   });
+});
+
+test("CuaDriverMcpDriver uses the verified clipboard change boundary for coordinate Unicode text", async () => {
+  const calls = [];
+  const unicodeCalls = [];
+  const driver = new CuaDriverMcpDriver({
+    session: "coordinate-unicode-clipboard-session",
+    foregroundWindowProbe: async () => "42",
+    unicodeInput: async (args) => {
+      unicodeCalls.push(args);
+      return {
+        status: "ok",
+        utf16CodeUnits: args.text.length,
+        clipboardRestored: true,
+        changeSignalDelivered: true,
+        focusVerified: true,
+        deliveryPath: "windows_clipboard_transaction",
+      };
+    },
+    client: {
+      async start() {},
+      async callTool(name, args) {
+        calls.push({ name, args });
+        if (name === "bring_to_front") {
+          return { landed_on_target: true, target_hwnd: "42", now_fg_hwnd: "42" };
+        }
+        return { status: "ok", verified: true };
+      },
+    },
+  });
+
+  const result = await driver.typeText({
+    window: { windowId: 42, pid: 1234 },
+    x: 102,
+    y: 56,
+    value: "宋鹏",
+    textMode: "replace-all",
+    inputBehavior: "incremental",
+    deliveryMode: "foreground",
+  });
+
+  assert.equal(unicodeCalls.length, 1);
+  assert.equal(unicodeCalls[0].inputBehavior, "incremental");
+  assert.equal(unicodeCalls[0].replaceAll, true);
+  assert.equal(result.providerPath, "windows-native-clipboard-change-boundary");
+  assert.equal(result.changeSignalDelivered, true);
+  assert.equal(result.focusVerified, true);
+  assert.deepEqual(calls.filter((call) => call.name === "type_text"), []);
+});
+
+test("CuaDriverMcpDriver uses foreground cua-driver typing for coordinate Unicode insertion", async () => {
+  const calls = [];
+  const nativeInputCalls = [];
+  const driver = new CuaDriverMcpDriver({
+    session: "coordinate-unicode-insert-session",
+    foregroundWindowProbe: async () => "42",
+    unicodeInput: async (args) => {
+      nativeInputCalls.push(args);
+      return { status: "ok" };
+    },
+    client: {
+      async start() {},
+      async callTool(name, args) {
+        calls.push({ name, args });
+        return { status: "ok", verified: true };
+      },
+    },
+  });
+
+  const result = await driver.typeText({
+    window: { windowId: 42, pid: 1234 },
+    x: 102,
+    y: 56,
+    value: "宋鹏",
+    textMode: "insert",
+    inputBehavior: "incremental",
+    deliveryMode: "foreground",
+  });
+
+  assert.deepEqual(nativeInputCalls, []);
+  assert.deepEqual(calls.filter((call) => call.name === "type_text"), [{
+    name: "type_text",
+    args: {
+      pid: 1234,
+      window_id: 42,
+      text: "宋鹏",
+      delivery_mode: "foreground",
+      session: "coordinate-unicode-insert-session",
+    },
+  }]);
+  assert.equal(result.focusVerified, true);
+});
+
+test("CuaDriverMcpDriver uses the native clipboard transaction for coordinate ASCII replace-all", async () => {
+  const calls = [];
+  const nativeInputCalls = [];
+  const driver = new CuaDriverMcpDriver({
+    session: "coordinate-ascii-replace-all-session",
+    foregroundWindowProbe: async () => "42",
+    unicodeInput: async (args) => {
+      nativeInputCalls.push(args);
+      return {
+        status: "ok",
+        clipboardRestored: true,
+        changeSignalDelivered: true,
+        focusVerified: true,
+      };
+    },
+    client: {
+      async start() {},
+      async callTool(name, args) {
+        calls.push({ name, args });
+        return { status: "ok", verified: true };
+      },
+    },
+  });
+
+  const result = await driver.typeText({
+    window: { windowId: 42, pid: 1234 },
+    x: 102,
+    y: 56,
+    value: "message-123",
+    textMode: "replace-all",
+    inputBehavior: "incremental",
+    deliveryMode: "foreground",
+  });
+
+  assert.equal(nativeInputCalls.length, 1);
+  assert.equal(nativeInputCalls[0].text, "message-123");
+  assert.equal(nativeInputCalls[0].replaceAll, true);
+  assert.equal(result.providerPath, "windows-native-clipboard-change-boundary");
+  assert.deepEqual(calls.filter((call) => call.name === "press_key"), []);
+  assert.deepEqual(calls.filter((call) => call.name === "type_text"), []);
 });
 
 test("CuaDriverMcpDriver verifies foreground immediately before a pixel click", async () => {

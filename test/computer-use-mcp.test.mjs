@@ -285,6 +285,7 @@ test("computer.acquire resolves one exact fresh application name without a secon
 
 test("computer.acquire falls back to screenshot OCR inside the same transaction when semantics are empty", async () => {
   const captureModes = [];
+  const png = Buffer.from("89504e470d0a1a0a0000000d49484452", "hex");
   const result = await callTool({
     async requestAccess() {
       return { status: "granted", controller: { status: "active" } };
@@ -298,8 +299,13 @@ test("computer.acquire falls back to screenshot OCR inside the same transaction 
         status: "ok",
         observationId: "screenshot-ocr-1",
         source: "cua-driver-window-state",
+        artifact: { path: "C:\\Temp\\private-acquire.png", mimeType: "image/png" },
         localObservation: { source: "ocr", elements: [{ name: "visible" }] },
       };
+    },
+    async readOwnedArtifact(filePath) {
+      assert.equal(filePath, "C:\\Temp\\private-acquire.png");
+      return png;
     },
   }, "computer.acquire", { applicationToken: "application-target", tier: "full" });
 
@@ -307,6 +313,30 @@ test("computer.acquire falls back to screenshot OCR inside the same transaction 
   assert.deepEqual(captureModes, ["semantic", "screenshot"]);
   assert.equal(result.structuredContent.initialObservation.observationId, "screenshot-ocr-1");
   assert.match(result.content[0].text, /visible/u);
+  assert.deepEqual(result.content[1], {
+    type: "image",
+    data: png.toString("base64"),
+    mimeType: "image/png",
+  });
+  assert.equal(
+    result.structuredContent.initialObservation.artifact.delivery,
+    "mcp-image-content",
+  );
+  assert.equal(result.structuredContent.initialObservation.artifact.path, undefined);
+  assert.equal(result._meta["xiaozhiclaw/visual-understanding"].mode, "auto");
+  assert.equal(result._meta["xiaozhiclaw/visual-understanding"].latencyBudgetMs, 2_500);
+  assert.match(
+    result._meta["xiaozhiclaw/visual-understanding"].instruction,
+    /major visible interactive regions/u,
+  );
+  assert.match(
+    result._meta["xiaozhiclaw/visual-understanding"].instruction,
+    /full editable bounds/u,
+  );
+  assert.match(
+    result._meta["xiaozhiclaw/visual-understanding"].instruction,
+    /Do not merge a text field/u,
+  );
 });
 
 test("computer.acquire without a selector returns fresh target discovery without a tool error", async () => {
@@ -366,6 +396,25 @@ test("computer.acquire recovers a stale application token with fresh discovery i
   assert.equal(result.structuredContent.status, "target_required");
   assert.equal(result.structuredContent.applications[0].applicationToken, "application-fresh");
   assert.match(result.content[0].text, /application-fresh/u);
+  const acquire = COMPUTER_USE_MCP_TOOLS.find((tool) => tool.name === "computer.acquire");
+  const validate = new Ajv({ strict: false }).compile(acquire.outputSchema);
+  assert.equal(validate(result.structuredContent), true, JSON.stringify(validate.errors));
+});
+
+test("computer.acquire unmatched application name remains schema-valid discovery", async () => {
+  const result = await callTool({
+    async listState() {
+      return {
+        foregroundWindow: null,
+        windows: [{ windowId: 42, title: "Recovered primary window" }],
+        applications: [{ applicationToken: "application-fresh", name: "Weixin" }],
+      };
+    },
+  }, "computer.acquire", { applicationName: "微信", tier: "full" });
+
+  assert.equal(result.isError, false);
+  assert.equal(result.structuredContent.status, "target_required");
+  assert.equal(result.structuredContent.requestedApplicationName, "微信");
   const acquire = COMPUTER_USE_MCP_TOOLS.find((tool) => tool.name === "computer.acquire");
   const validate = new Ajv({ strict: false }).compile(acquire.outputSchema);
   assert.equal(validate(result.structuredContent), true, JSON.stringify(validate.errors));
@@ -738,7 +787,37 @@ test("model-facing observations bound OCR rows without keyword filtering", () =>
   assert.equal(projected.elements.at(-1).name, "Visible row 79");
 });
 
-test("model-facing application state is bounded while preserving a recoverable app tied to a window", () => {
+test("post-action projection reserves model evidence for the bounded dependent region", () => {
+  const primary = Array.from({ length: 8 }, (_, index) => ({
+    name: `Primary ${index}`,
+    source: "ocr",
+    bounds: { x: 10, y: index * 12, width: 90, height: 10 },
+  }));
+  const dependent = Array.from({ length: 7 }, (_, index) => ({
+    name: `Dependent ${index}`,
+    source: "ocr",
+    bounds: { x: 110, y: 110 + (index * 28), width: 120, height: 18 },
+  }));
+  const projected = projectComputerUseModelResult({
+    status: "ok",
+    localObservation: {
+      source: "ocr",
+      elementCount: primary.length + dependent.length,
+      elements: [...primary, ...dependent],
+    },
+    perceptionRouting: {
+      secondaryOcrRegion: { x: 100, y: 100, width: 180, height: 240 },
+    },
+  });
+
+  const names = projected.localObservation.elements.map((element) => element.name);
+  assert.equal(projected.localObservation.elements.length, 8);
+  assert.ok(names.includes("Dependent 0"));
+  assert.ok(names.filter((name) => name.startsWith("Dependent ")).length >= 5);
+  assert.ok(names.some((name) => name.startsWith("Primary ")));
+});
+
+test("model-facing application state preserves a typical recoverable inventory and remains bounded", () => {
   const applications = [
     { applicationToken: "visible-1", name: "Visible One", state: "visible" },
     { applicationToken: "visible-2", name: "Visible Two", state: "visible" },
@@ -759,9 +838,24 @@ test("model-facing application state is bounded while preserving a recoverable a
     applications,
   });
 
-  assert.equal(projected.applications.length, 6);
-  assert.equal(projected.omittedApplicationCount, 17);
+  assert.equal(projected.applications.length, 23);
+  assert.equal(projected.omittedApplicationCount, undefined);
   assert.ok(projected.applications.some((application) => application.applicationToken === "target-token"));
+  assert.match(projected.controlGuidance, /computer\.acquire/u);
+  assert.match(projected.controlGuidance, /applicationName/u);
+
+  const oversized = projectComputerUseModelResult({
+    status: "idle",
+    windows: [],
+    applications: Array.from({ length: 60 }, (_, index) => ({
+      applicationToken: `runtime-${index}`,
+      name: `Runtime ${index}`,
+      state: "recoverable",
+    })),
+  });
+  assert.equal(oversized.applications.length, 48);
+  assert.equal(oversized.omittedApplicationCount, 12);
+  assert.match(oversized.controlGuidance, /Do not repeat the same state observation/u);
 });
 
 test("model-facing semantic elements remove overlapping duplicates without keyword filtering", () => {
@@ -1259,6 +1353,7 @@ test("screenshot observations return MCP ImageContent without exposing the conne
     result._meta["xiaozhiclaw/visual-understanding"].instruction,
     "Locate the search field in the current application window.",
   );
+  assert.equal(result._meta["xiaozhiclaw/visual-understanding"].latencyBudgetMs, undefined);
   assert.deepEqual(result._meta["xiaozhiclaw/visual-understanding"].region, {
     x: 400,
     y: 300,
@@ -1484,28 +1579,39 @@ test("unchanged screenshot digest suppresses repeated Host vision after local OC
     assert.equal(second.perceptionRouting.selectedMode, "unchanged-frame");
     assert.equal(second.perceptionRouting.visualUnderstandingEligible, false);
     assert.equal(second.perceptionRouting.avoidedVision, true);
-    assert.equal(second.perceptionRouting.reason, "visual-reuse-suppressed-ocr-fallback");
-    assert.equal(second.executionControl, undefined);
+    assert.equal(second.perceptionRouting.reason, "repeated-stable-visual-observation-blocked");
+    assert.equal(second.localObservation.reusedFromStableFrame, true);
+    assert.deepEqual(second.localObservation.elements.map((element) => element.name), ["Ready"]);
+    assert.deepEqual(second.executionControl, {
+      status: "blocked",
+      scope: "interaction-step",
+      retryable: false,
+      allowedNextTools: ["computer.act", "computer.release"],
+      reason: "repeated-stable-visual-observation-blocked",
+      nextAction: "Do not request visual understanding again for this stable region in the current interaction step. Act once from the retained OCR/structure evidence or release control and report the blocker.",
+    });
     assert.equal(third.perceptionRouting.selectedMode, "unchanged-frame");
     assert.equal(third.perceptionRouting.visualUnderstandingEligible, false);
-    assert.equal(third.perceptionRouting.reason, "visual-reuse-suppressed-ocr-fallback");
-    assert.equal(third.executionControl, undefined);
+    assert.equal(third.perceptionRouting.reason, "repeated-stable-visual-observation-blocked");
+    assert.equal(third.executionControl.scope, "interaction-step");
     assert.equal(fourth.perceptionRouting.visualUnderstandingEligible, false);
-    assert.equal(fifth.perceptionRouting.reason, "repeated-unchanged-observation-blocked");
+    assert.equal(fifth.perceptionRouting.reason, "repeated-stable-visual-observation-blocked");
     assert.equal(fifth.perceptionRouting.noProgress.status, "blocked");
     assert.equal(fifth.perceptionRouting.noProgress.unchangedObservations, 2);
     assert.match(
       renderComputerUseTextResult(fifth),
-      /Do not call computer\.observe again for this unchanged region/u,
+      /Do not request visual understanding again for this stable region/u,
     );
     assert.equal(sixth.perceptionRouting.stableFrameObservations, 5);
-    assert.equal(seventh.perceptionRouting.reason, "stable-frame-observation-budget-exhausted");
+    assert.equal(seventh.perceptionRouting.reason, "repeated-stable-visual-observation-blocked");
     assert.equal(seventh.perceptionRouting.visualUnderstandingEligible, false);
     assert.equal(seventh.perceptionRouting.noProgress.status, "blocked");
     assert.equal(seventh.perceptionRouting.noProgress.stableFrameObservations, 6);
+    assert.equal(seventh.executionControl.scope, "interaction-step");
+    assert.deepEqual(seventh.executionControl.allowedNextTools, ["computer.act", "computer.release"]);
     assert.match(
       renderComputerUseTextResult(seventh),
-      /Do not call computer\.observe again on this unchanged frame/u,
+      /Do not request visual understanding again for this stable region/u,
     );
     assert.equal(ocrCalls, 1);
     await assert.rejects(
@@ -1593,8 +1699,9 @@ test("caret-sized frame changes do not trigger repeated Host vision", async () =
       JSON.stringify(second.perceptionRouting),
     );
     assert.equal(second.perceptionRouting.visualUnderstandingEligible, false);
-    assert.equal(second.perceptionRouting.reason, "visual-reuse-suppressed-ocr-fallback");
-    assert.equal(second.executionControl, undefined);
+    assert.equal(second.perceptionRouting.reason, "repeated-stable-visual-observation-blocked");
+    assert.equal(second.executionControl?.scope, "interaction-step");
+    assert.equal(second.executionControl?.reason, "repeated-stable-visual-observation-blocked");
   } finally {
     await router.close();
     await rm(artifactRoot, { recursive: true, force: true });
@@ -1677,8 +1784,9 @@ test("sparse animated pixels with unchanged OCR semantics do not repeat the same
     assert.ok(second.perceptionRouting.dirtyRegion.changedPixels > 120);
     assert.equal(second.perceptionRouting.visualSceneChanged, false);
     assert.equal(second.perceptionRouting.visualUnderstandingEligible, false);
-    assert.equal(second.perceptionRouting.reason, "visual-reuse-suppressed-ocr-fallback");
-    assert.equal(second.executionControl, undefined);
+    assert.equal(second.perceptionRouting.reason, "repeated-stable-visual-observation-blocked");
+    assert.equal(second.executionControl?.scope, "interaction-step");
+    assert.equal(second.executionControl?.reason, "repeated-stable-visual-observation-blocked");
   } finally {
     await router.close();
     await rm(artifactRoot, { recursive: true, force: true });
@@ -1769,8 +1877,9 @@ test("dynamic content outside an explicit visual region cannot re-enable Host vi
     assert.ok(second.perceptionRouting.dirtyRegion.width > 100);
     assert.equal(second.perceptionRouting.visualSceneChanged, false);
     assert.equal(second.perceptionRouting.visualUnderstandingEligible, false);
-    assert.equal(second.perceptionRouting.reason, "visual-reuse-suppressed-ocr-fallback");
-    assert.equal(second.executionControl, undefined);
+    assert.equal(second.perceptionRouting.reason, "repeated-stable-visual-observation-blocked");
+    assert.equal(second.executionControl?.scope, "interaction-step");
+    assert.equal(second.executionControl?.reason, "repeated-stable-visual-observation-blocked");
   } finally {
     await router.close();
     await rm(artifactRoot, { recursive: true, force: true });
@@ -2299,12 +2408,32 @@ test("agent-computer-use-mcp freezes the local MCP tool contract", () => {
   );
   assert.deepEqual(
     act.inputSchema.properties.action.allOf[3].then.required,
-    ["targetBounds"],
+    ["observationId"],
   );
   assert.deepEqual(
     act.inputSchema.properties.action.allOf[4].then.required,
     ["targetBounds"],
   );
+  assert.deepEqual(
+    act.inputSchema.properties.action.allOf[5].then.required,
+    ["targetBounds"],
+  );
+  const validateAct = new Ajv({ strict: false }).compile(act.inputSchema);
+  assert.equal(validateAct({ action: {
+    kind: "type_text",
+    textMode: "replace-all",
+    inputBehavior: "incremental",
+    value: "hello",
+    targetBounds: { x: 10, y: 10, width: 100, height: 30 },
+  } }), false);
+  assert.equal(validateAct({ action: {
+    kind: "type_text",
+    textMode: "replace-all",
+    inputBehavior: "incremental",
+    value: "hello",
+    observationId: "capture-1",
+    targetBounds: { x: 10, y: 10, width: 100, height: 30 },
+  } }), true);
   assert.equal(act.inputSchema.properties.action.properties.inputBehavior.default, undefined);
   assert.deepEqual(
     act.inputSchema.properties.action.allOf[0].then.required,
@@ -2336,6 +2465,7 @@ test("agent-computer-use-mcp freezes the local MCP tool contract", () => {
   assert.match(observe.description, /OCR elements are observationOnly/u);
   assert.match(observe.description, /Use visual once only/u);
   assert.match(act.description, /focus-editable click/u);
+  assert.match(act.description, /activate-recognized-text/u);
   assert.match(act.description, /finish only after the requested transition is observed/u);
   assert.deepEqual(observe.outputSchema.properties.expiresAt, {
     anyOf: [{ type: "number" }, { type: "null" }],

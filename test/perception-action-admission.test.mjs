@@ -3,6 +3,7 @@ import { test } from "node:test";
 
 import {
   ComputerUseProviderRouter,
+  observedCompositeTextElementAtTarget,
   planPostActionEffectRegion,
   planPostActionObservationCrop,
 } from "../src/computer-use-provider-router.mjs";
@@ -51,7 +52,7 @@ test("selection verification also observes the largest complementary pane", () =
       interactionIntent: "select-item",
       targetBounds: { x: 60, y: 346, width: 234, height: 50 },
     }, observation),
-    { x: 294, y: 0, width: 658, height: 722 },
+    { x: 294, y: 0, width: 640, height: 320 },
   );
   assert.equal(
     planPostActionEffectRegion({
@@ -61,6 +62,120 @@ test("selection verification also observes the largest complementary pane", () =
     }, observation),
     null,
   );
+});
+
+test("text entry observes a bounded dependent region below the editable without scanning the window", () => {
+  const observation = {
+    coordinateBounds: { x: 0, y: 0, width: 952, height: 722 },
+  };
+
+  assert.deepEqual(
+    planPostActionEffectRegion({
+      kind: "type_text",
+      targetBounds: { x: 54, y: 32, width: 256, height: 37 },
+    }, observation),
+    { x: 0, y: 69, width: 384, height: 320 },
+  );
+  assert.equal(
+    planPostActionEffectRegion({
+      kind: "type_text",
+      targetBounds: { x: 326, y: 674, width: 614, height: 42 },
+    }, observation),
+    null,
+  );
+});
+
+test("post-write verification accepts compact OCR adornments only inside the grounded editable", () => {
+  const element = {
+    name: "Q 宋鹏",
+    source: "ocr",
+    bounds: { x: 62, y: 39, width: 82, height: 24 },
+  };
+  assert.equal(
+    observedCompositeTextElementAtTarget(
+      element,
+      "宋鹏",
+      { x: 54, y: 32, width: 256, height: 37 },
+    ),
+    true,
+  );
+  assert.equal(
+    observedCompositeTextElementAtTarget(
+      { ...element, bounds: { x: 62, y: 84, width: 82, height: 24 } },
+      "宋鹏",
+      { x: 54, y: 32, width: 256, height: 37 },
+    ),
+    false,
+  );
+});
+
+test("computer.release aborts an admitted external desktop action before a late effect", async (t) => {
+  let admittedSignal;
+  let effectApplied = false;
+  const router = new ComputerUseProviderRouter({
+    driver: {
+      click(args) {
+        admittedSignal = args.signal;
+        return new Promise((resolve, reject) => {
+          const timer = setTimeout(() => {
+            effectApplied = true;
+            resolve({ status: "ok", effect: "applied", verified: true });
+          }, 100);
+          args.signal.addEventListener("abort", () => {
+            clearTimeout(timer);
+            const error = new Error("driver request aborted");
+            error.name = "AbortError";
+            reject(error);
+          }, { once: true });
+        });
+      },
+    },
+  });
+  t.after(() => router.close());
+  router.activeController = {
+    controllerId: "controller-1",
+    tier: "full",
+    window: {
+      id: "window-1",
+      windowId: "window-1",
+      title: "Fixture",
+      pid: 100,
+      bounds: { width: 960, height: 720 },
+    },
+    expiresAt: new Date(Date.now() + 60_000).toISOString(),
+    expiresAtMs: Date.now() + 60_000,
+  };
+  router.lastCapture = router.createActionObservation({
+    observationId: "cancel-action-observation",
+    source: "window-capture",
+    coordinateSpace: "window-local",
+    coordinateBounds: { x: 0, y: 0, width: 960, height: 720 },
+    capture: { width: 960, height: 720 },
+    includeUserOverlay: false,
+    elements: [],
+  });
+
+  const action = router.act({
+    action: {
+      kind: "click",
+      observationId: router.lastCapture.observationId,
+      coordinateSpace: "window-local",
+      x: 200,
+      y: 100,
+      targetBounds: { x: 160, y: 80, width: 80, height: 40 },
+      interactionIntent: "activate-control",
+      targetRole: "button",
+      deliveryMode: "foreground",
+    },
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+  const released = await router.cancel({ reason: "test-release" });
+
+  assert.equal(released.status, "cancelled");
+  assert.equal(admittedSignal.aborted, true);
+  await assert.rejects(action, (error) => error?.code === "operation.cancelled");
+  await new Promise((resolve) => setTimeout(resolve, 120));
+  assert.equal(effectApplied, false);
 });
 
 test("semantic UIA elements are admitted only for the active window lease", () => {
@@ -1716,7 +1831,7 @@ test("provider router permits one screenshot focus continuation and derives targ
   assert.equal(calls[1].args.deliveryMode, "foreground");
 });
 
-test("provider router safely derives observation and focus receipts for the same editable target", async (t) => {
+test("provider router safely derives the coordinate text target from a matching focus receipt", async (t) => {
   const calls = [];
   const router = new ComputerUseProviderRouter({
     driver: {
@@ -1732,10 +1847,6 @@ test("provider router safely derives observation and focus receipts for the same
           focusVerified: false,
           foregroundWindow: { windowId: "window-1" },
         };
-      },
-      async pressKey(args) {
-        calls.push({ method: "pressKey", args });
-        return { status: "ok", verified: true };
       },
       async captureScreenshot({ outputPath }) {
         return {
@@ -1812,20 +1923,19 @@ test("provider router safely derives observation and focus receipts for the same
     action: {
       kind: "type_text",
       surfaceReceiptId: "surface-receipt-2",
+      focusReceiptId: clicked.focusReceipt.id,
       targetBounds: bounds,
       value: "query",
       textMode: "replace-all",
       inputBehavior: "incremental",
     },
   });
-  router.pendingUnverifiedMutation = null;
-  await router.act({ action: { kind: "press_key", key: "return" } });
 
   assert.equal(clicked.focusReceipt.status, "verified");
-  assert.deepEqual(calls.map((entry) => entry.method), ["click", "typeText", "pressKey"]);
+  assert.deepEqual(calls.map((entry) => entry.method), ["click", "typeText"]);
   assert.equal(calls[1].args.x, 200);
   assert.equal(calls[1].args.y, 60);
-  assert.equal(calls[2].args.deliveryMode, "foreground");
+  assert.equal(calls[1].args.deliveryMode, "foreground");
 });
 
 test("provider router derives a safe window-local center for targetBounds-only text", async (t) => {
@@ -1931,7 +2041,7 @@ test("provider router rejects expired or mismatched focus receipts", async (t) =
   );
 });
 
-test("possibly-applied text requires a fresh observation before any replay or commit action", async (t) => {
+test("possibly-applied text stays blocked after an observation that cannot confirm the mutation", async (t) => {
   const calls = [];
   const router = new ComputerUseProviderRouter({
     driver: {
@@ -2018,19 +2128,21 @@ test("possibly-applied text requires a fresh observation before any replay or co
   );
 
   await router.capture({ mode: "semantic" });
-  const pressed = await router.act({
-    action: {
-      kind: "press_key",
-      observationId: router.lastCapture.observationId,
-      coordinateSpace: "window-local",
-      x: 200,
-      y: 100,
-      key: "return",
-      deliveryMode: "foreground",
-    },
-  });
-  assert.equal(pressed.status, "ok");
-  assert.deepEqual(calls.map((call) => call.method), ["typeText", "capture", "pressKey"]);
+  await assert.rejects(
+    router.act({
+      action: {
+        kind: "press_key",
+        observationId: router.lastCapture.observationId,
+        coordinateSpace: "window-local",
+        x: 200,
+        y: 100,
+        key: "return",
+        deliveryMode: "foreground",
+      },
+    }),
+    (error) => error.code === "action.observation_required_after_unverified_mutation",
+  );
+  assert.deepEqual(calls.map((call) => call.method), ["typeText", "capture"]);
 });
 
 test("coordinate text entry returns independently verified focus while mutation still requires observation", async (t) => {
@@ -2224,8 +2336,8 @@ test("indeterminate pixel text entry automatically returns target-local OCR evid
 
   assert.equal(captures.length, 1);
   assert.equal(captures[0].mode, "screenshot");
-  assert.deepEqual(captures[0].crop, { x: 300, y: 530, width: 556, height: 192 });
-  assert.equal(captures[0].includeChangedRegionAlongsideCrop, undefined);
+  assert.deepEqual(captures[0].crop, { x: 300, y: 594, width: 556, height: 128 });
+  assert.equal(captures[0].includeChangedRegionAlongsideCrop, true);
   assert.equal(captures[0].effectHintRegion, undefined);
   assert.equal(typed.capture.observationId, "post-action-observation");
   assert.equal(typed.postActionObservationRequired, false);
@@ -2238,11 +2350,160 @@ test("indeterminate pixel text entry automatically returns target-local OCR evid
   );
   assert.deepEqual(
     typed.postActionObservation.verificationRegion,
-    { x: 300, y: 530, width: 556, height: 192 },
+    { x: 300, y: 594, width: 556, height: 128 },
   );
   assert.equal(typed.result.verificationRequired, "satisfied_by_post_action_capture");
-  assert.match(typed.result.nextAction, /do not call computer\.observe merely to refresh it/u);
-  assert.match(typed.result.nextAction, /verified focusReceipt/u);
+  assert.match(typed.result.nextAction, /Do not call computer\.observe/u);
+  assert.match(typed.result.nextAction, /secondaryOcrRegion/u);
+});
+
+test("leading transient list selection uses the verified text focus keyboard commit", async (t) => {
+  const calls = [];
+  const now = Date.now();
+  const router = new ComputerUseProviderRouter({
+    driver: {
+      async click(input) {
+        calls.push({ method: "click", input });
+        return { status: "ok", verified: true };
+      },
+      async pressKey(input) {
+        calls.push({ method: "pressKey", input });
+        return { status: "ok", verified: true };
+      },
+    },
+  });
+  t.after(() => router.close());
+  router.activeController = {
+    controllerId: "controller-1",
+    tier: "full",
+    window: {
+      id: "window-1",
+      windowId: "window-1",
+      title: "Fixture",
+      pid: 100,
+      bounds: { width: 960, height: 720 },
+    },
+    expiresAt: new Date(now + 60_000).toISOString(),
+    expiresAtMs: now + 60_000,
+  };
+  router.activeFocusReceipt = {
+    id: "focus-query",
+    status: "verified",
+    controllerId: "controller-1",
+    windowId: "window-1",
+    target: {
+      kind: "type_text",
+      x: 210,
+      y: 52,
+      bounds: { x: 40, y: 32, width: 340, height: 40 },
+    },
+    issuedAtMs: now,
+    expiresAtMs: now + 30_000,
+  };
+  router.lastCapture = router.createActionObservation({
+    ...observation({
+      source: "ocr",
+      mode: "ocr",
+      expiresAt: now + 5_000,
+      capture: { width: 960, height: 720 },
+    }),
+    coordinateBounds: { x: 0, y: 0, width: 960, height: 720 },
+    mutationVerification: { status: "confirmed" },
+    perceptionRouting: {
+      secondaryOcrRegion: { x: 24, y: 80, width: 380, height: 320 },
+    },
+    elements: [],
+  });
+
+  const selected = await router.act({
+    action: {
+      kind: "click",
+      observationId: router.lastCapture.observationId,
+      coordinateSpace: "window-local",
+      x: 180,
+      y: 130,
+      targetBounds: { x: 40, y: 100, width: 330, height: 60 },
+      interactionIntent: "select-item",
+      targetRole: "list-item",
+    },
+  });
+
+  assert.deepEqual(calls.map((call) => call.method), ["pressKey"]);
+  assert.equal(calls[0].input.key, "enter");
+  assert.equal(selected.action, "press_key");
+  assert.equal(selected.requestedAction, "click");
+  assert.equal(selected.execution.targetPath, "focus-receipt");
+  assert.equal(selected.execution.selectionReason, "transient-dependent-first-item");
+  assert.deepEqual(selected.execution.fallback, {
+    used: true,
+    reason: "transient-popup-keyboard-commit",
+  });
+});
+
+test("non-leading transient list selection preserves the requested click", async (t) => {
+  const calls = [];
+  const now = Date.now();
+  const router = new ComputerUseProviderRouter({
+    driver: {
+      async click(input) {
+        calls.push({ method: "click", input });
+        return { status: "ok", verified: true };
+      },
+    },
+  });
+  t.after(() => router.close());
+  router.activeController = {
+    controllerId: "controller-1",
+    tier: "full",
+    window: {
+      id: "window-1",
+      windowId: "window-1",
+      title: "Fixture",
+      pid: 100,
+      bounds: { width: 960, height: 720 },
+    },
+    expiresAt: new Date(now + 60_000).toISOString(),
+    expiresAtMs: now + 60_000,
+  };
+  router.activeFocusReceipt = {
+    id: "focus-query",
+    status: "verified",
+    controllerId: "controller-1",
+    windowId: "window-1",
+    target: { kind: "type_text", bounds: { x: 40, y: 32, width: 340, height: 40 } },
+    issuedAtMs: now,
+    expiresAtMs: now + 30_000,
+  };
+  router.lastCapture = router.createActionObservation({
+    ...observation({
+      source: "window-capture",
+      expiresAt: now + 5_000,
+      capture: { width: 960, height: 720 },
+    }),
+    coordinateBounds: { x: 0, y: 0, width: 960, height: 720 },
+    mutationVerification: { status: "confirmed" },
+    perceptionRouting: {
+      secondaryOcrRegion: { x: 24, y: 80, width: 380, height: 320 },
+    },
+    elements: [],
+  });
+
+  const selected = await router.act({
+    action: {
+      kind: "click",
+      observationId: router.lastCapture.observationId,
+      coordinateSpace: "window-local",
+      x: 180,
+      y: 330,
+      targetBounds: { x: 40, y: 300, width: 330, height: 60 },
+      interactionIntent: "select-item",
+      targetRole: "list-item",
+    },
+  });
+
+  assert.deepEqual(calls.map((call) => call.method), ["click"]);
+  assert.equal(selected.action, "click");
+  assert.equal(selected.requestedAction, undefined);
 });
 
 test("fresh exact OCR text promotes coordinate entry without another observe or retry", async (t) => {
@@ -2335,7 +2596,7 @@ test("fresh exact OCR text promotes coordinate entry without another observe or 
   });
 
   assert.equal(captures.length, 1);
-  assert.equal(captures[0].includeChangedRegionAlongsideCrop, undefined);
+  assert.equal(captures[0].includeChangedRegionAlongsideCrop, true);
   assert.equal(typed.status, "ok");
   assert.equal(typed.outcome, "completed");
   assert.equal(typed.result.effect, "verified");
@@ -2346,6 +2607,319 @@ test("fresh exact OCR text promotes coordinate entry without another observe or 
   assert.equal(typed.focusReceipt.status, "verified");
   assert.equal(router.pendingUnverifiedMutation, null);
   assert.match(typed.postActionObservation.nextAction, /Do not observe or type it again/u);
+});
+
+test("replace-all rejects a containing OCR value and blocks dependent actions", async (t) => {
+  const router = new ComputerUseProviderRouter({
+    ocrSession: {},
+    driver: {
+      async typeText() {
+        return {
+          status: "ok",
+          effect: "possibly_applied",
+          verified: false,
+          focusVerified: true,
+        };
+      },
+      async click() {
+        throw new Error("dependent click must stay blocked");
+      },
+      async captureScreenshot() {
+        throw new Error("captureOperation is stubbed by this test");
+      },
+    },
+  });
+  t.after(() => router.close());
+  router.activeController = {
+    controllerId: "controller-1",
+    tier: "full",
+    window: {
+      id: "window-1",
+      windowId: "window-1",
+      title: "Fixture",
+      pid: 100,
+      bounds: { width: 952, height: 722 },
+    },
+    expiresAt: new Date(Date.now() + 60_000).toISOString(),
+    expiresAtMs: Date.now() + 60_000,
+  };
+  router.lastCapture = router.createActionObservation({
+    ...observation({
+      source: "window-capture",
+      expiresAt: Date.now() + 5_000,
+      capture: { width: 952, height: 722 },
+    }),
+    coordinateBounds: { x: 0, y: 0, width: 952, height: 722 },
+    elements: [],
+  });
+  router.captureOperation = async () => {
+    const observed = router.createActionObservation({
+      ...observation({
+        observationId: "post-action-appended-value",
+        source: "ocr",
+        mode: "ocr",
+        expiresAt: Date.now() + 5_000,
+        capture: { width: 952, height: 722 },
+      }),
+      coordinateBounds: { x: 0, y: 0, width: 952, height: 722 },
+      surfaceReceipt: { id: "post-action-appended-receipt" },
+      elements: [{
+        elementToken: "editor-appended-value",
+        role: "text",
+        name: "stale message-123",
+        value: "stale message-123",
+        source: "ocr",
+        bounds: { x: 350, y: 640, width: 220, height: 23 },
+      }],
+    });
+    router.reconcilePendingTextFocus(observed);
+    return observed;
+  };
+
+  const typed = await router.act({
+    action: {
+      kind: "type_text",
+      observationId: router.lastCapture.observationId,
+      coordinateSpace: "window-local",
+      targetBounds: { x: 300, y: 620, width: 550, height: 70 },
+      value: "message-123",
+      textMode: "replace-all",
+    },
+  });
+
+  assert.equal(typed.status, "indeterminate");
+  assert.equal(typed.outcome, "unverified");
+  assert.equal(typed.capture.mutationVerification.status, "not-confirmed");
+  assert.equal(typed.capture.mutationVerification.requiredEffect, "exact-replacement");
+  assert.equal(typed.focusReceipt, undefined);
+  assert.equal(router.pendingUnverifiedMutation.textMode, "replace-all");
+  await assert.rejects(
+    router.act({
+      action: {
+        kind: "click",
+        observationId: router.lastCapture.observationId,
+        coordinateSpace: "window-local",
+        x: 900,
+        y: 680,
+        targetBounds: { x: 870, y: 660, width: 60, height: 40 },
+        interactionIntent: "activate-control",
+        targetRole: "button",
+      },
+    }),
+    (error) => error.code === "action.observation_required_after_unverified_mutation",
+  );
+});
+
+test("bounded local UI transition confirms verified entry when the custom editor hides its value", async (t) => {
+  const calls = [];
+  let captureCalls = 0;
+  const router = new ComputerUseProviderRouter({
+    ocrSession: {},
+    driver: {
+      async typeText() {
+        return {
+          status: "ok",
+          effect: "unverifiable",
+          verified: false,
+          focusVerified: false,
+          path: "key_events",
+        };
+      },
+      async pressKey(args) {
+        calls.push(args);
+        return { status: "ok", verified: true };
+      },
+      async captureScreenshot() {
+        throw new Error("captureOperation is stubbed by this test");
+      },
+    },
+  });
+  t.after(() => router.close());
+  router.activeController = {
+    controllerId: "controller-1",
+    tier: "full",
+    window: {
+      id: "window-1",
+      windowId: "window-1",
+      title: "Fixture",
+      pid: 100,
+      bounds: { width: 952, height: 722 },
+    },
+    expiresAt: new Date(Date.now() + 60_000).toISOString(),
+    expiresAtMs: Date.now() + 60_000,
+  };
+  router.lastCapture = router.createActionObservation({
+    ...observation({
+      source: "window-capture",
+      expiresAt: Date.now() + 5_000,
+      capture: { width: 952, height: 722 },
+    }),
+    coordinateBounds: { x: 0, y: 0, width: 952, height: 722 },
+    elements: [
+      {
+        elementToken: "default-suggestion-1",
+        role: "text",
+        name: "Recent option",
+        source: "ocr",
+        bounds: { x: 110, y: 118, width: 90, height: 24 },
+      },
+      {
+        elementToken: "default-suggestion-2",
+        role: "text",
+        name: "Another option",
+        source: "ocr",
+        bounds: { x: 110, y: 158, width: 110, height: 24 },
+      },
+    ],
+  });
+  router.activeFocusReceipt = router.createFocusReceipt({
+    action: {
+      kind: "type_text",
+      targetBounds: { x: 62, y: 34, width: 223, height: 37 },
+      x: 173.5,
+      y: 52.5,
+    },
+    element: null,
+    driverTarget: { bounds: { x: 62, y: 34, width: 223, height: 37 } },
+  });
+  router.captureOperation = async () => {
+    captureCalls += 1;
+    const observed = router.createActionObservation({
+      ...observation({
+        observationId: "post-action-dependent-popup",
+        source: "ocr",
+        mode: "ocr",
+        expiresAt: Date.now() + 5_000,
+        capture: { width: 952, height: 722 },
+      }),
+      coordinateBounds: { x: 0, y: 0, width: 952, height: 722 },
+      surfaceReceipt: { id: "post-action-dependent-receipt" },
+      // Screenshot captures retain Host OCR under localObservation rather than
+      // flattening it onto the capture object.
+      localObservation: {
+        crop: { x: 40, y: 20, width: 360, height: 300 },
+        elements: captureCalls === 1 ? [{
+          elementToken: "default-suggestion-1",
+          role: "text",
+          name: "Recent option",
+          source: "ocr",
+          bounds: { x: 110, y: 118, width: 90, height: 24 },
+        }] : [
+          {
+            elementToken: "dependent-result-term-1",
+            role: "text",
+            name: "宋鹏宋鹏",
+            value: "宋鹏宋鹏",
+            source: "ocr",
+            bounds: { x: 110, y: 118, width: 88, height: 24 },
+          },
+          {
+            elementToken: "dependent-result-term-2",
+            role: "text",
+            name: "宋鹏律师",
+            value: "宋鹏律师",
+            source: "ocr",
+            bounds: { x: 110, y: 158, width: 88, height: 24 },
+          },
+        ],
+      },
+    });
+    router.reconcilePendingTextFocus(observed);
+    return observed;
+  };
+
+  const typed = await router.act({
+    action: {
+      kind: "type_text",
+      observationId: router.lastCapture.observationId,
+      coordinateSpace: "window-local",
+      targetBounds: { x: 62, y: 34, width: 223, height: 37 },
+      value: "宋鹏",
+      textMode: "insert",
+    },
+  });
+
+  assert.equal(typed.status, "ok");
+  assert.equal(typed.outcome, "completed");
+  assert.equal(captureCalls, 2);
+  assert.equal(
+    typed.capture.mutationVerification.method,
+    "bounded-local-ui-transition-after-verified-entry",
+  );
+  assert.equal(typed.focusReceipt.target.bounds.x, 62);
+  assert.equal(typed.focusReceipt.target.bounds.y, 34);
+  const pressed = await router.act({
+    action: {
+      kind: "press_key",
+      key: "enter",
+      focusReceiptId: typed.focusReceipt.id,
+    },
+  });
+  assert.equal(pressed.status, "ok");
+  assert.equal(calls[0].key, "enter");
+});
+
+test("a fresh same-target editable refocus clears an unconfirmed text correction lock", async (t) => {
+  const calls = [];
+  const router = new ComputerUseProviderRouter({
+    driver: {
+      async click(args) {
+        calls.push(args);
+        return { status: "ok", verified: true, focusVerified: true };
+      },
+    },
+  });
+  t.after(() => router.close());
+  router.activeController = {
+    controllerId: "controller-1",
+    tier: "full",
+    window: {
+      id: "window-1",
+      windowId: "window-1",
+      title: "Fixture",
+      pid: 100,
+      bounds: { width: 952, height: 722 },
+    },
+    expiresAt: new Date(Date.now() + 60_000).toISOString(),
+    expiresAtMs: Date.now() + 60_000,
+  };
+  router.lastCapture = router.createActionObservation({
+    ...observation({
+      source: "window-capture",
+      expiresAt: Date.now() + 5_000,
+      capture: { width: 952, height: 722 },
+    }),
+    coordinateBounds: { x: 0, y: 0, width: 952, height: 722 },
+    elements: [],
+  });
+  router.pendingUnverifiedMutation = {
+    actionKind: "type_text",
+    controllerId: "controller-1",
+    windowId: "window-1",
+    target: {
+      kind: "type_text",
+      x: 173.5,
+      y: 52.5,
+      bounds: { x: 62, y: 34, width: 223, height: 37 },
+    },
+  };
+
+  const focused = await router.act({
+    action: {
+      kind: "click",
+      observationId: router.lastCapture.observationId,
+      coordinateSpace: "window-local",
+      x: 173.5,
+      y: 52.5,
+      targetBounds: { x: 62, y: 34, width: 223, height: 37 },
+      interactionIntent: "focus-editable",
+      targetRole: "editable",
+    },
+  });
+
+  assert.equal(focused.status, "ok");
+  assert.equal(router.pendingUnverifiedMutation, null);
+  assert.equal(calls.length, 1);
 });
 
 test("two unconfirmed mutations block another retry in the same target region", (t) => {
@@ -2442,8 +3016,8 @@ test("fresh OCR confirmation restores a limited focus continuation after coordin
             value: "宋鹏",
             actions: ["click"],
             source: "ocr",
-            bounds: { x: 100, y: 82, width: 42, height: 24 },
-            sourceRegion: { x: 100, y: 82, width: 42, height: 24 },
+            bounds: { x: 160, y: 82, width: 42, height: 24 },
+            sourceRegion: { x: 160, y: 82, width: 42, height: 24 },
           }],
         });
       },
@@ -2505,6 +3079,97 @@ test("fresh OCR confirmation restores a limited focus continuation after coordin
   });
   assert.equal(pressed.status, "ok");
   assert.deepEqual(calls.map((call) => call.method), ["typeText", "capture", "pressKey"]);
+});
+
+test("post-write focus verification accepts the exact representative anchor of a compact OCR row", async (t) => {
+  const calls = [];
+  const router = new ComputerUseProviderRouter({
+    ocrSession: {},
+    driver: {
+      async typeText(args) {
+        calls.push({ method: "typeText", args });
+        return {
+          status: "ok",
+          effect: "possibly_applied",
+          verified: false,
+          focusVerified: false,
+        };
+      },
+      async captureScreenshot() {
+        throw new Error("captureOperation is stubbed by this test");
+      },
+      async pressKey(args) {
+        calls.push({ method: "pressKey", args });
+        return { status: "ok", verified: true };
+      },
+    },
+  });
+  t.after(() => router.close());
+  router.activeController = {
+    controllerId: "controller-1",
+    tier: "full",
+    window: {
+      id: "window-1",
+      windowId: "window-1",
+      title: "Fixture",
+      pid: 100,
+      bounds: { width: 952, height: 722 },
+    },
+    expiresAt: new Date(Date.now() + 10_000).toISOString(),
+    expiresAtMs: Date.now() + 10_000,
+  };
+  router.lastCapture = router.createActionObservation({
+    ...observation({
+      source: "window-capture",
+      expiresAt: Date.now() + 5_000,
+      capture: { width: 952, height: 722 },
+    }),
+    coordinateBounds: { x: 0, y: 0, width: 952, height: 722 },
+    elements: [],
+  });
+  router.captureOperation = async (args) => {
+    calls.push({ method: "capture", args });
+    const observed = router.createActionObservation({
+      ...observation({
+        observationId: "compact-row-after-text",
+        source: "ocr",
+        mode: "ocr",
+        expiresAt: Date.now() + 5_000,
+        capture: { width: 952, height: 722 },
+      }),
+      coordinateBounds: { x: 0, y: 0, width: 952, height: 722 },
+      surfaceReceipt: { id: "compact-row-receipt" },
+      elements: [{
+        elementToken: "compact-search-row",
+        name: "宋鹏 Q",
+        source: "ocr",
+        observationOnly: true,
+        bounds: { x: 80, y: 40, width: 70, height: 24 },
+        representativeTextAnchor: {
+          name: "宋鹏",
+          bounds: { x: 89, y: 44, width: 42, height: 23 },
+        },
+      }],
+    });
+    router.reconcilePendingTextFocus(observed);
+    return observed;
+  };
+
+  const typed = await router.act({
+    action: {
+      kind: "type_text",
+      observationId: router.lastCapture.observationId,
+      coordinateSpace: "window-local",
+      targetBounds: { x: 61, y: 37, width: 216, height: 46 },
+      value: "宋鹏",
+      textMode: "replace-all",
+    },
+  });
+
+  assert.equal(typed.capture.mutationVerification.status, "confirmed");
+  assert.equal(typed.capture.mutationVerification.matchedElementToken, "compact-search-row");
+  assert.equal(typed.focusReceipt.status, "verified");
+  assert.equal(typed.result.verified, true);
 });
 
 function observation(overrides = {}) {

@@ -116,10 +116,11 @@ async function recognize(request) {
     executionProviders: result.selected.providers,
     modelFormat: modelPack.format,
     crop: imageInput.crop,
+    recognitionScale: imageInput.scale,
     fixture: request.fixture ?? null,
     items: result.ocr.results.map((item) => ({
       text: item.text,
-      bounds: translateBounds(item.box, imageInput.crop),
+      bounds: translateBounds(item.box, imageInput.crop, imageInput.scale),
       confidence: item.confidence,
       source: "ocr",
     })),
@@ -265,10 +266,11 @@ function createDaemon() {
         sessionMode: "daemon",
         cacheHit: false,
         crop: imageInput.crop,
+        recognitionScale: imageInput.scale,
         fixture: request.fixture ?? null,
         items: ocr.results.map((item) => ({
           text: item.text,
-          bounds: translateBounds(item.box, imageInput.crop),
+          bounds: translateBounds(item.box, imageInput.crop, imageInput.scale),
           confidence: item.confidence,
           source: "ocr",
         })),
@@ -346,12 +348,15 @@ async function resolveImageBuffer(request) {
   }
 
   if (request.crop) {
+    const scale = selectRecognitionScale(request.crop);
+    const cropped = await cropImage(buffer, request.crop);
     return {
-      buffer: await cropImage(buffer, request.crop),
+      buffer: scale === 1 ? cropped : await resizeImage(cropped, scale),
       crop: request.crop,
+      scale,
     };
   }
-  return { buffer, crop: null };
+  return { buffer, crop: null, scale: 1 };
 }
 
 async function cropImage(buffer, crop) {
@@ -360,6 +365,29 @@ async function cropImage(buffer, crop) {
   const ctx = canvas.getContext("2d");
   ctx.drawImage(image, crop.x, crop.y, crop.width, crop.height, 0, 0, crop.width, crop.height);
   return canvas.toBuffer("image/png");
+}
+
+async function resizeImage(buffer, scale) {
+  const image = await loadImage(buffer);
+  const width = Math.max(1, Math.round(image.width * scale));
+  const height = Math.max(1, Math.round(image.height * scale));
+  const canvas = createCanvas(width, height);
+  const ctx = canvas.getContext("2d");
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = "high";
+  ctx.drawImage(image, 0, 0, image.width, image.height, 0, 0, width, height);
+  return canvas.toBuffer("image/png");
+}
+
+export function selectRecognitionScale(crop) {
+  const width = Number(crop?.width);
+  const height = Number(crop?.height);
+  if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) return 1;
+
+  // Region OCR is commonly used for compact application surfaces where text glyphs
+  // are too small for the recognizer. Upscale only bounded crops so full-window OCR
+  // keeps its existing latency and memory profile.
+  return Math.max(width, height) <= 900 && (width * height) <= 500_000 ? 2 : 1;
 }
 
 function createCanvasLabPng() {
@@ -442,13 +470,20 @@ function toArrayBuffer(buffer) {
   return buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength);
 }
 
-function translateBounds(bounds, crop) {
-  if (!crop) return bounds;
+export function translateBounds(bounds, crop, scale = 1) {
+  const normalizedScale = Number.isFinite(scale) && scale > 0 ? scale : 1;
+  const local = {
+    x: bounds.x / normalizedScale,
+    y: bounds.y / normalizedScale,
+    width: bounds.width / normalizedScale,
+    height: bounds.height / normalizedScale,
+  };
+  if (!crop) return local;
   return {
-    x: bounds.x + crop.x,
-    y: bounds.y + crop.y,
-    width: bounds.width,
-    height: bounds.height,
+    x: local.x + crop.x,
+    y: local.y + crop.y,
+    width: local.width,
+    height: local.height,
   };
 }
 

@@ -11,12 +11,14 @@ import { ComputerUseProviderRouter } from "./computer-use-provider-router.mjs";
 import { CuaDriverMcpDriver } from "./cua-driver-mcp-driver.mjs";
 import { startGatewayManagedOverlay, stopGatewayManagedOverlay } from "./gateway-overlay-session.mjs";
 import { createPlatformOcrEnvironment, OcrSidecarSession } from "./ocr-sidecar.mjs";
+import { sendWindowsUnicodeText } from "./windows-unicode-input.mjs";
 
 export async function runComputerUseMcpServer(options = {}) {
   const router = new ComputerUseProviderRouter({
     ocrSession: createPlatformOcrSession(options.platformRuntime),
     driver: new CuaDriverMcpDriver({
       driverPath: options.platformRuntime?.paths?.cuaDriverExecutable,
+      unicodeInput: sendWindowsUnicodeText,
     }),
     overlayRuntime: {
       start: (args) => startGatewayManagedOverlay({
@@ -196,6 +198,11 @@ export async function callTool(router, name, args, requestContext) {
   }
   structuredContent = withResultContract(compactComputerUseResult(projected.structuredContent));
   const visualUnderstandingEligible = structuredContent?.perceptionRouting?.visualUnderstandingEligible !== false;
+  const visualInstruction = typeof args?.visualQuestion === "string" && args.visualQuestion.trim()
+    ? args.visualQuestion.trim().slice(0, 1200)
+    : (name === "computer.acquire" && projected.imageContent.length > 0
+      ? "Identify the major visible interactive regions needed to continue the requested desktop task in one pass. Return separate grounded bounds for every visibly present category that may be needed next: window title or header, each text-entry surface using its full editable bounds, independent action buttons, selectable list rows, and major list or content panes. Do not merge a text field with an embedded or adjacent button. Omit a category only when it is not visibly present. Ground all regions in the returned window-local coordinate space; labels are unverified visual hints, so do not infer exact text or identity beyond visible evidence."
+      : null);
   return {
     content: [
       {
@@ -211,12 +218,14 @@ export async function callTool(router, name, args, requestContext) {
           sameTransaction: true,
           requestField: "visualQuestion",
         },
-        ...(visualUnderstandingEligible
-          && typeof args?.visualQuestion === "string"
-          && args.visualQuestion.trim() ? {
+        ...(visualUnderstandingEligible && visualInstruction ? {
         "xiaozhiclaw/visual-understanding": {
           mode: "auto",
-          instruction: args.visualQuestion.trim().slice(0, 1200),
+          instruction: visualInstruction,
+          ...(name === "computer.acquire"
+            && !(typeof args?.visualQuestion === "string" && args.visualQuestion.trim())
+            ? { latencyBudgetMs: 2_500 }
+            : {}),
           ...(structuredContent?.perceptionRouting?.visualRegion
             ? { region: structuredContent.perceptionRouting.visualRegion }
             : {}),
@@ -344,7 +353,7 @@ export function projectComputerUseModelResult(value, contextKey = "") {
   const projected = contextKey === ""
       ? {
         ...(value.initialObservation ? {
-          initialObservationGuidance: "A fresh initial observation is already included. Use its semantic or screenshot/OCR evidence directly; do not call computer.observe again unless required evidence is absent.",
+          initialObservationGuidance: "A fresh initial observation is already included. Use its OCR and Host-grounded layout evidence directly. Never call semantic observe merely to reconfirm the current title or screenshot: an empty semantic probe cannot add evidence. If the next interaction is grounded, act now. If one exact editable or selectable bound is missing, ask one bounded visual question for every remaining region in a single observe call, then act; do not insert semantic or screenshot refreshes before it.",
         } : {}),
         ...(value?.perceptionRouting?.suggestedVisualRegion
           && value?.perceptionRouting?.visualRegion == null
@@ -353,7 +362,7 @@ export function projectComputerUseModelResult(value, contextKey = "") {
             }
           : {}),
         ...(hasOcrObservation(value) ? {
-        observationGuidance: "LIMIT: OCR proves visible pixels only. Blank editable surfaces produce no OCR row, and matching text elsewhere does not prove a draft or current field value. Confirm editable state through a semantic control or at most one bounded visual region; if that remains unavailable, release control and report the blocker instead of repeating observations.",
+        observationGuidance: "LIMIT: OCR proves visible pixels only. When the intended visible target label is already proven by exact OCR, click those glyph bounds once with interactionIntent=activate-recognized-text; do not request vision merely to recover the surrounding list row. Blank editable surfaces and unlabeled controls still require semantic or one bounded visual region. matching text elsewhere does not prove a draft or current field value. If required non-text geometry remains unavailable, release control and report the blocker instead of repeating observations.",
         } : {}),
       }
     : {};
@@ -417,6 +426,12 @@ export function projectComputerUseModelResult(value, contextKey = "") {
       };
       continue;
     }
+    if (key === "localObservation" && entry && typeof entry === "object") {
+      projected.localObservation = summarizeLocalObservation(entry, {
+        preferredRegion: value?.perceptionRouting?.secondaryOcrRegion,
+      });
+      continue;
+    }
     projected[key] = projectComputerUseModelResult(entry, key);
   }
 
@@ -431,7 +446,9 @@ export function projectComputerUseModelResult(value, contextKey = "") {
     && Array.isArray(value.applications)
     && Array.isArray(value.windows)
   ) {
-    projected.controlGuidance = "Next, call computer.acquire with the matching fresh applicationToken.";
+    projected.controlGuidance = projected.omittedApplicationCount > 0
+      ? "This state inventory is intentionally compressed. Do not repeat the same state observation to reveal omitted entries. If the user already identified the target application, call computer.acquire now with applicationName set to that product name; the Host resolves it against the full fresh inventory and fails closed on no or ambiguous matches. Otherwise use a shown fresh applicationToken."
+      : "Next, call computer.acquire with the matching fresh applicationToken. If the user already identified the target application but it is absent here, call computer.acquire with applicationName instead of repeating state.";
   }
   return projected;
 }
@@ -496,7 +513,9 @@ function summarizeEmbeddedObservation(value) {
         }
       : {}),
     ...(value.localObservation !== undefined
-      ? { localObservation: summarizeLocalObservation(value.localObservation) }
+      ? { localObservation: summarizeLocalObservation(value.localObservation, {
+          preferredRegion: value?.perceptionRouting?.secondaryOcrRegion,
+        }) }
       : {}),
     ...(value.perceptionRouting !== undefined
       ? { perceptionRouting: summarizePerceptionRouting(value.perceptionRouting) }
@@ -538,7 +557,12 @@ function summarizeDriverActionResult(value) {
 }
 
 const MODEL_STATE_WINDOW_LIMIT = 6;
-const MODEL_STATE_APPLICATION_LIMIT = 6;
+// A tray-only application has no window evidence, so its opaque selector can
+// only survive through the application inventory. Keep a bounded but complete
+// typical running-process set; the per-entry projection already removes pid,
+// paths, and launch metadata. Six entries was too lossy on a normal Windows
+// desktop and made recoverable tray applications undiscoverable.
+const MODEL_STATE_APPLICATION_LIMIT = 48;
 
 function summarizeStateWindows(windows, foregroundWindow) {
   return windows
@@ -641,11 +665,11 @@ function isModelRelevantStateWindow(window) {
     && Math.abs(y) < 16_384;
 }
 
-function summarizeLocalObservation(value) {
+function summarizeLocalObservation(value, options = {}) {
   const compactedElements = Array.isArray(value.elements)
     ? compactModelPerceptionElements(value.elements)
     : [];
-  const elements = limitModelPerceptionElements(compactedElements);
+  const elements = limitModelPerceptionElements(compactedElements, options);
   return {
     ...(value.source !== undefined ? { source: value.source } : {}),
     ...(value.crop !== undefined ? { crop: projectComputerUseModelResult(value.crop, "crop") } : {}),
@@ -689,8 +713,25 @@ function summarizePerceptionRouting(value) {
 
 const MODEL_PERCEPTION_ELEMENT_LIMIT = 8;
 
-function limitModelPerceptionElements(elements) {
+function limitModelPerceptionElements(elements, options = {}) {
   if (elements.length <= MODEL_PERCEPTION_ELEMENT_LIMIT) return elements;
+  const preferredRegion = options.preferredRegion;
+  if (isCoordinateBox(preferredRegion)) {
+    const preferred = elements.filter((element) => boxesIntersect(
+      element?.bounds ?? element?.representativeTextAnchor?.bounds,
+      preferredRegion,
+    ));
+    if (preferred.length > 0) {
+      const preferredLimit = Math.min(preferred.length, Math.ceil(MODEL_PERCEPTION_ELEMENT_LIMIT * 0.625));
+      const selectedPreferred = samplePerceptionElements(preferred, preferredLimit);
+      const selectedSet = new Set(selectedPreferred);
+      const remaining = elements.filter((element) => !selectedSet.has(element));
+      return [
+        ...selectedPreferred,
+        ...samplePerceptionElements(remaining, MODEL_PERCEPTION_ELEMENT_LIMIT - selectedPreferred.length),
+      ].sort(comparePerceptionGeometry);
+    }
+  }
   const semantic = elements.filter((element) => element?.source !== "ocr");
   const ocr = elements
     .filter((element) => element?.source === "ocr")
@@ -719,6 +760,37 @@ function limitModelPerceptionElements(elements) {
   }
   sampled.sort(comparePerceptionGeometry);
   return [...selected, ...sampled].slice(0, MODEL_PERCEPTION_ELEMENT_LIMIT);
+}
+
+function samplePerceptionElements(elements, limit) {
+  if (limit <= 0 || elements.length === 0) return [];
+  if (elements.length <= limit) return [...elements];
+  if (limit === 1) return [elements[0]];
+  const selected = [];
+  const used = new Set();
+  for (let index = 0; index < limit; index += 1) {
+    const sourceIndex = Math.round(index * (elements.length - 1) / (limit - 1));
+    if (!used.has(sourceIndex)) {
+      used.add(sourceIndex);
+      selected.push(elements[sourceIndex]);
+    }
+  }
+  return selected;
+}
+
+function isCoordinateBox(value) {
+  return value && typeof value === "object"
+    && [value.x, value.y, value.width, value.height].every(Number.isFinite)
+    && value.width > 0
+    && value.height > 0;
+}
+
+function boxesIntersect(left, right) {
+  if (!isCoordinateBox(left) || !isCoordinateBox(right)) return false;
+  return left.x < right.x + right.width
+    && left.x + left.width > right.x
+    && left.y < right.y + right.height
+    && left.y + left.height > right.y;
 }
 
 function summarizePriorCapture(value) {
@@ -1010,18 +1082,25 @@ function compactMarkdownValue(value) {
 }
 
 export async function projectComputerUseMediaResult(router, name, args, value) {
-  if (name !== "computer.observe") {
+  if (name !== "computer.observe" && name !== "computer.acquire") {
     return { structuredContent: value, imageContent: [] };
   }
   const mode = args?.mode;
-  const artifactPath = value?.artifact?.path ?? value?.capture?.path;
+  const acquisitionObservation = name === "computer.acquire"
+    ? value?.initialObservation
+    : null;
+  const artifactPath = acquisitionObservation?.artifact?.path
+    ?? acquisitionObservation?.capture?.path
+    ?? value?.artifact?.path
+    ?? value?.capture?.path;
   const explicitVisualQuestion = typeof args?.visualQuestion === "string"
     && args.visualQuestion.trim() !== "";
   const visualUnderstandingEligible = value?.perceptionRouting?.visualUnderstandingEligible !== false;
-  const shouldAttachImage = (
-    mode === "capture-window"
-    || (mode === "visual" && explicitVisualQuestion && visualUnderstandingEligible)
-  )
+  const shouldAttachAcquisitionImage = name === "computer.acquire"
+    && acquisitionObservation?.localObservation?.source === "ocr";
+  const shouldAttachImage = (shouldAttachAcquisitionImage
+    || mode === "capture-window"
+    || (mode === "visual" && explicitVisualQuestion && visualUnderstandingEligible))
     && typeof artifactPath === "string";
   const structuredContent = sanitizeObservationMediaPaths(value, shouldAttachImage);
   if (!shouldAttachImage) return { structuredContent, imageContent: [] };

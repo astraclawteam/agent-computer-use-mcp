@@ -456,7 +456,10 @@ export async function sendWindowsUnicodeText(options = {}) {
     platform = process.platform,
     powershellPath = resolveWindowsPowerShellPath(),
     spawnProcess = spawn,
+    signal,
   } = options;
+
+  if (signal?.aborted === true) throw unicodeInputAbortError();
 
   if (platform !== "win32") {
     throw unicodeInputError(
@@ -531,6 +534,11 @@ export async function sendWindowsUnicodeText(options = {}) {
       ));
     }, timeoutMs);
     timer.unref?.();
+    const onAbort = () => {
+      child.kill();
+      finish(reject, unicodeInputAbortError());
+    };
+    signal?.addEventListener?.("abort", onAbort, { once: true });
 
     const appendOutput = (current, chunk) => {
       if (Buffer.byteLength(current) + chunk.length > MAX_BRIDGE_OUTPUT_BYTES) {
@@ -603,9 +611,19 @@ export async function sendWindowsUnicodeText(options = {}) {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
+      signal?.removeEventListener?.("abort", onAbort);
       settle(value);
     }
   });
+}
+
+function unicodeInputAbortError() {
+  const error = unicodeInputError(
+    "unicode_input.cancelled",
+    "The Windows Unicode input operation was cancelled.",
+  );
+  error.name = "AbortError";
+  return error;
 }
 
 function isValidWindowId(value) {
