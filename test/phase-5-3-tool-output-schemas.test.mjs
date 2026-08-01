@@ -35,6 +35,8 @@ test("Host Scene schema freezes identity ownership evidence and invalidation", (
   for (const field of ["id", "type", "role", "parentId", "observationVersion", "coordinate", "evidence", "evidenceConsistency", "actions", "invalidatesOn"]) {
     assert.ok(element.properties[field], field);
   }
+  assert.ok(element.properties.state);
+  assert.ok(element.properties.semanticKey);
 });
 
 test("Phase 5.3 has an executable strict tool schema smoke script", async () => {

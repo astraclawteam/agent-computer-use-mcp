@@ -89,6 +89,11 @@ const HOST_SCENE_SCHEMA = {
           invalidatesOn: { type: "array", items: { type: "string" } },
           name: { type: "string" },
           value: { type: "string" },
+          semanticKey: {
+            type: "string",
+            description: "Optional Host-declared semantic identity used to compare the same logical item across observation versions.",
+          },
+          state: ANY_OBJECT,
         },
         additionalProperties: false,
       },

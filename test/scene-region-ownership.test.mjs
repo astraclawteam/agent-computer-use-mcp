@@ -207,3 +207,47 @@ test("screen-reported semantic bounds are projected into the declared window-loc
   assert.deepEqual(editable.coordinate.bounds, { x: 33, y: 143, width: 500, height: 23 });
   assert.deepEqual(editable.evidence[0].bounds, { x: 33, y: 143, width: 500, height: 23 });
 });
+
+test("Host Scene preserves structural ownership, semantic identity, and observable control state", () => {
+  const scene = buildHostScene({
+    observationVersion: 14,
+    observation: {
+      observationId: "observation-14",
+      coordinateSpace: "window-local",
+      coordinateBounds: { x: 0, y: 0, width: 800, height: 600 },
+      window: {
+        id: "window-14",
+        title: "Fixture",
+        role: "main-window",
+        isForeground: true,
+        bounds: { width: 800, height: 600 },
+      },
+      elements: [{
+        elementToken: "conversation",
+        role: "conversation",
+        source: "uia-som",
+        bounds: { x: 200, y: 0, width: 600, height: 600 },
+        actions: [],
+      }, {
+        elementToken: "editor",
+        parentElementToken: "conversation",
+        role: "editable",
+        source: "uia-som",
+        bounds: { x: 240, y: 500, width: 500, height: 60 },
+        actions: ["click", "type_text"],
+        state: { focused: true },
+        semanticKey: "editor:primary",
+      }],
+    },
+  });
+
+  const window = scene.elements.find((element) => element.type === "Window");
+  const conversation = resolveHostSceneElement(scene, { elementToken: "conversation" });
+  const editor = resolveHostSceneElement(scene, { elementToken: "editor" });
+  assert.equal(window.role, "main-window");
+  assert.equal(window.state.foreground, true);
+  assert.deepEqual(window.actions, ["activate_window"]);
+  assert.equal(editor.parentId, conversation.id);
+  assert.deepEqual(editor.state, { focused: true });
+  assert.equal(editor.semanticKey, "editor:primary");
+});

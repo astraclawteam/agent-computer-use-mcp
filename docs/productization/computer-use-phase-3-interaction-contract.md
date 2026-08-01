@@ -19,7 +19,8 @@ Scene (observationId + observationVersion)
 
 Every Scene element contains:
 
-- `id`, `type`, and provider-independent `role`;
+- `id`, `type`, provider-independent `role`, optional cross-observation
+  `semanticKey`, and observable `state`;
 - `parentId`;
 - `observationVersion`;
 - `coordinate.screenshotId`, `windowId`, `space`, `cropOffset`, `scale`, and

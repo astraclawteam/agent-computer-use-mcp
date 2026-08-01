@@ -83,13 +83,17 @@ export function buildHostScene({ observation, observationVersion } = {}) {
     hostElement({
       id: windowElementId,
       type: "Window",
-      role: "window",
+      role: observation.window?.role ?? "main-window",
       parentId: null,
       observationVersion: version,
       coordinate,
       evidence: [{ source: "structure", detail: "controller-window" }],
-      actions: [],
+      actions: ["activate_window"],
       name: observation.window?.title ?? null,
+      state: {
+        foreground: observation.window?.isForeground === true
+          || observation.window?.foreground === true,
+      },
     }),
     hostElement({
       id: viewportElementId,
@@ -113,12 +117,19 @@ export function buildHostScene({ observation, observationVersion } = {}) {
   elements.push(...regionParents.elements);
 
   const rawElements = collectProviderElements(observation);
+  const rawElementIds = rawElements.map((raw, index) => sceneElementId(sceneId, index));
+  const rawElementIdByToken = new Map(rawElements.flatMap((raw, index) => {
+    const token = raw?.elementToken ?? raw?.element_token;
+    return token === undefined || token === null ? [] : [[String(token), rawElementIds[index]]];
+  }));
   for (let index = 0; index < rawElements.length; index += 1) {
     const raw = rawElements[index];
     if (!raw || typeof raw !== "object" || Array.isArray(raw)) continue;
     const source = evidenceSource(raw.source ?? observation.source);
     const bounds = providerElementBounds(raw, observation, coordinateBounds);
-    const parentId = regionParents.parentFor(bounds) ?? viewportElementId;
+    const parentId = structuralParentId(raw, rawElementIds, rawElementIdByToken)
+      ?? regionParents.parentFor(bounds)
+      ?? viewportElementId;
     const evidence = evidenceForRawElement(raw, source, parentId, bounds);
     const conflicts = normalizeConflicts(raw);
     const evidenceConsistency = conflicts.length > 0
@@ -144,6 +155,10 @@ export function buildHostScene({ observation, observationVersion } = {}) {
       actions,
       name: typeof raw.name === "string" ? raw.name : null,
       value: typeof raw.value === "string" ? raw.value : null,
+      state: normalizeElementState(raw.state),
+      semanticKey: typeof raw.semanticKey === "string" && raw.semanticKey.trim()
+        ? raw.semanticKey
+        : null,
       binding: {
         providerElementIndex: index,
         ...(typeof raw.elementToken === "string" ? { elementToken: raw.elementToken } : {}),
@@ -439,6 +454,8 @@ function hostElement({
   actions,
   name = null,
   value = null,
+  state = {},
+  semanticKey = null,
   binding,
 }) {
   if (!HOST_ELEMENT_TYPES.has(type)) {
@@ -465,8 +482,28 @@ function hostElement({
     ]),
     ...(name !== null ? { name } : {}),
     ...(value !== null ? { value } : {}),
+    state: Object.freeze({ ...state }),
+    ...(semanticKey !== null ? { semanticKey } : {}),
     ...(binding ? { binding: Object.freeze({ ...binding }) } : {}),
   });
+}
+
+function structuralParentId(raw, rawElementIds, rawElementIdByToken) {
+  const parentToken = raw.parentElementToken ?? raw.parentToken
+    ?? raw.parent_element_token ?? raw.parent_token;
+  if (parentToken !== undefined && parentToken !== null) {
+    return rawElementIdByToken.get(String(parentToken)) ?? null;
+  }
+  const parentIndex = raw.parentElementIndex ?? raw.parentIndex
+    ?? raw.parent_element_index ?? raw.parent_index;
+  return Number.isSafeInteger(parentIndex) && parentIndex >= 0
+    ? rawElementIds[parentIndex] ?? null
+    : null;
+}
+
+function normalizeElementState(state) {
+  if (!state || typeof state !== "object" || Array.isArray(state)) return {};
+  return { ...state };
 }
 
 function collectProviderElements(observation) {

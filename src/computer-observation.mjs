@@ -94,6 +94,28 @@ function normalizeElement(element, index) {
     name: String(element.name ?? element.label ?? element.title ?? ""),
     value: element.value == null ? "" : String(element.value),
     state: element.state ?? {},
+    ...((element.semanticKey ?? element.semantic_key) !== undefined
+      && (element.semanticKey ?? element.semantic_key) !== null
+      ? { semanticKey: String(element.semanticKey ?? element.semantic_key) }
+      : {}),
+    ...((element.parentElementToken ?? element.parent_element_token
+      ?? element.parentToken ?? element.parent_token) !== undefined
+      && (element.parentElementToken ?? element.parent_element_token
+        ?? element.parentToken ?? element.parent_token) !== null
+      ? {
+        parentElementToken: String(
+          element.parentElementToken ?? element.parent_element_token
+          ?? element.parentToken ?? element.parent_token,
+        ),
+      }
+      : {}),
+    ...(Number.isSafeInteger(element.parentElementIndex ?? element.parent_element_index
+      ?? element.parentIndex ?? element.parent_index)
+      ? {
+        parentElementIndex: element.parentElementIndex ?? element.parent_element_index
+          ?? element.parentIndex ?? element.parent_index,
+      }
+      : {}),
     actions: normalizeActions(element.actions, role),
     bounds: normalizeBounds(element.bounds ?? element.frame),
     confidence: element.confidence ?? 1,
