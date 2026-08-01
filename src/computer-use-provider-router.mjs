@@ -1209,16 +1209,14 @@ export class ComputerUseProviderRouter {
         : previousOcrElements,
     };
 
-    const noProgress = repeatedUnchangedObservation || stableFrameObservationBlocked || repeatedVisualFrame
+    const noProgress = repeatedUnchangedObservation || stableFrameObservationBlocked
       ? {
           status: "blocked",
           unchangedObservations: unchangedObservationStreak,
           stableFrameObservations,
           nextAction: stableFrameObservationBlocked
             ? "Do not call computer.observe again on this unchanged frame. Act from existing evidence or release control and report the blocker."
-            : repeatedUnchangedObservation
-              ? "Do not call computer.observe again for this unchanged region. Act from the existing evidence, inspect a different bounded region, or release control and report the blocker."
-              : "Do not call visual again in this bounded interaction window. Use the completed visual grounding plus current OCR evidence; perform the next distinct action, release control, or report the remaining blocker.",
+            : "Do not call computer.observe again for this unchanged region. Act from the existing evidence, inspect a different bounded region, or release control and report the blocker.",
         }
       : null;
 
@@ -1234,9 +1232,7 @@ export class ComputerUseProviderRouter {
               allowedNextTools: ["computer.release"],
               reason: stableFrameObservationBlocked
                 ? "stable-frame-observation-budget-exhausted"
-                : repeatedUnchangedObservation
-                  ? "repeated-unchanged-observation-blocked"
-                  : "visual-attempt-budget-exhausted",
+                : "repeated-unchanged-observation-blocked",
               nextAction: noProgress.nextAction,
             },
           }
@@ -1279,7 +1275,7 @@ export class ComputerUseProviderRouter {
           : repeatedUnchangedObservation
           ? "repeated-unchanged-observation-blocked"
           : repeatedVisualFrame
-          ? "visual-attempt-budget-exhausted"
+          ? "visual-reuse-suppressed-ocr-fallback"
           : explicitVisualQuestion
             ? "explicit-complex-visual-question"
             : localElements > 0
@@ -1334,7 +1330,9 @@ export class ComputerUseProviderRouter {
         },
       );
     }
-    if (surfaceReceipt?.id && this.consumedSurfaceReceiptId === surfaceReceipt.id) {
+    const focusContinuation = isTargetlessKeyboardAction(args.action)
+      && typeof args.action?.focusReceiptId === "string";
+    if (surfaceReceipt?.id && this.consumedSurfaceReceiptId === surfaceReceipt.id && !focusContinuation) {
       fail(
         "action.fresh_observation_required",
         "The latest surface observation has already authorized one action. Observe again before another action.",
@@ -1365,7 +1363,7 @@ export class ComputerUseProviderRouter {
       effectiveDeliveryMode,
       surfaceReceiptId: surfaceReceipt?.id ?? null,
     });
-    if (surfaceReceipt?.id) this.consumedSurfaceReceiptId = surfaceReceipt.id;
+    if (surfaceReceipt?.id && !focusContinuation) this.consumedSurfaceReceiptId = surfaceReceipt.id;
 
     let result;
     let outcome = "applied";
@@ -2789,7 +2787,8 @@ export class ComputerUseProviderRouter {
         textEntry: {
           actionKind: "type_text",
           atomicFocus: true,
-          separateFocusClick: false,
+          separateFocusClick: "screenshot-grounded-focus-receipt-only",
+          focusContinuation: "A verified focus-editable click may be followed by one targetless type_text or press_key using its focusReceipt without consuming another surfaceReceipt.",
           requiresExplicitTextMode: true,
           textModes: {
             insert: "Insert at the current caret without clearing existing content.",
@@ -3416,6 +3415,7 @@ function normalizeActionCoordinates(action = {}, observation, window) {
         ...action,
         x: action.targetBounds.x + (action.targetBounds.width / 2),
         y: action.targetBounds.y + (action.targetBounds.height / 2),
+        coordinateSpace: action.coordinateSpace ?? observation?.coordinateSpace ?? "window-local",
         derivedInteractionPoint: "target-bounds-center",
       }
     : action;

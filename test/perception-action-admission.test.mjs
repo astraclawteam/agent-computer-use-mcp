@@ -230,7 +230,7 @@ test("a non-editable click cannot reuse the latest text-entry surface as a resul
   assert.equal(admitted.allowed, true);
 });
 
-test("editable pixel clicks are safely redirected to atomic text entry", () => {
+test("editable pixel clicks require explicit focus intent", () => {
   const decision = admitPerceptionAction({
     observation: observation({
       observationId: "editable-surface-1",
@@ -251,10 +251,49 @@ test("editable pixel clicks are safely redirected to atomic text entry", () => {
   });
 
   assert.equal(decision.allowed, false);
-  assert.equal(decision.code, "target.editable_click_requires_text");
+  assert.equal(decision.code, "target.editable_focus_intent_required");
   assert.equal(decision.pixelLimitedAction, false);
-  assert.equal(decision.requiredActionKind, "type_text");
-  assert.match(decision.nextAction, /same fresh screenshot observationId/);
+  assert.equal(decision.requiredInteractionIntent, "focus-editable");
+  assert.match(decision.nextAction, /Prefer one atomic type_text/u);
+});
+
+test("screenshot-grounded editable focus click is admitted only with full safe bounds", () => {
+  const value = observation({
+    observationId: "editable-focus-1",
+    source: "window-capture",
+    capture: { width: 960, height: 720 },
+  });
+  const admitted = admitPerceptionAction({
+    observation: value,
+    action: action({
+      kind: "click",
+      observationId: "editable-focus-1",
+      coordinateSpace: "window-local",
+      x: 160,
+      y: 55,
+      targetBounds: { x: 60, y: 35, width: 200, height: 40 },
+      interactionIntent: "focus-editable",
+      targetRole: "editable",
+    }),
+    now: 100,
+  });
+  assert.deepEqual(admitted, { allowed: true, code: "action.allowed", pixelLimitedAction: true });
+
+  const wrongRole = admitPerceptionAction({
+    observation: value,
+    action: action({
+      kind: "click",
+      observationId: "editable-focus-1",
+      coordinateSpace: "window-local",
+      x: 160,
+      y: 55,
+      targetBounds: { x: 60, y: 35, width: 200, height: 40 },
+      interactionIntent: "focus-editable",
+      targetRole: "button",
+    }),
+    now: 100,
+  });
+  assert.equal(wrongRole.code, "target.editable_role_required");
 });
 
 test("OCR glyph coordinates cannot ground keyboard actions", () => {
@@ -301,7 +340,9 @@ test("OCR geometry cannot masquerade as an editable-focus click", () => {
       observationId: "ocr-1",
       x: 89,
       y: 55,
+      targetBounds: { x: 40, y: 35, width: 180, height: 40 },
       interactionIntent: "focus-editable",
+      targetRole: "editable",
     }),
     now: 100,
   });
@@ -992,7 +1033,8 @@ test("screenshot geometry outranks stale minimized-window bounds", async (t) => 
     textEntry: {
       actionKind: "type_text",
       atomicFocus: true,
-      separateFocusClick: false,
+      separateFocusClick: "screenshot-grounded-focus-receipt-only",
+      focusContinuation: "A verified focus-editable click may be followed by one targetless type_text or press_key using its focusReceipt without consuming another surfaceReceipt.",
       requiresExplicitTextMode: true,
       textModes: {
         insert: "Insert at the current caret without clearing existing content.",
@@ -1604,6 +1646,119 @@ test("provider router issues and consumes a short-lived verified focus receipt",
       },
     },
   ]);
+});
+
+test("provider router permits one screenshot focus continuation and derives targetBounds coordinates", async (t) => {
+  const calls = [];
+  const router = new ComputerUseProviderRouter({
+    driver: {
+      async click(args) {
+        calls.push({ method: "click", args });
+        return { status: "ok", focusVerified: true };
+      },
+      async typeText(args) {
+        calls.push({ method: "typeText", args });
+        return { status: "ok", verified: true };
+      },
+    },
+  });
+  t.after(() => router.close());
+  router.activeController = {
+    controllerId: "controller-1",
+    tier: "full",
+    window: { id: "window-1", windowId: "window-1", title: "Fixture", pid: 100, bounds: { width: 960, height: 720 } },
+    expiresAt: new Date(Date.now() + 10_000).toISOString(),
+    expiresAtMs: Date.now() + 10_000,
+  };
+  router.lastCapture = {
+    ...observation({
+      observationId: "screenshot-focus-1",
+      source: "window-capture",
+      expiresAt: Date.now() + 5_000,
+      capture: { width: 960, height: 720 },
+    }),
+    coordinateSpace: "window-local",
+    surfaceReceipt: {
+      id: "surface-focus-1",
+      controllerId: "controller-1",
+      windowId: "window-1",
+      observationId: "screenshot-focus-1",
+    },
+    elements: [],
+  };
+
+  const clicked = await router.act({
+    action: {
+      kind: "click",
+      observationId: "screenshot-focus-1",
+      coordinateSpace: "window-local",
+      x: 180,
+      y: 60,
+      targetBounds: { x: 80, y: 40, width: 240, height: 40 },
+      interactionIntent: "focus-editable",
+      targetRole: "editable",
+    },
+  });
+  assert.equal(clicked.focusReceipt.status, "verified");
+
+  await router.act({
+    action: {
+      kind: "type_text",
+      value: "宋",
+      textMode: "replace-all",
+      inputBehavior: "incremental",
+      focusReceiptId: clicked.focusReceipt.id,
+    },
+  });
+
+  assert.deepEqual(calls.map((entry) => entry.method), ["click", "typeText"]);
+  assert.equal(calls[1].args.value, "宋");
+  assert.equal(calls[1].args.deliveryMode, "foreground");
+});
+
+test("provider router derives a safe window-local center for targetBounds-only text", async (t) => {
+  const calls = [];
+  const router = new ComputerUseProviderRouter({
+    driver: {
+      async typeText(args) {
+        calls.push(args);
+        return { status: "ok", verified: true };
+      },
+    },
+  });
+  t.after(() => router.close());
+  router.activeController = {
+    controllerId: "controller-1",
+    tier: "full",
+    window: { id: "window-1", windowId: "window-1", title: "Fixture", pid: 100, bounds: { width: 960, height: 720 } },
+    expiresAt: new Date(Date.now() + 10_000).toISOString(),
+    expiresAtMs: Date.now() + 10_000,
+  };
+  router.lastCapture = {
+    ...observation({
+      observationId: "bounds-text-1",
+      source: "window-capture",
+      expiresAt: Date.now() + 5_000,
+      capture: { width: 960, height: 720 },
+    }),
+    coordinateSpace: "window-local",
+    elements: [],
+  };
+
+  await router.act({
+    action: {
+      kind: "type_text",
+      observationId: "bounds-text-1",
+      targetBounds: { x: 80, y: 40, width: 240, height: 40 },
+      value: "宋",
+      textMode: "replace-all",
+      inputBehavior: "incremental",
+    },
+  });
+
+  assert.equal(calls[0].x, 200);
+  assert.equal(calls[0].y, 60);
+  assert.equal(calls[0].value, "宋");
 });
 
 test("provider router rejects expired or mismatched focus receipts", async (t) => {

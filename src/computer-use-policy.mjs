@@ -122,7 +122,10 @@ export function createComputerUsePolicy(options = {}) {
           allowedInputBehaviors: ["incremental", "commit"],
         });
       }
-      if (action.kind === "type_text" && action.textMode === "replace-all" && !hasPixelRef) {
+      const hasFocusReceipt = typeof action.focusReceiptId === "string"
+        && action.focusReceiptId.trim() !== "";
+      if (action.kind === "type_text" && action.textMode === "replace-all"
+        && !hasPixelRef && !hasFocusReceipt) {
         return deny("action.replace_all_requires_pixel_target");
       }
       if (action.kind === "press_key" && (typeof action.key !== "string" || action.key.trim() === "")) {

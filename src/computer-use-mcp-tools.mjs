@@ -277,11 +277,13 @@ const LEGACY_COMPUTER_USE_MCP_TOOLS = [
     annotations: { phase: "1.3", destructiveHint: false },
     inputSchema: {
       type: "object",
-      oneOf: [
-        { required: ["windowId"] },
-        { required: ["target"] },
-        { required: ["applicationToken"] },
-      ],
+      not: {
+        anyOf: [
+          { required: ["windowId", "target"] },
+          { required: ["windowId", "applicationToken"] },
+          { required: ["target", "applicationToken"] },
+        ],
+      },
       properties: {
         windowId: {
           anyOf: [{ type: "string" }, { type: "number" }],
@@ -412,7 +414,7 @@ const LEGACY_COMPUTER_USE_MCP_TOOLS = [
   {
     name: "computer.act",
     title: "Act On Computer",
-    description: "Execute exactly one action from the latest single-use surfaceReceipt and verify its visible effect. Prefer a semantic elementToken. Otherwise use fresh screenshot coordinates and full targetBounds; OCR glyph bounds cannot ground actions. Enter text with one atomic coordinate-grounded type_text, never a preceding editable click. Use replace-all for an exact field value, insert only for intentional insertion; use incremental for controls that must react per edit and commit for one exact transaction. Exclude borders, icons, adjacent controls, and occlusions from targetBounds. Copy window-local coordinates unchanged. Consume post-action evidence and finish only after the requested transition is observed.",
+    description: "Execute one action from the latest single-use surfaceReceipt and verify its visible effect. Prefer semantic elementToken. For pixels use fresh screenshot targetBounds; OCR glyphs cannot ground actions. Prefer atomic type_text. A custom editable may use a screenshot-grounded focus-editable click, then only its verified focusReceipt. Use replace-all for an exact value, insert for intentional insertion; incremental for reactive controls and commit for one transaction. Exclude borders, icons, adjacent controls, and occlusions. Copy window-local coordinates unchanged; finish only after the requested transition is observed.",
     annotations: { phase: "1.3", destructiveHint: true },
     inputSchema: {
       type: "object",
@@ -482,7 +484,7 @@ const LEGACY_COMPUTER_USE_MCP_TOOLS = [
                   properties: {
                     kind: { const: "click" },
                     interactionIntent: {
-                      enum: ["activate-control", "select-item"],
+                      enum: ["focus-editable", "activate-control", "select-item"],
                     },
                   },
                   required: ["kind", "interactionIntent"],
@@ -521,8 +523,8 @@ const LEGACY_COMPUTER_USE_MCP_TOOLS = [
             },
             interactionIntent: {
               type: "string",
-              enum: ["activate-control", "select-item"],
-              description: "Required for pixel clicks and bound to screenshot-derived targetBounds. Never use an OCR glyph or an editable-focus click.",
+              enum: ["focus-editable", "activate-control", "select-item"],
+              description: "Pixel-click intent. focus-editable requires screenshot editable bounds and verified focus before targetless typing.",
             },
             targetRole: {
               type: "string",

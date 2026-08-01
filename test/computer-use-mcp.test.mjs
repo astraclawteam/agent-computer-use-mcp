@@ -9,6 +9,7 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { createCanvas } from "ppu-ocv";
 import { COMPUTER_USE_MCP_TOOLS } from "../src/computer-use-mcp-tools.mjs";
+import { ComputerUseMcpError } from "../src/computer-use-errors.mjs";
 import {
   callTool,
   compactComputerUseResult,
@@ -278,8 +279,36 @@ test("computer.acquire without a selector returns fresh target discovery without
   assert.match(result.content[0].text, /application-target/u);
   assert.match(result.content[0].text, /call computer\.acquire again/u);
   const acquire = COMPUTER_USE_MCP_TOOLS.find((tool) => tool.name === "computer.acquire");
+  const validateInput = new Ajv({ strict: false }).compile(acquire.inputSchema);
+  assert.equal(validateInput({ tier: "observe" }), true, JSON.stringify(validateInput.errors));
+  assert.equal(validateInput({ applicationToken: "fresh" }), true, JSON.stringify(validateInput.errors));
+  assert.equal(validateInput({ applicationToken: "fresh", target: "foreground" }), false);
   const validate = new Ajv({ strict: false }).compile(acquire.outputSchema);
   assert.equal(validate(result.structuredContent), true, JSON.stringify(validate.errors));
+});
+
+test("computer.acquire recovers a stale application token with fresh discovery instead of a tool error", async () => {
+  let listStateCalls = 0;
+  const result = await callTool({
+    async requestAccess() {
+      throw new ComputerUseMcpError("application.token_invalid", "stale application token");
+    },
+    async listState() {
+      listStateCalls += 1;
+      return {
+        foregroundWindow: null,
+        windows: [{ windowId: 42, title: "Recovered primary window" }],
+        applications: [{ applicationToken: "application-fresh", name: "Recovered app" }],
+      };
+    },
+  }, "computer.acquire", { applicationToken: "application-stale", tier: "full" });
+
+  assert.equal(result.isError, false);
+  assert.equal(listStateCalls, 1);
+  assert.equal(result.structuredContent.status, "target_required");
+  assert.equal(result.structuredContent.recoveryReason, "application-token-stale");
+  assert.equal(result.structuredContent.applications[0].applicationToken, "application-fresh");
+  assert.match(result.content[0].text, /application-fresh/u);
 });
 
 test("model-facing OCR geometry is compressed into visual rows without losing structured tokens", () => {
@@ -1289,22 +1318,12 @@ test("unchanged screenshot digest suppresses repeated Host vision after local OC
     assert.equal(second.perceptionRouting.selectedMode, "unchanged-frame");
     assert.equal(second.perceptionRouting.visualUnderstandingEligible, false);
     assert.equal(second.perceptionRouting.avoidedVision, true);
-    assert.equal(second.perceptionRouting.reason, "visual-attempt-budget-exhausted");
-    assert.deepEqual(second.executionControl, {
-      status: "blocked",
-      scope: "turn",
-      retryable: false,
-      allowedNextTools: ["computer.release"],
-      reason: "visual-attempt-budget-exhausted",
-      nextAction: second.perceptionRouting.noProgress.nextAction,
-    });
+    assert.equal(second.perceptionRouting.reason, "visual-reuse-suppressed-ocr-fallback");
+    assert.equal(second.executionControl, undefined);
     assert.equal(third.perceptionRouting.selectedMode, "unchanged-frame");
     assert.equal(third.perceptionRouting.visualUnderstandingEligible, false);
-    assert.equal(third.perceptionRouting.reason, "visual-attempt-budget-exhausted");
-    assert.match(
-      third.perceptionRouting.noProgress.nextAction,
-      /Do not call visual again/u,
-    );
+    assert.equal(third.perceptionRouting.reason, "visual-reuse-suppressed-ocr-fallback");
+    assert.equal(third.executionControl, undefined);
     assert.equal(fourth.perceptionRouting.visualUnderstandingEligible, false);
     assert.equal(fifth.perceptionRouting.reason, "repeated-unchanged-observation-blocked");
     assert.equal(fifth.perceptionRouting.noProgress.status, "blocked");
@@ -1408,7 +1427,8 @@ test("caret-sized frame changes do not trigger repeated Host vision", async () =
       JSON.stringify(second.perceptionRouting),
     );
     assert.equal(second.perceptionRouting.visualUnderstandingEligible, false);
-    assert.equal(second.perceptionRouting.reason, "visual-attempt-budget-exhausted");
+    assert.equal(second.perceptionRouting.reason, "visual-reuse-suppressed-ocr-fallback");
+    assert.equal(second.executionControl, undefined);
   } finally {
     await router.close();
     await rm(artifactRoot, { recursive: true, force: true });
@@ -1491,7 +1511,8 @@ test("sparse animated pixels with unchanged OCR semantics do not repeat the same
     assert.ok(second.perceptionRouting.dirtyRegion.changedPixels > 120);
     assert.equal(second.perceptionRouting.visualSceneChanged, false);
     assert.equal(second.perceptionRouting.visualUnderstandingEligible, false);
-    assert.equal(second.perceptionRouting.reason, "visual-attempt-budget-exhausted");
+    assert.equal(second.perceptionRouting.reason, "visual-reuse-suppressed-ocr-fallback");
+    assert.equal(second.executionControl, undefined);
   } finally {
     await router.close();
     await rm(artifactRoot, { recursive: true, force: true });
@@ -1582,7 +1603,8 @@ test("dynamic content outside an explicit visual region cannot re-enable Host vi
     assert.ok(second.perceptionRouting.dirtyRegion.width > 100);
     assert.equal(second.perceptionRouting.visualSceneChanged, false);
     assert.equal(second.perceptionRouting.visualUnderstandingEligible, false);
-    assert.equal(second.perceptionRouting.reason, "visual-attempt-budget-exhausted");
+    assert.equal(second.perceptionRouting.reason, "visual-reuse-suppressed-ocr-fallback");
+    assert.equal(second.executionControl, undefined);
   } finally {
     await router.close();
     await rm(artifactRoot, { recursive: true, force: true });
@@ -2053,11 +2075,10 @@ test("agent-computer-use-mcp freezes the local MCP tool contract", () => {
   const acquire = COMPUTER_USE_MCP_TOOLS.find((tool) => tool.name === "computer.acquire");
   assert.equal(acquire.annotations.phase, "1.3");
   assert.equal(acquire.inputSchema.required, undefined);
-  assert.deepEqual(acquire.inputSchema.oneOf, [
-    { required: ["windowId"] },
-    { required: ["target"] },
-    { required: ["applicationToken"] },
-  ]);
+  const validateAcquire = new Ajv({ strict: false }).compile(acquire.inputSchema);
+  assert.equal(validateAcquire({}), true, JSON.stringify(validateAcquire.errors));
+  assert.equal(validateAcquire({ applicationToken: "fresh" }), true, JSON.stringify(validateAcquire.errors));
+  assert.equal(validateAcquire({ applicationToken: "fresh", target: "foreground" }), false);
   assert.equal(acquire.inputSchema.properties.titlePart, undefined);
   assert.deepEqual(acquire.inputSchema.properties.target.enum, ["foreground"]);
   assert.equal(acquire.inputSchema.properties.applicationToken.type, "string");
@@ -2126,7 +2147,7 @@ test("agent-computer-use-mcp freezes the local MCP tool contract", () => {
   );
   assert.deepEqual(
     act.inputSchema.properties.action.properties.interactionIntent.enum,
-    ["activate-control", "select-item"],
+    ["focus-editable", "activate-control", "select-item"],
   );
   assert.deepEqual(
     act.inputSchema.properties.action.properties.targetRole.enum,
@@ -2145,7 +2166,7 @@ test("agent-computer-use-mcp freezes the local MCP tool contract", () => {
   assert.ok(modelVisibleContractChars <= 8500, `agent-visible Computer Use contract stays compact (${modelVisibleContractChars} chars)`);
   assert.match(observe.description, /OCR elements are observationOnly/u);
   assert.match(observe.description, /Use visual once only/u);
-  assert.match(act.description, /never a preceding editable click/u);
+  assert.match(act.description, /focus-editable click/u);
   assert.match(act.description, /finish only after the requested transition is observed/u);
   assert.deepEqual(observe.outputSchema.properties.expiresAt, {
     anyOf: [{ type: "number" }, { type: "null" }],

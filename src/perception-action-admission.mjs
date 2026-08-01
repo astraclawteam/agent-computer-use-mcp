@@ -31,12 +31,20 @@ export function admitPerceptionAction({
     if (action.guessedAction === true || !coordinatesWithinObservation(action, observation)) {
       return denied("observation.insufficient");
     }
-    if (action.kind === "click" && action.targetRole === "editable") {
-      return denied("target.editable_click_requires_text", {
-        reason: "Editable surfaces are focused and written atomically; a separate focus click is not an admissible public action.",
+    if (action.kind === "click" && action.targetRole === "editable"
+      && action.interactionIntent !== "focus-editable") {
+      return denied("target.editable_focus_intent_required", {
+        reason: "A pixel click on an editable surface must explicitly request focus and use screenshot-grounded editable-interior geometry.",
         targetRole: "editable",
-        requiredActionKind: "type_text",
-        nextAction: "Reuse this same fresh screenshot observationId and targetBounds in one type_text action with value, textMode, and inputBehavior. Do not observe or click first.",
+        requiredInteractionIntent: "focus-editable",
+        nextAction: "Prefer one atomic type_text. If separate focus is required, use focus-editable with the same fresh screenshot observationId and full targetBounds, then type only with the verified focusReceipt returned by the Host.",
+      });
+    }
+    if (action.kind === "click" && action.interactionIntent === "focus-editable"
+      && action.targetRole !== "editable") {
+      return denied("target.editable_role_required", {
+        reason: "focus-editable is valid only for a declared editable target.",
+        requiredTargetRole: "editable",
       });
     }
     if (action.kind === "click"

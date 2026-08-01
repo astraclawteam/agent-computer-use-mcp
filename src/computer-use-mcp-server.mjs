@@ -5,7 +5,7 @@ import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
 import { COMPUTER_USE_MCP_TOOLS, MCP_RESULT_SCHEMA_VERSION } from "./computer-use-mcp-tools.mjs";
-import { serializeToolError } from "./computer-use-errors.mjs";
+import { ComputerUseMcpError, serializeToolError } from "./computer-use-errors.mjs";
 import { getComputerUseInstallation } from "./computer-use-installation.mjs";
 import { ComputerUseProviderRouter } from "./computer-use-provider-router.mjs";
 import { CuaDriverMcpDriver } from "./cua-driver-mcp-driver.mjs";
@@ -1273,22 +1273,20 @@ export async function observeComputer(router, args, requestContext) {
 }
 
 export async function acquireComputer(router, args, requestContext) {
-  if (acquisitionSelectorCount(args) === 0 && typeof router.listState === "function") {
-    const state = await router.listState({ includeInstalled: false });
-    return {
-      status: "target_required",
-      approval: null,
-      controller: null,
-      overlay: null,
-      foregroundWindow: state?.foregroundWindow ?? null,
-      windows: Array.isArray(state?.windows) ? state.windows : [],
-      applications: Array.isArray(state?.applications) ? state.applications : [],
-      nextAction: "Select the matching fresh applicationToken or windowId from this result, then call computer.acquire again.",
-      startsDesktopControl: false,
-      includeUserOverlay: false,
-    };
+  if (acquisitionSelectorCount(args) === 0) {
+    return freshAcquisitionTargets(router);
   }
-  const access = await router.requestAccess({ ...args, requestContext });
+  let access;
+  try {
+    access = await router.requestAccess({ ...args, requestContext });
+  } catch (error) {
+    if (error instanceof ComputerUseMcpError && error.code === "application.token_invalid") {
+      return freshAcquisitionTargets(router, {
+        staleApplicationToken: args.applicationToken,
+      });
+    }
+    throw error;
+  }
   if (
     (access?.status !== "granted" && access?.status !== "reused")
     || typeof router.capture !== "function"
@@ -1310,6 +1308,33 @@ export async function acquireComputer(router, args, requestContext) {
     // replaying or abandoning the controller acquisition.
     return access;
   }
+}
+
+async function freshAcquisitionTargets(router, detail = {}) {
+  if (typeof router.listState !== "function") {
+    throw new ComputerUseMcpError(
+      "window.selector_required",
+      "Fresh target discovery is unavailable; select a target from computer.observe mode=\"state\".",
+      { retryable: true, nextTool: "computer.observe" },
+    );
+  }
+  const state = await router.listState({ includeInstalled: false });
+  return {
+    status: "target_required",
+    approval: null,
+    controller: null,
+    overlay: null,
+    foregroundWindow: state?.foregroundWindow ?? null,
+    windows: Array.isArray(state?.windows) ? state.windows : [],
+    applications: Array.isArray(state?.applications) ? state.applications : [],
+    ...(detail.staleApplicationToken === undefined ? {} : {
+      staleApplicationToken: detail.staleApplicationToken,
+      recoveryReason: "application-token-stale",
+    }),
+    nextAction: "Select the matching fresh applicationToken or windowId from this result, then call computer.acquire again.",
+    startsDesktopControl: false,
+    includeUserOverlay: false,
+  };
 }
 
 function acquisitionSelectorCount(args = {}) {
