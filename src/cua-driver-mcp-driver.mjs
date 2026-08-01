@@ -600,6 +600,24 @@ export class CuaDriverMcpDriver {
   }
 
   async ensureForegroundActionResources(ticket, window) {
+    await this.ensureStartedResources(ticket);
+    const currentForegroundWindowId = await this.foregroundWindowProbe();
+    this.assertWorkTicket(ticket);
+    if (sameNativeWindowId(currentForegroundWindowId, window.windowId)) {
+      return {
+        status: "ok",
+        effect: "preserved",
+        verified: true,
+        activation: {
+          method: "already-foreground",
+          verified_fg_hwnd: currentForegroundWindowId,
+        },
+        foregroundWindow: {
+          ...window,
+          isForeground: true,
+        },
+      };
+    }
     const activation = await this.activateWindowResources(ticket, window);
     if (activation?.verified === true && activation?.foregroundWindow?.isForeground === true) {
       return activation;

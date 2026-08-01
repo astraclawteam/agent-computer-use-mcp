@@ -169,14 +169,6 @@ test("CuaDriverMcpDriver maps request/capture/action to cua-driver MCP tools", a
     },
     {
       method: "callTool",
-      name: "bring_to_front",
-      args: {
-        pid: 1234,
-        window_id: 42,
-      },
-    },
-    {
-      method: "callTool",
       name: "type_text",
       args: {
         pid: 1234,
@@ -198,14 +190,6 @@ test("CuaDriverMcpDriver maps request/capture/action to cua-driver MCP tools", a
         y: 210,
         delivery_mode: "background",
         session: "test-session",
-      },
-    },
-    {
-      method: "callTool",
-      name: "bring_to_front",
-      args: {
-        pid: 1234,
-        window_id: 42,
       },
     },
     {
@@ -267,11 +251,6 @@ test("CuaDriverMcpDriver distinguishes foreground-window verification from edita
   assert.deepEqual(calls, [
     { method: "start" },
     { method: "callTool", name: "start_session", args: { session: "unicode-session" } },
-    {
-      method: "callTool",
-      name: "bring_to_front",
-      args: { pid: 1234, window_id: 42 },
-    },
     {
       method: "callTool",
       name: "click",
@@ -480,13 +459,15 @@ test("CuaDriverMcpDriver keeps semantic Unicode text on the cua-driver path", as
 
 test("CuaDriverMcpDriver verifies foreground immediately before a pixel click", async () => {
   const calls = [];
+  let foregroundWindowId = "999";
   const driver = new CuaDriverMcpDriver({
     session: "foreground-pixel-click-session",
-    foregroundWindowProbe: async () => "42",
+    foregroundWindowProbe: async () => foregroundWindowId,
     client: {
       async start() {},
       async callTool(name, args) {
         calls.push({ name, args });
+        if (name === "bring_to_front") foregroundWindowId = String(args.window_id);
         return { status: "ok" };
       },
     },
