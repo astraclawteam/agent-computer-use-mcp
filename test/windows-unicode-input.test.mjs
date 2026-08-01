@@ -12,7 +12,7 @@ test("sendWindowsUnicodeText keeps text off process arguments and delivers it th
     return fakeChild({
       onStdin(value, child) {
         stdinText = value;
-        child.stdout.end('{"status":"ok","utf16CodeUnits":2,"clipboardRestored":true,"changeSignalDelivered":true,"deliveryPath":"windows_sendinput_unicode_incremental"}');
+        child.stdout.end('{"status":"ok","utf16CodeUnits":5,"clipboardRestored":true,"changeSignalDelivered":true,"deliveryPath":"windows_sendinput_unicode_incremental"}');
         child.emit("close", 0, null);
       },
     });
@@ -21,7 +21,7 @@ test("sendWindowsUnicodeText keeps text off process arguments and delivers it th
   const result = await sendWindowsUnicodeText({
     windowId: 42,
     processId: 1234,
-    text: "宋鹏",
+    text: "Hello",
     platform: "win32",
     powershellPath: "powershell.exe",
     spawnProcess,
@@ -29,7 +29,7 @@ test("sendWindowsUnicodeText keeps text off process arguments and delivers it th
 
   assert.deepEqual(result, {
     status: "ok",
-    utf16CodeUnits: 2,
+    utf16CodeUnits: 5,
     clipboardRestored: true,
     changeSignalDelivered: true,
     deliveryPath: "windows_sendinput_unicode_incremental",
@@ -38,14 +38,14 @@ test("sendWindowsUnicodeText keeps text off process arguments and delivers it th
   assert.deepEqual(payload, {
     windowId: "42",
     processId: 1234,
-    textBase64: Buffer.from("宋鹏", "utf8").toString("base64"),
+    textBase64: Buffer.from("Hello", "utf8").toString("base64"),
     replaceAll: false,
     inputBehavior: "incremental",
   });
-  assert.equal(Buffer.from(payload.textBase64, "base64").toString("utf8"), "宋鹏");
+  assert.equal(Buffer.from(payload.textBase64, "base64").toString("utf8"), "Hello");
   assert.equal(spawnCalls.length, 1);
   assert.equal(spawnCalls[0].command, "powershell.exe");
-  assert.equal(spawnCalls[0].args.some((value) => value.includes("宋鹏")), false);
+  assert.equal(spawnCalls[0].args.some((value) => value.includes("Hello")), false);
   assert.equal(spawnCalls[0].args.includes("-Sta"), true);
   assert.ok(spawnCalls[0].args.at(-1).length < 30_000, "encoded bridge must stay below Windows command-line limits");
   const bridgeScript = Buffer.from(spawnCalls[0].args.at(-1), "base64").toString("utf16le");
@@ -54,9 +54,39 @@ test("sendWindowsUnicodeText keeps text off process arguments and delivers it th
   assert.match(bridgeScript, /private const uint KEYEVENTF_UNICODE = 0x0004;/);
   assert.match(bridgeScript, /SendChord\(0x11, 0x41\);[\s\S]*SendKey\(0x08\);[\s\S]*foreach \(char codeUnit in text\)/);
   assert.match(bridgeScript, /SendKey\(0x20\);[\s\S]*SendKey\(0x08\);/);
-  assert.equal(JSON.stringify(spawnCalls[0].options).includes("宋鹏"), false);
+  assert.equal(JSON.stringify(spawnCalls[0].options).includes("Hello"), false);
   assert.equal(spawnCalls[0].options.windowsHide, true);
   assert.deepEqual(spawnCalls[0].options.stdio, ["pipe", "pipe", "pipe"]);
+});
+
+test("sendWindowsUnicodeText bypasses active IME composition for non-ASCII incremental text", async () => {
+  let encodedBridge = "";
+  const spawnProcess = (_command, args) => {
+    encodedBridge = args.at(-1);
+    return fakeChild({
+      onStdin(_value, child) {
+        child.stdout.end('{"status":"ok","utf16CodeUnits":1,"clipboardRestored":true,"changeSignalDelivered":true,"deliveryPath":"windows_clipboard_transaction"}');
+        child.emit("close", 0, null);
+      },
+    });
+  };
+
+  const result = await sendWindowsUnicodeText({
+    windowId: 42,
+    processId: 1234,
+    text: "\u5b8b",
+    inputBehavior: "incremental",
+    platform: "win32",
+    powershellPath: "powershell.exe",
+    spawnProcess,
+  });
+
+  assert.equal(result.deliveryPath, "windows_clipboard_transaction");
+  const bridgeScript = Buffer.from(encodedBridge, "base64").toString("utf16le");
+  assert.match(bridgeScript, /PasteUnicode\(/);
+  assert.match(bridgeScript, /foreground != expected/);
+  assert.match(bridgeScript, /GetGUIThreadInfo\(/);
+  assert.doesNotMatch(bridgeScript, /AgentComputerUseIncrementalInput/);
 });
 
 test("sendWindowsUnicodeText sends replace-all intent through the private stdin payload", async () => {

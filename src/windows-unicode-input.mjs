@@ -87,8 +87,8 @@ public static class AgentComputerUseIncrementalInput
         IntPtr foreground = GetForegroundWindow();
         uint foregroundProcess;
         uint foregroundThread = GetWindowThreadProcessId(foreground, out foregroundProcess);
-        if (foreground != new IntPtr(expectedWindow) && foregroundProcess != expectedProcess)
-            throw new InvalidOperationException("The approved target process is not foreground.");
+        if (foreground != new IntPtr(expectedWindow))
+            throw new InvalidOperationException("The approved target window is not foreground.");
 
         GUITHREADINFO info = new GUITHREADINFO();
         info.cbSize = Marshal.SizeOf(typeof(GUITHREADINFO));
@@ -236,11 +236,29 @@ public static class AgentComputerUseUnicodeInput
         public ushort parameterHigh;
     }
 
+    [StructLayout(LayoutKind.Sequential)]
+    private struct RECT
+    {
+        public int left, top, right, bottom;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct GUITHREADINFO
+    {
+        public int cbSize;
+        public uint flags;
+        public IntPtr hwndActive, hwndFocus, hwndCapture, hwndMenuOwner, hwndMoveSize, hwndCaret;
+        public RECT rcCaret;
+    }
+
     [DllImport("user32.dll")]
     private static extern IntPtr GetForegroundWindow();
 
     [DllImport("user32.dll")]
     private static extern uint GetWindowThreadProcessId(IntPtr window, out uint processId);
+
+    [DllImport("user32.dll")]
+    private static extern bool GetGUIThreadInfo(uint threadId, ref GUITHREADINFO info);
 
     [DllImport("user32.dll", SetLastError = true)]
     private static extern uint SendInput(uint inputCount, INPUT[] inputs, int inputSize);
@@ -273,13 +291,20 @@ public static class AgentComputerUseUnicodeInput
         IntPtr foreground = GetForegroundWindow();
         if (foreground != expected)
         {
-            uint foregroundProcess;
-            GetWindowThreadProcessId(foreground, out foregroundProcess);
-            if (foregroundProcess != expectedProcess)
-            {
-                throw new InvalidOperationException("The approved target process is not foreground.");
-            }
+            throw new InvalidOperationException("The approved target window is not foreground.");
         }
+        uint foregroundProcess;
+        uint foregroundThread = GetWindowThreadProcessId(foreground, out foregroundProcess);
+        if (foregroundProcess != expectedProcess)
+            throw new InvalidOperationException("The foreground window does not belong to the approved target process.");
+        GUITHREADINFO info = new GUITHREADINFO();
+        info.cbSize = Marshal.SizeOf(typeof(GUITHREADINFO));
+        if (!GetGUIThreadInfo(foregroundThread, ref info) || info.hwndFocus == IntPtr.Zero)
+            throw new InvalidOperationException("The approved target has no verified focused window.");
+        uint focusProcess;
+        GetWindowThreadProcessId(info.hwndFocus, out focusProcess);
+        if (focusProcess != expectedProcess)
+            throw new InvalidOperationException("The focused window does not belong to the approved target process.");
 
         int inputSize = Marshal.SizeOf(typeof(INPUT));
         System.Runtime.InteropServices.ComTypes.IDataObject originalClipboard;
@@ -455,7 +480,12 @@ export async function sendWindowsUnicodeText(options = {}) {
     );
   }
 
-  const bridgeScript = inputBehavior === "incremental"
+  // KEYEVENTF_UNICODE is normally ideal for incremental text, but an active
+  // Windows IME can still retain or transform non-ASCII composition in
+  // custom-drawn edit controls. The clipboard transaction bypasses that IME
+  // state while still producing a native paste event and a reversible change
+  // boundary for search, filter, autocomplete, and draft controls.
+  const bridgeScript = inputBehavior === "incremental" && isAsciiText(text)
     ? WINDOWS_INCREMENTAL_INPUT_SCRIPT
     : WINDOWS_UNICODE_INPUT_SCRIPT;
   const encodedScript = Buffer.from(bridgeScript, "utf16le").toString("base64");
@@ -572,6 +602,13 @@ function isValidWindowId(value) {
 function isValidProcessId(value) {
   const numeric = Number(value);
   return Number.isSafeInteger(numeric) && numeric > 0 && numeric <= 0xffff_ffff;
+}
+
+function isAsciiText(value) {
+  for (let index = 0; index < value.length; index += 1) {
+    if (value.charCodeAt(index) > 0x7f) return false;
+  }
+  return true;
 }
 
 function unicodeInputError(code, message) {
