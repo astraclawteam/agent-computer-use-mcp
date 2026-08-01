@@ -1,4 +1,4 @@
-export const MCP_RESULT_SCHEMA_VERSION = "5.5";
+export const MCP_RESULT_SCHEMA_VERSION = "6.0";
 
 const ANY_OBJECT = { type: "object", additionalProperties: true };
 const ANY_ARRAY = { type: "array", items: {} };
@@ -13,74 +13,88 @@ const BOX_SCHEMA = {
   },
   additionalProperties: false,
 };
-const MODEL_IDENTITY_SCHEMA = {
+const HOST_SCENE_SCHEMA = {
   type: "object",
+  required: [
+    "id",
+    "observationId",
+    "observationVersion",
+    "screenshotId",
+    "windowId",
+    "rootId",
+    "elements",
+  ],
   properties: {
-    provider: { type: "string" },
-    model: { type: "string" },
-    modelPack: { type: "string" },
-    modelFormat: { type: "string" },
-    runtime: { type: "string" },
-    executionProvider: { type: "string" },
-  },
-  additionalProperties: false,
-};
-const PERCEPTION_ELEMENT_ARRAY = {
-  type: "array",
-  items: {
-    type: "object",
-    properties: {
-      elementToken: { type: "string" },
-      elementIndex: { type: "number" },
-      role: { type: "string" },
-      name: { type: "string" },
-      value: { type: "string" },
-      state: ANY_OBJECT,
-      actions: { type: "array", items: { type: "string" } },
-      bounds: BOX_SCHEMA,
-      sourceRegion: BOX_SCHEMA,
-      interactionPoint: {
+    id: { type: "string" },
+    observationId: { type: "string" },
+    observationVersion: { type: "number", minimum: 0 },
+    screenshotId: { type: "string" },
+    windowId: { type: "string" },
+    rootId: { type: "string" },
+    elements: {
+      type: "array",
+      items: {
         type: "object",
-        required: ["x", "y"],
+        required: [
+          "id",
+          "type",
+          "role",
+          "parentId",
+          "observationVersion",
+          "coordinate",
+          "evidence",
+          "evidenceConsistency",
+          "conflicts",
+          "actions",
+          "actionable",
+          "invalidatesOn",
+        ],
         properties: {
-          x: { type: "number" },
-          y: { type: "number" },
+          id: { type: "string" },
+          type: {
+            type: "string",
+            enum: ["Window", "Container", "Editable", "TransientSurface", "ActionableItem"],
+          },
+          role: { type: "string" },
+          parentId: { anyOf: [{ type: "string" }, { type: "null" }] },
+          observationVersion: { type: "number", minimum: 0 },
+          coordinate: {
+            type: "object",
+            required: ["screenshotId", "windowId", "space", "cropOffset", "scale", "bounds"],
+            properties: {
+              screenshotId: { type: "string" },
+              windowId: { type: "string" },
+              space: { type: "string", enum: ["window-local"] },
+              cropOffset: {
+                type: "object",
+                required: ["x", "y"],
+                properties: { x: { type: "number" }, y: { type: "number" } },
+                additionalProperties: false,
+              },
+              scale: {
+                type: "object",
+                required: ["x", "y"],
+                properties: { x: { type: "number" }, y: { type: "number" } },
+                additionalProperties: false,
+              },
+              bounds: BOX_SCHEMA,
+            },
+            additionalProperties: false,
+          },
+          evidence: { type: "array", items: ANY_OBJECT },
+          evidenceConsistency: { type: "string", enum: ["consistent", "insufficient", "conflict"] },
+          conflicts: { type: "array", items: { type: "string" } },
+          actions: { type: "array", items: { type: "string" } },
+          actionable: { type: "boolean" },
+          invalidatesOn: { type: "array", items: { type: "string" } },
+          name: { type: "string" },
+          value: { type: "string" },
         },
         additionalProperties: false,
       },
-      geometryKind: { type: "string" },
-      interactionPointSemantics: { type: "string" },
-      controlBoundsKnown: { type: "boolean" },
-      editableInteriorKnown: { type: "boolean" },
-      confidence: { type: "number" },
-      source: { type: "string" },
-      observationOnly: { type: "boolean" },
-      proposalId: { type: "string" },
-      templateId: { type: "string" },
-      pixelLimitedAction: { type: "boolean" },
-      guessedAction: { type: "boolean" },
-      support: {
-        type: "array",
-        items: {
-          type: "object",
-          properties: {
-            provider: { type: "string" },
-            confidence: { type: "number" },
-            proposalId: { type: "string" },
-          },
-          additionalProperties: false,
-        },
-      },
-      modelIdentity: MODEL_IDENTITY_SCHEMA,
-      rawTextSha256: { type: "string" },
-      exact: { type: "boolean" },
-      approvedActionLabel: { type: "boolean" },
-      passwordRegion: { type: "boolean" },
-      paymentRegion: { type: "boolean" },
-      privateRegion: { type: "boolean" },
     },
-    additionalProperties: false,
   },
+  additionalProperties: false,
 };
 
 const COMMON_OUTPUT_PROPERTIES = {
@@ -412,7 +426,7 @@ const LEGACY_COMPUTER_USE_MCP_TOOLS = [
       provider: { type: "string" },
       source: { type: "string" },
       mode: { type: "string" },
-      elements: PERCEPTION_ELEMENT_ARRAY,
+      scene: HOST_SCENE_SCHEMA,
       artifact: ANY_OBJECT,
       capture: ANY_OBJECT,
       window: ANY_OBJECT,
@@ -424,7 +438,7 @@ const LEGACY_COMPUTER_USE_MCP_TOOLS = [
   {
     name: "computer.act",
     title: "Act On Computer",
-    description: "Act once from the latest single-use surfaceReceipt. Prefer semantic elementToken. Proven OCR target text: click its glyph bounds with activate-recognized-text, without vision for the parent row. Other pixels need fresh screenshot bounds. For text use one type_text. Custom editable: screenshot-grounded focus-editable click, then verified focusReceipt. For a transient result popup whose intended item is uniquely first, press Enter with that receipt instead of clicking popup coordinates. Consume embedded post-action capture without re-click or retype. Exclude borders, icons, adjacent controls, and occlusions. Keep window-local coordinates; finish only after the requested transition is observed.",
+    description: "Act once on an actionable element from the latest versioned Host Scene. OCR-only or conflicting evidence cannot authorize an action. The result outcome is exactly committed, not-applied, or indeterminate; never replay an indeterminate mutation. For screenshot-grounded editable text use one atomic type_text and verify its postcondition.",
     annotations: { phase: "1.3", destructiveHint: true },
     inputSchema: {
       type: "object",
@@ -540,8 +554,10 @@ const LEGACY_COMPUTER_USE_MCP_TOOLS = [
               type: "string",
               description: "Optional exact binding to the latest single-use surfaceReceipt.id.",
             },
-            elementToken: { type: "string" },
-            elementIndex: { type: "number" },
+            elementId: {
+              type: "string",
+              description: "Identity of an actionable element in the latest Host Scene observation version.",
+            },
             focusReceiptId: {
               type: "string",
               description: "Required for targetless type_text or press_key; use only a current receipt for the same verified target.",
@@ -612,12 +628,12 @@ const LEGACY_COMPUTER_USE_MCP_TOOLS = [
       additionalProperties: false,
     },
     outputSchema: outputSchema({
-      status: { type: "string" },
+      status: { type: "string", enum: ["committed", "not-applied", "indeterminate"] },
       provider: { type: "string" },
       action: { type: "string" },
       result: ANY_OBJECT,
       pixelLimitedAction: { type: "boolean" },
-      outcome: { type: "string" },
+      outcome: { type: "string", enum: ["committed", "not-applied", "indeterminate"] },
       effectiveDeliveryMode: { type: "string" },
       execution: ANY_OBJECT,
       focusReceipt: ANY_OBJECT,
@@ -625,7 +641,7 @@ const LEGACY_COMPUTER_USE_MCP_TOOLS = [
       postActionObservation: ANY_OBJECT,
       consumedSurfaceReceipt: ANY_OBJECT,
       postActionObservationRequired: { type: "boolean" },
-    }, ["status", "provider", "action", "result", "pixelLimitedAction", "execution"]),
+    }, ["status", "provider", "action", "result", "pixelLimitedAction", "outcome", "execution"]),
   },
   {
     name: "computer.cancel",
@@ -873,7 +889,7 @@ const acquireTool = {
 const observeTool = {
   name: "computer.observe",
   title: "Observe Computer",
-    description: "Discover compact desktop state or inspect the leased window. Include installed apps only to launch a stopped target. Never repeat identical state for omissions; acquire a user-named product by applicationName against the full fresh inventory. A locked desktop is terminal. Start semantic and stop observing when it already resolves the next decision. Use OCR for missing text/geometry. Use visual once only for remaining layout/icon ambiguity. OCR elements are observationOnly. Each observation returns a single-use surfaceReceipt; observe after every action. Copy image coordinates unchanged.",
+    description: "Discover compact desktop state or inspect the leased window. Detailed observations return one versioned Host Scene; provider elements are evidence, not parallel targets. Start semantic, use OCR only as non-actionable text evidence, and use visual once for remaining layout ambiguity. Conflicting evidence suppresses actions. Each observation returns a single-use surfaceReceipt and invalidates prior Scene element identities.",
   _meta: semanticCapabilityMeta({
     summary: "Inspect visible state in local graphical applications using window discovery, semantic elements, screenshots, OCR, or visual differences.",
     scenarios: [
@@ -983,8 +999,6 @@ const observeTool = {
       },
       additionalProperties: false,
     },
-    localObservation: ANY_OBJECT,
-    semanticProbe: ANY_OBJECT,
     activeController: { anyOf: [ANY_OBJECT, { type: "null" }] },
     pendingAccessApproval: { anyOf: [ANY_OBJECT, { type: "null" }] },
     pendingRepairApproval: { anyOf: [ANY_OBJECT, { type: "null" }] },
@@ -1033,7 +1047,7 @@ const observeTool = {
     cacheHit: { type: "boolean" },
     crop: { anyOf: [BOX_SCHEMA, { type: "null" }] },
     timings: ANY_OBJECT,
-    elements: PERCEPTION_ELEMENT_ARRAY,
+    scene: HOST_SCENE_SCHEMA,
     elementCount: { type: "number" },
     artifact: ANY_OBJECT,
     capture: ANY_OBJECT,

@@ -48,6 +48,10 @@
   },
   "scripts": {
     "test": "node --test --test-concurrency=1",
+    "verify:atomic:contracts": "node --test test/windows-unicode-input.test.mjs test/scene-region-ownership.test.mjs test/task-4-lifecycle-races.test.mjs test/computer-use-mcp.test.mjs",
+    "verify:atomic:unicode": "node scripts/verify-real-unicode-editors.mjs",
+    "verify:atomic:scene": "node scripts/verify-fixed-scene-regions.mjs",
+    "verify:atomic:lifecycle": "node --test test/task-4-lifecycle-races.test.mjs test/phase-5-2-disconnect-cleanup.test.mjs test/computer-use-mcp.test.mjs",
     "prepublishOnly": "node scripts/block-source-publish.mjs",
     "mcp": "node src/computer-use-mcp-server.mjs",
     "artifact:windows:build": "node scripts/build-windows-sea-artifact.mjs",

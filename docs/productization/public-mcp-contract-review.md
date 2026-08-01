@@ -1,7 +1,7 @@
 # Public MCP Contract Review
 
 - Schema Version: 1
-- Result Schema Version: 5.5
+- Result Schema Version: 6.0
 - Requires Human Review: true
 - Compatibility Reviewed: true
 - Overlay Exclusion Reviewed: true
@@ -12,8 +12,8 @@ This review records the public `computer.*` MCP contract that requires human PR 
 | Tool | Review Status | Compatibility | Overlay Exclusion | Desktop Control | Notes |
 | --- | --- | --- | --- | --- | --- |
 | computer.acquire | reviewed | compatible | overlay-free | reviewed | May start desktop control only after policy and approval requirements and an interactive input-desktop check. |
-| computer.observe | reviewed | compatible | overlay-free | reviewed | Combines state, semantic capture, screenshot, OCR, and diff while preserving includeUserOverlay=false; coordinate observations expose focus, truncation, scale evidence, and a single-use surface receipt. |
-| computer.act | reviewed | compatible | overlay-free | reviewed | State-changing action remains allowlisted and policy-gated; each fresh observation authorizes one action and the Host applies screenshot-to-native coordinate transforms. |
+| computer.observe | reviewed | compatible | overlay-free | reviewed | Detailed observations expose one versioned Host Scene; raw provider elements remain evidence and are not parallel action targets. |
+| computer.act | reviewed | compatible | overlay-free | reviewed | Targets the current Scene by elementId and returns exactly committed, not-applied, or indeterminate; indeterminate mutations are never replay-safe. |
 | computer.release | reviewed | compatible | overlay-free | reviewed | Stops active control and clears pending access without leaving an observation overlay. |
 | computer.health | reviewed | compatible | overlay-free | reviewed | Host-only health report includes the versioned capability handshake; never projected to the Agent. |
 | computer.doctor | reviewed | compatible | overlay-free | reviewed | Host-only diagnostics; repair actions remain plan-only. |

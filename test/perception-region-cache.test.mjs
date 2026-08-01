@@ -165,7 +165,7 @@ test("title-based OCR replaces stale minimized geometry with the restored captur
     height: 711,
   });
 
-  await router.act({
+  await assert.rejects(router.act({
     action: {
       kind: "click",
       elementToken: "ocr-1",
@@ -175,9 +175,8 @@ test("title-based OCR replaces stale minimized geometry with the restored captur
       y: 45,
       interactionIntent: "activate-recognized-text",
     },
-  });
-  assert.equal(clickCalls.length, 1);
-  assert.deepEqual({ x: clickCalls[0].x, y: clickCalls[0].y }, { x: 97, y: 45 });
+  }), (error) => error?.code === "scene.action_not_available");
+  assert.equal(clickCalls.length, 0);
 });
 
 function keyFor(pixels, windowId = "window-1", includeUserOverlay = false) {

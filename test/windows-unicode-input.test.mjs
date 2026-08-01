@@ -136,8 +136,74 @@ test("sendWindowsUnicodeText redacts text from bridge failures", async () => {
       spawnProcess,
     }),
     (error) => {
-      assert.equal(error.code, "unicode_input.bridge_failed");
+      assert.equal(error.code, "unicode_input.bridge_process_failed");
       assert.doesNotMatch(error.message, /宋鹏/);
+      assert.equal(error.detail.stage, "bridge-execution");
+      assert.equal(error.detail.effect, "indeterminate");
+      assert.deepEqual(error.detail.sideEffects, {
+        focus: "indeterminate",
+        selection: "not-used",
+        text: "indeterminate",
+        clipboard: "not-used",
+        ime: "indeterminate",
+      });
+      return true;
+    },
+  );
+});
+
+test("sendWindowsUnicodeText reports cancellation stage and possible side effects", async () => {
+  const entered = Promise.withResolvers();
+  const controller = new AbortController();
+  const spawnProcess = () => fakeChild({
+    onStdin() {
+      entered.resolve();
+    },
+  });
+
+  const operation = sendWindowsUnicodeText({
+    windowId: 42,
+    processId: 1234,
+    text: "正在输入的中文",
+    platform: "win32",
+    powershellPath: "powershell.exe",
+    spawnProcess,
+    signal: controller.signal,
+  });
+  await entered.promise;
+  controller.abort("operator-stop");
+
+  await assert.rejects(operation, (error) => {
+    assert.equal(error.code, "unicode_input.cancelled");
+    assert.equal(error.name, "AbortError");
+    assert.equal(error.detail.stage, "bridge-execution");
+    assert.equal(error.detail.effect, "indeterminate");
+    assert.equal(error.detail.sideEffects.text, "indeterminate");
+    return true;
+  });
+});
+
+test("sendWindowsUnicodeText reports stdin rejection as not applied", async () => {
+  const spawnProcess = () => {
+    const child = fakeChild({ onStdin() {} });
+    queueMicrotask(() => child.stdin.emit("error", new Error("closed")));
+    return child;
+  };
+
+  await assert.rejects(
+    () => sendWindowsUnicodeText({
+      windowId: 42,
+      processId: 1234,
+      text: "中文",
+      platform: "win32",
+      powershellPath: "powershell.exe",
+      spawnProcess,
+    }),
+    (error) => {
+      assert.equal(error.code, "unicode_input.bridge_input_failed");
+      assert.equal(error.detail.stage, "bridge-input");
+      assert.equal(error.detail.effect, "not-applied");
+      assert.equal(error.detail.sideEffects.text, "not-applied");
       return true;
     },
   );

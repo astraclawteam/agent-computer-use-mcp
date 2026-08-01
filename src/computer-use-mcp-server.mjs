@@ -144,16 +144,24 @@ export async function callTool(router, name, args, requestContext) {
     }
     if (isSafeContractRejection(name, toolError)) {
       const rejected = withResultContract({
-        status: "not-applied",
+        status: name === "computer.act" ? "not-applied" : "blocked",
         provider: "gateway-managed",
         ...(name === "computer.act" ? { action: args?.action?.kind ?? "unknown" } : {}),
-        result: {
-          effect: "not-applied",
-          replaySafe: toolError.detail?.replaySafe ?? true,
-          nextAction: toolError.detail?.nextAction ?? null,
-        },
+        result: name === "computer.act"
+          ? {
+              outcome: "not-applied",
+              applied: false,
+              mayHaveSideEffects: false,
+              postconditionVerified: false,
+              nextAction: toolError.detail?.nextAction ?? null,
+            }
+          : {
+              effect: "not-applied",
+              replaySafe: toolError.detail?.replaySafe ?? true,
+              nextAction: toolError.detail?.nextAction ?? null,
+            },
         pixelLimitedAction: false,
-        outcome: "blocked",
+        outcome: name === "computer.act" ? "not-applied" : "blocked",
         effectiveDeliveryMode: "none",
         execution: {
           schemaVersion: 1,
@@ -185,6 +193,7 @@ export async function callTool(router, name, args, requestContext) {
     };
   }
 
+  if (name === "computer.act") structuredContent = normalizePublicComputerActResult(structuredContent);
   let projected;
   try {
     projected = await projectComputerUseMediaResult(router, name, args, structuredContent);
@@ -196,7 +205,10 @@ export async function callTool(router, name, args, requestContext) {
       isError: true,
     };
   }
-  structuredContent = withResultContract(compactComputerUseResult(projected.structuredContent));
+  const compactedStructuredContent = compactComputerUseResult(projected.structuredContent);
+  structuredContent = withResultContract(
+    stripLegacyObservationAuthorities(compactedStructuredContent),
+  );
   const visualUnderstandingEligible = structuredContent?.perceptionRouting?.visualUnderstandingEligible !== false;
   const visualInstruction = typeof args?.visualQuestion === "string" && args.visualQuestion.trim()
     ? args.visualQuestion.trim().slice(0, 1200)
@@ -240,6 +252,65 @@ export async function callTool(router, name, args, requestContext) {
     // above so agents do not abandon a healthy connector or retry mutations.
     isError: false,
   };
+}
+
+function normalizePublicComputerActResult(value = {}) {
+  const outcome = canonicalActionOutcome(value.outcome ?? value.status);
+  const result = value.result && typeof value.result === "object" ? value.result : {};
+  if (result.outcome === outcome && result.effect === undefined && result.replaySafe === undefined) {
+    return { ...value, status: outcome, outcome };
+  }
+  const {
+    effect: _legacyEffect,
+    replaySafe: _legacyReplaySafe,
+    completionEligible: _legacyCompletionEligible,
+    delivered: _legacyDelivered,
+    status: providerStatus,
+    ...detail
+  } = result;
+  return {
+    ...value,
+    status: outcome,
+    outcome,
+    result: {
+      ...detail,
+      outcome,
+      applied: outcome === "committed" ? true : outcome === "not-applied" ? false : null,
+      mayHaveSideEffects: outcome !== "not-applied",
+      postconditionVerified: detail.verified === true,
+      ...(typeof providerStatus === "string" ? { providerStatus } : {}),
+    },
+  };
+}
+
+function stripLegacyObservationAuthorities(value) {
+  if (Array.isArray(value)) return value.map(stripLegacyObservationAuthorities);
+  if (!value || typeof value !== "object") return value;
+  const isObservation = value.observationId !== undefined || value.scene !== undefined;
+  const stripped = {};
+  for (const [key, entry] of Object.entries(value)) {
+    if (isObservation && (key === "elements" || key === "localObservation" || key === "semanticProbe")) {
+      continue;
+    }
+    stripped[key] = key === "scene" ? publicHostScene(entry) : stripLegacyObservationAuthorities(entry);
+  }
+  return stripped;
+}
+
+function publicHostScene(scene) {
+  return {
+    ...scene,
+    elements: Array.isArray(scene.elements)
+      ? scene.elements.map(({ binding: _hostOnlyBinding, ...element }) => element)
+      : [],
+  };
+}
+
+function canonicalActionOutcome(value) {
+  if (value === "committed" || value === "not-applied" || value === "indeterminate") return value;
+  if (value === "applied" || value === "completed" || value === "ok") return "committed";
+  if (value === "blocked" || value === "rejected") return "not-applied";
+  return "indeterminate";
 }
 
 function isSafeContractRejection(name, toolError) {
@@ -362,7 +433,7 @@ export function projectComputerUseModelResult(value, contextKey = "") {
             }
           : {}),
         ...(hasOcrObservation(value) ? {
-        observationGuidance: "LIMIT: OCR proves visible pixels only. When the intended visible target label is already proven by exact OCR, click those glyph bounds once with interactionIntent=activate-recognized-text; do not request vision merely to recover the surrounding list row. Blank editable surfaces and unlabeled controls still require semantic or one bounded visual region. matching text elsewhere does not prove a draft or current field value. If required non-text geometry remains unavailable, release control and report the blocker instead of repeating observations.",
+        observationGuidance: "LIMIT: OCR is text evidence only and cannot authorize a click or keyboard target. Act only through a consistent actionable element in the current Host Scene. If structure or bounded visual evidence cannot establish the parent control and its action, release control and report the blocker.",
         } : {}),
       }
     : {};
@@ -404,6 +475,7 @@ export function projectComputerUseModelResult(value, contextKey = "") {
       continue;
     }
     if (key === "elements" && Array.isArray(entry)) {
+      if (value.scene) continue;
       if (entry.length === 0) continue;
       const compacted = compactModelPerceptionElements(entry);
       projected.elements = limitModelPerceptionElements(compacted);
@@ -411,6 +483,10 @@ export function projectComputerUseModelResult(value, contextKey = "") {
         projected.modelElementCount = projected.elements.length;
         projected.omittedModelElementCount = compacted.length - projected.elements.length;
       }
+      continue;
+    }
+    if (key === "scene" && entry && typeof entry === "object") {
+      projected.scene = entry;
       continue;
     }
     if (
@@ -1153,6 +1229,9 @@ export function compactComputerUseResult(value) {
 
   const compacted = {};
   for (const [key, entry] of Object.entries(value)) {
+    if (value.scene && (key === "elements" || key === "localObservation" || key === "semanticProbe")) {
+      continue;
+    }
     if (key === "capture" && entry && typeof entry === "object") {
       // `computer.act` embeds a complete automatic post-action observation
       // under `capture`; only a raw screenshot payload should be reduced to
@@ -1202,6 +1281,10 @@ export function compactComputerUseResult(value) {
     if (key === "elements" && Array.isArray(entry)) {
       compacted.elements = entry.map(compactPerceptionElement);
       compacted.elementCount = entry.length;
+      continue;
+    }
+    if (key === "scene" && entry && typeof entry === "object") {
+      compacted.scene = entry;
       continue;
     }
     compacted[key] = compactComputerUseResult(entry);

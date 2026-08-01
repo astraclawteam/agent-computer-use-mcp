@@ -210,16 +210,13 @@ test("pixel actions reject missing provenance expiry low confidence and guessed 
   }
 });
 
-test("exact high-confidence OCR clicks are admitted while weak OCR and single-source SOM fail closed", () => {
-  assert.deepEqual(
-    admitPerceptionAction({
-      observation: observation({ source: "ocr" }),
-      element: ocrElement(),
-      action: action({ interactionIntent: "activate-recognized-text" }),
-      now: 100,
-    }),
-    { allowed: true, code: "action.allowed", pixelLimitedAction: true },
-  );
+test("OCR-only and single-source SOM evidence fail closed regardless of confidence", () => {
+  assert.equal(admitPerceptionAction({
+    observation: observation({ source: "ocr" }),
+    element: ocrElement(),
+    action: action({ interactionIntent: "activate-recognized-text" }),
+    now: 100,
+  }).code, "observation.insufficient");
   assert.equal(
     admitPerceptionAction({
       observation: observation({ source: "ocr" }),
@@ -464,7 +461,7 @@ test("OCR geometry cannot masquerade as an editable-focus click", () => {
   assert.equal(focusClick.code, "target.visual_grounding_required");
   assert.equal(focusClick.requiredObservationMode, "screenshot");
 
-  assert.deepEqual(
+  assert.equal(
     admitPerceptionAction({
       observation: value,
       element: null,
@@ -475,8 +472,8 @@ test("OCR geometry cannot masquerade as an editable-focus click", () => {
         interactionIntent: "activate-recognized-text",
       }),
       now: 100,
-    }),
-    { allowed: true, code: "action.allowed", pixelLimitedAction: true },
+    }).code,
+    "target.interaction_intent_required",
   );
 });
 
@@ -568,7 +565,7 @@ test("targetless keyboard actions require an explicit focus receipt", () => {
   });
 });
 
-test("provider router maps an admitted OCR token to a bounded driver pixel click", async (t) => {
+test("provider router refuses to turn an OCR-only token into a click", async (t) => {
   const clicks = [];
   const router = new ComputerUseProviderRouter({
     driver: { async click(args) { clicks.push(args); return { status: "ok" }; } },
@@ -586,22 +583,54 @@ test("provider router maps an admitted OCR token to a bounded driver pixel click
     elements: [ocrElement()],
   };
 
-  const result = await router.act({
+  await assert.rejects(router.act({
     action: {
       kind: "click",
       elementToken: "ocr-1",
       interactionIntent: "activate-recognized-text",
     },
+  }), (error) => error?.code === "scene.action_not_available");
+  assert.deepEqual(clicks, []);
+});
+
+test("provider router resolves an elementId only through the current Host Scene binding", async (t) => {
+  const calls = [];
+  const router = new ComputerUseProviderRouter({
+    driver: {
+      async click(input) {
+        calls.push(input);
+        return { status: "ok", verified: true };
+      },
+    },
   });
-  assert.equal(result.pixelLimitedAction, true);
-  assert.deepEqual(clicks, [{
-    window: router.activeController.window,
-    x: 110,
-    y: 60,
-    deliveryMode: "foreground",
-  }]);
-  assert.equal(result.status, "ok");
-  assert.equal(result.focusReceipt, undefined);
+  t.after(() => router.close());
+  router.activeController = {
+    controllerId: "controller-1",
+    tier: "full",
+    window: { id: "window-1", windowId: "window-1", title: "Fixture", bounds: { width: 960, height: 720 } },
+    expiresAtMs: Date.now() + 10_000,
+  };
+  router.lastCapture = router.createActionObservation({
+    observationId: "scene-action-1",
+    source: "uia-som",
+    elements: [{
+      elementToken: "provider-button",
+      role: "button",
+      name: "Continue",
+      actions: ["click"],
+      source: "uia-som",
+      bounds: { x: 100, y: 100, width: 100, height: 40 },
+    }],
+  });
+  const target = router.lastCapture.scene.elements.find((element) => element.name === "Continue");
+
+  const result = await router.act({
+    action: { kind: "click", elementId: target.id, interactionIntent: "activate-control" },
+  });
+
+  assert.equal(result.outcome, "committed");
+  assert.equal(calls[0].elementToken, "provider-button");
+  assert.equal(calls[0].elementId, undefined);
 });
 
 test("explicitly unverified pixel clicks are indeterminate and require observation", async (t) => {
@@ -656,7 +685,7 @@ test("explicitly unverified pixel clicks are indeterminate and require observati
     },
   });
   assert.equal(clicked.status, "indeterminate");
-  assert.equal(clicked.outcome, "unverified");
+  assert.equal(clicked.outcome, "indeterminate");
   assert.equal(clicked.effectiveDeliveryMode, "foreground");
   assert.equal(clicked.focusReceipt, undefined);
   assert.deepEqual(clicked.result.recovery, {
@@ -697,7 +726,7 @@ test("explicitly unverified pixel clicks are indeterminate and require observati
       textMode: "insert",
     },
   });
-  assert.equal(typed.status, "ok");
+  assert.equal(typed.status, "committed");
   assert.equal(typed.effectiveDeliveryMode, "foreground");
   assert.deepEqual(calls.map((call) => call.method), ["click", "capture", "typeText"]);
 });
@@ -770,7 +799,6 @@ test("semantic clicks are verified by a fresh state transition when the driver c
       },
     ],
   };
-  router.rememberSemanticElements(router.lastCapture);
 
   const clicked = await router.act({
     action: {
@@ -780,24 +808,21 @@ test("semantic clicks are verified by a fresh state transition when the driver c
     },
   });
 
-  assert.equal(clicked.status, "ok");
-  assert.equal(clicked.outcome, "applied");
+  assert.equal(clicked.status, "committed");
+  assert.equal(clicked.outcome, "committed");
   assert.equal(clicked.result.verified, true);
   assert.equal(clicked.result.verification.status, "changed");
   assert.equal(clicked.result.verification.observation.observationId, "semantic-after-click-1");
   assert.equal(router.pendingUnverifiedMutation, null);
 
-  const clickedAgainWithOriginalToken = await router.act({
+  await assert.rejects(router.act({
     action: {
       kind: "click",
       elementToken: "button-one",
       interactionIntent: "activate-control",
     },
-  });
-  assert.equal(clickedAgainWithOriginalToken.status, "ok");
-  assert.equal(clickedAgainWithOriginalToken.outcome, "applied");
-  assert.equal(calls.filter((call) => call.method === "click")[1].args.elementToken, "next-button-1");
-  assert.deepEqual(calls.map((call) => call.method), ["click", "capture", "click", "capture"]);
+  }), (error) => error?.code === "scene.element_invalid");
+  assert.deepEqual(calls.map((call) => call.method), ["click", "capture"]);
 });
 
 test("semantic clicks with no immediate state transition are delivered once and defer verification", async (t) => {
@@ -866,19 +891,19 @@ test("semantic clicks with no immediate state transition are delivered once and 
     },
   });
 
-  assert.equal(clicked.status, "ok");
-  assert.equal(clicked.outcome, "delivered");
-  assert.equal(clicked.result.effect, "delivered_unobserved");
-  assert.equal(clicked.result.delivered, true);
-  assert.equal(clicked.result.replaySafe, false);
-  assert.equal(clicked.result.completionEligible, false);
+  assert.equal(clicked.status, "indeterminate");
+  assert.equal(clicked.outcome, "indeterminate");
+  assert.equal(clicked.result.outcome, "indeterminate");
+  assert.equal(clicked.result.mayHaveSideEffects, true);
+  assert.equal(clicked.result.effect, undefined);
+  assert.equal(clicked.result.replaySafe, undefined);
   assert.equal(clicked.result.verificationRequired, "later_observable_boundary");
   assert.match(clicked.result.nextAction, /Do not replay/u);
   assert.equal(clicked.result.verification.status, "unchanged");
   assert.deepEqual(calls, ["click", "capture"]);
 });
 
-test("parallel Agent actions are serialized across fresh semantic token generations", async (t) => {
+test("queued actions cannot reuse a target invalidated by a newer Scene observation", async (t) => {
   const clickedTokens = [];
   let captureCount = 0;
   const router = new ComputerUseProviderRouter({
@@ -944,17 +969,19 @@ test("parallel Agent actions are serialized across fresh semantic token generati
       },
     ],
   };
-  router.rememberSemanticElements(router.lastCapture);
 
-  const results = await Promise.all([
+  const results = await Promise.allSettled([
     router.act({ action: { kind: "click", elementToken: "button-one", interactionIntent: "activate-control" } }),
     router.act({ action: { kind: "click", elementToken: "button-one", interactionIntent: "activate-control" } }),
     router.act({ action: { kind: "click", elementToken: "button-one", interactionIntent: "activate-control" } }),
   ]);
 
-  assert.deepEqual(clickedTokens, ["button-one", "next-button-1", "next-button-2"]);
-  assert.deepEqual(results.map((result) => result.status), ["ok", "ok", "ok"]);
-  assert.deepEqual(results.map((result) => result.outcome), ["applied", "applied", "applied"]);
+  assert.deepEqual(clickedTokens, ["button-one"]);
+  assert.equal(results[0].status, "fulfilled");
+  assert.equal(results[0].value.outcome, "committed");
+  assert.deepEqual(results.slice(1).map((result) => result.status), ["rejected", "rejected"]);
+  assert.equal(results[1].reason.code, "scene.element_invalid");
+  assert.equal(results[2].reason.code, "scene.element_invalid");
 });
 
 test("verified activation issues a focus receipt that can verify targetless text by state transition", async (t) => {
@@ -1025,8 +1052,8 @@ test("verified activation issues a focus receipt that can verify targetless text
 
   assert.equal(activated.focusReceipt.status, "verified");
   assert.equal(activated.result.observation.observationId, "calculator-1");
-  assert.equal(typed.status, "ok");
-  assert.equal(typed.outcome, "applied");
+  assert.equal(typed.status, "committed");
+  assert.equal(typed.outcome, "committed");
   assert.equal(typed.result.verification.status, "changed");
   assert.deepEqual(calls, ["activateWindow", "capture", "typeText", "capture"]);
 });
@@ -1316,7 +1343,7 @@ test("router requires an explicit coordinate space and translates screen coordin
     },
   });
 
-  assert.equal(result.status, "ok");
+  assert.equal(result.status, "committed");
   assert.deepEqual(calls, [{
     window: router.activeController.window,
     x: 53,
@@ -1448,7 +1475,7 @@ test("an empty semantic probe preserves a fresh unconsumed screenshot receipt", 
     },
   });
 
-  assert.equal(acted.status, "ok");
+  assert.equal(acted.status, "committed");
   assert.deepEqual(calls.map((entry) => entry.method), ["capture", "click"]);
 });
 
@@ -2101,9 +2128,10 @@ test("possibly-applied text stays blocked after an observation that cannot confi
   });
 
   assert.equal(typed.status, "indeterminate");
-  assert.equal(typed.outcome, "unverified");
-  assert.equal(typed.result.effect, "possibly_applied");
-  assert.equal(typed.result.replaySafe, false);
+  assert.equal(typed.outcome, "indeterminate");
+  assert.equal(typed.result.effect, undefined);
+  assert.equal(typed.result.replaySafe, undefined);
+  assert.equal(typed.result.mayHaveSideEffects, true);
   assert.equal(typed.result.escalation, undefined);
   assert.deepEqual(typed.result.recovery, {
     requiresFreshObservation: true,
@@ -2199,7 +2227,7 @@ test("coordinate text entry returns independently verified focus while mutation 
     },
   });
 
-  assert.equal(typed.outcome, "unverified");
+  assert.equal(typed.outcome, "indeterminate");
   assert.equal(typed.focusReceipt.status, "verified");
   assert.equal(typed.focusReceipt.target.kind, "type_text");
   assert.ok(Date.parse(typed.focusReceipt.expiresAt) - Date.parse(typed.focusReceipt.issuedAt) >= 30_000);
@@ -2256,7 +2284,7 @@ test("screenshot target bounds alone atomically ground text entry at the safe ce
     },
   });
 
-  assert.equal(typed.status, "ok");
+  assert.equal(typed.status, "committed");
   assert.equal(calls.length, 1);
   assert.equal(calls[0].x, 205.5);
   assert.equal(calls[0].y, 57.5);
@@ -2353,11 +2381,10 @@ test("indeterminate pixel text entry automatically returns target-local OCR evid
     { x: 300, y: 594, width: 556, height: 128 },
   );
   assert.equal(typed.result.verificationRequired, "satisfied_by_post_action_capture");
-  assert.match(typed.result.nextAction, /Do not call computer\.observe/u);
-  assert.match(typed.result.nextAction, /secondaryOcrRegion/u);
+  assert.match(typed.result.nextAction, /actionable element from this Scene/u);
 });
 
-test("leading transient list selection uses the verified text focus keyboard commit", async (t) => {
+test("Host preserves a requested transient list click without rewriting it to Enter", async (t) => {
   const calls = [];
   const now = Date.now();
   const router = new ComputerUseProviderRouter({
@@ -2402,8 +2429,7 @@ test("leading transient list selection uses the verified text focus keyboard com
   };
   router.lastCapture = router.createActionObservation({
     ...observation({
-      source: "ocr",
-      mode: "ocr",
+      source: "window-capture",
       expiresAt: now + 5_000,
       capture: { width: 960, height: 720 },
     }),
@@ -2428,16 +2454,11 @@ test("leading transient list selection uses the verified text focus keyboard com
     },
   });
 
-  assert.deepEqual(calls.map((call) => call.method), ["pressKey"]);
-  assert.equal(calls[0].input.key, "enter");
-  assert.equal(selected.action, "press_key");
-  assert.equal(selected.requestedAction, "click");
-  assert.equal(selected.execution.targetPath, "focus-receipt");
-  assert.equal(selected.execution.selectionReason, "transient-dependent-first-item");
-  assert.deepEqual(selected.execution.fallback, {
-    used: true,
-    reason: "transient-popup-keyboard-commit",
-  });
+  assert.deepEqual(calls.map((call) => call.method), ["click"]);
+  assert.equal(selected.action, "click");
+  assert.equal(selected.requestedAction, undefined);
+  assert.notEqual(selected.execution.targetPath, "focus-receipt");
+  assert.equal(selected.execution.selectionReason, null);
 });
 
 test("non-leading transient list selection preserves the requested click", async (t) => {
@@ -2597,9 +2618,9 @@ test("fresh exact OCR text promotes coordinate entry without another observe or 
 
   assert.equal(captures.length, 1);
   assert.equal(captures[0].includeChangedRegionAlongsideCrop, true);
-  assert.equal(typed.status, "ok");
-  assert.equal(typed.outcome, "completed");
-  assert.equal(typed.result.effect, "verified");
+  assert.equal(typed.status, "committed");
+  assert.equal(typed.outcome, "committed");
+  assert.equal(typed.result.outcome, "committed");
   assert.equal(typed.result.verified, true);
   assert.equal(typed.result.focusVerified, true);
   assert.equal(typed.capture.mutationVerification.status, "confirmed");
@@ -2688,7 +2709,7 @@ test("replace-all rejects a containing OCR value and blocks dependent actions", 
   });
 
   assert.equal(typed.status, "indeterminate");
-  assert.equal(typed.outcome, "unverified");
+  assert.equal(typed.outcome, "indeterminate");
   assert.equal(typed.capture.mutationVerification.status, "not-confirmed");
   assert.equal(typed.capture.mutationVerification.requiredEffect, "exact-replacement");
   assert.equal(typed.focusReceipt, undefined);
@@ -2839,8 +2860,8 @@ test("bounded local UI transition confirms verified entry when the custom editor
     },
   });
 
-  assert.equal(typed.status, "ok");
-  assert.equal(typed.outcome, "completed");
+  assert.equal(typed.status, "committed");
+  assert.equal(typed.outcome, "committed");
   assert.equal(captureCalls, 2);
   assert.equal(
     typed.capture.mutationVerification.method,
@@ -2855,7 +2876,7 @@ test("bounded local UI transition confirms verified entry when the custom editor
       focusReceiptId: typed.focusReceipt.id,
     },
   });
-  assert.equal(pressed.status, "ok");
+  assert.equal(pressed.status, "committed");
   assert.equal(calls[0].key, "enter");
 });
 
@@ -2917,7 +2938,7 @@ test("a fresh same-target editable refocus clears an unconfirmed text correction
     },
   });
 
-  assert.equal(focused.status, "ok");
+  assert.equal(focused.status, "committed");
   assert.equal(router.pendingUnverifiedMutation, null);
   assert.equal(calls.length, 1);
 });
@@ -3062,7 +3083,7 @@ test("fresh OCR confirmation restores a limited focus continuation after coordin
       textMode: "replace-all",
     },
   });
-  assert.equal(typed.outcome, "unverified");
+  assert.equal(typed.outcome, "indeterminate");
 
   const observed = await router.capture({ mode: "semantic" });
   assert.equal(observed.mutationVerification.status, "confirmed");
@@ -3077,7 +3098,7 @@ test("fresh OCR confirmation restores a limited focus continuation after coordin
       focusReceiptId: observed.focusReceipt.id,
     },
   });
-  assert.equal(pressed.status, "ok");
+  assert.equal(pressed.status, "committed");
   assert.deepEqual(calls.map((call) => call.method), ["typeText", "capture", "pressKey"]);
 });
 

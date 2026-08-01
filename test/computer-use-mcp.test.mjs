@@ -10,6 +10,7 @@ import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js"
 import { createCanvas } from "ppu-ocv";
 import { COMPUTER_USE_MCP_TOOLS } from "../src/computer-use-mcp-tools.mjs";
 import { ComputerUseMcpError } from "../src/computer-use-errors.mjs";
+import { buildHostScene } from "../src/scene-region-ownership.mjs";
 import {
   callTool,
   compactComputerUseResult,
@@ -136,7 +137,7 @@ test("model-facing state drops nominal lifecycle noise and keeps the acquisition
     desktopState: { status: "interactive", inputDesktop: "Default", secureDesktop: false },
     startsDesktopControl: false,
     includeUserOverlay: false,
-    resultSchemaVersion: "5.5",
+    resultSchemaVersion: "6.0",
   };
 
   const rendered = renderComputerUseTextResult(value);
@@ -179,14 +180,14 @@ test("model-facing controller lifecycle omits leases, overlay paths, and complet
     },
     startsDesktopControl: true,
     includeUserOverlay: false,
-    resultSchemaVersion: "5.5",
+    resultSchemaVersion: "6.0",
   });
   const released = renderComputerUseTextResult({
     status: "cancelled",
     previousController: controller,
     previousApproval: null,
     includeUserOverlay: false,
-    resultSchemaVersion: "5.5",
+    resultSchemaVersion: "6.0",
   });
 
   assert.match(acquired, /tier.*observe/u);
@@ -248,7 +249,8 @@ test("computer.acquire returns one initial semantic observation in the same tool
   assert.equal(result.structuredContent.initialObservation.observationId, "initial-observation");
   assert.match(result.content[0].text, /fresh initial observation is already included/u);
   assert.match(result.content[0].text, /## initialObservation/u);
-  assert.match(result.content[0].text, /Sign in required/u);
+  assert.doesNotMatch(result.content[0].text, /Sign in required/u);
+  assert.equal(result.structuredContent.initialObservation.elements, undefined);
 });
 
 test("computer.acquire resolves one exact fresh application name without a second model round", async () => {
@@ -312,7 +314,8 @@ test("computer.acquire falls back to screenshot OCR inside the same transaction 
   assert.equal(result.isError, false);
   assert.deepEqual(captureModes, ["semantic", "screenshot"]);
   assert.equal(result.structuredContent.initialObservation.observationId, "screenshot-ocr-1");
-  assert.match(result.content[0].text, /visible/u);
+  assert.doesNotMatch(result.content[0].text, /visible/u);
+  assert.equal(result.structuredContent.initialObservation.localObservation, undefined);
   assert.deepEqual(result.content[1], {
     type: "image",
     data: png.toString("base64"),
@@ -718,7 +721,7 @@ test("model text projection omits repeated contracts and summarizes prior captur
   assert.equal(JSON.stringify(projected).includes("Previous 0"), false);
   assert.match(rendered, /"Current" @ \[10,20,70,24\] source=ocr observationOnly/u);
   assert.match(rendered, /atomic type_text/u);
-  assert.match(rendered, /matching text elsewhere does not prove a draft/u);
+  assert.match(rendered, /OCR is text evidence only and cannot authorize/u);
   assert.ok(rendered.indexOf("LIMIT: OCR") < rendered.indexOf("## localObservation"));
   assert.doesNotMatch(rendered, /"modelPack":|"executionProvider":|"coordinateTransform":/u);
   assert.ok(rendered.length < JSON.stringify(value).length / 4);
@@ -754,7 +757,7 @@ test("model-facing local OCR is a compact section that does not claim editable s
   ]);
   assert.match(rendered, /## localObservation/u);
   assert.match(rendered, /### elements \(2\)/u);
-  assert.match(rendered, /OCR proves visible pixels only/u);
+  assert.match(rendered, /OCR is text evidence only/u);
   assert.doesNotMatch(rendered, /large-private|nested-observation|historical text\\nfield label/u);
 });
 
@@ -1035,8 +1038,8 @@ test("indeterminate desktop actions remain successful MCP calls that require obs
 
   assert.equal(result.isError, false);
   assert.equal(result.structuredContent.status, "indeterminate");
-  assert.equal(result.structuredContent.outcome, "unverified");
-  assert.equal(result.structuredContent.result.replaySafe, false);
+  assert.equal(result.structuredContent.outcome, "indeterminate");
+  assert.equal(result.structuredContent.result.mayHaveSideEffects, true);
 });
 
 test("safe action contract rejections are non-fatal not-applied results", async () => {
@@ -1064,9 +1067,9 @@ test("safe action contract rejections are non-fatal not-applied results", async 
 
   assert.equal(result.isError, false);
   assert.equal(result.structuredContent.status, "not-applied");
-  assert.equal(result.structuredContent.outcome, "blocked");
-  assert.equal(result.structuredContent.result.effect, "not-applied");
-  assert.equal(result.structuredContent.result.replaySafe, true);
+  assert.equal(result.structuredContent.outcome, "not-applied");
+  assert.equal(result.structuredContent.result.outcome, "not-applied");
+  assert.equal(result.structuredContent.result.mayHaveSideEffects, false);
   assert.equal(result.structuredContent.error.code, "target.editable_interior_required");
 });
 
@@ -1125,7 +1128,7 @@ test("stale action receipts are non-fatal not-applied preconditions", async () =
 
   assert.equal(result.isError, false);
   assert.equal(result.structuredContent.status, "not-applied");
-  assert.equal(result.structuredContent.outcome, "blocked");
+  assert.equal(result.structuredContent.outcome, "not-applied");
   assert.equal(result.structuredContent.error.code, "action.surface_receipt_mismatch");
 });
 
@@ -1151,7 +1154,7 @@ test("keyboard focus and observation preconditions do not count as tool failures
 
     assert.equal(result.isError, false, code);
     assert.equal(result.structuredContent.status, "not-applied", code);
-    assert.equal(result.structuredContent.outcome, "blocked", code);
+    assert.equal(result.structuredContent.outcome, "not-applied", code);
     assert.equal(result.structuredContent.error.code, code);
   }
 });
@@ -1174,7 +1177,7 @@ test("a missing foreground window is a non-fatal acquire precondition", async ()
   });
 
   assert.equal(result.isError, false);
-  assert.equal(result.structuredContent.status, "not-applied");
+  assert.equal(result.structuredContent.status, "blocked");
   assert.equal(result.structuredContent.outcome, "blocked");
   assert.equal(result.structuredContent.error.code, "window.not_found");
   assert.equal(result.structuredContent.result.replaySafe, true);
@@ -1239,6 +1242,23 @@ test("visual observation is an explicit escalation with one required question", 
 });
 
 test("successful unified OCR observations satisfy the public result envelope", async () => {
+  const scene = buildHostScene({
+    observationVersion: 1,
+    observation: {
+      observationId: "ocr-1",
+      coordinateSpace: "window-local",
+      coordinateBounds: { x: 0, y: 0, width: 320, height: 200 },
+      window: { id: "window-1", bounds: { width: 320, height: 200 } },
+      elements: [{
+        elementToken: "private-provider-token",
+        role: "text",
+        name: "Visible",
+        source: "ocr",
+        bounds: { x: 10, y: 10, width: 60, height: 20 },
+        actions: ["click"],
+      }],
+    },
+  });
   const result = await callTool({
     async capture() {
       return {
@@ -1254,6 +1274,7 @@ test("successful unified OCR observations satisfy the public result envelope", a
         crop: null,
         timings: { totalMs: 125 },
         elements: [],
+        scene,
         focusReceipt: {
           id: "focus-post-write-1",
           status: "verified",
@@ -1271,13 +1292,17 @@ test("successful unified OCR observations satisfy the public result envelope", a
   }, "computer.observe", { mode: "ocr-region" });
 
   assert.equal(result.isError, false);
-  assert.equal(result.structuredContent.resultSchemaVersion, "5.5");
+  assert.equal(result.structuredContent.resultSchemaVersion, "6.0");
   assert.equal(result.structuredContent.includeUserOverlay, false);
   const observe = COMPUTER_USE_MCP_TOOLS.find((tool) => tool.name === "computer.observe");
   const validate = new Ajv({ strict: false }).compile(observe.outputSchema);
   assert.equal(validate(result.structuredContent), true, JSON.stringify(validate.errors));
   assert.equal(result.structuredContent.focusReceipt.id, "focus-post-write-1");
   assert.equal(result.structuredContent.mutationVerification.status, "confirmed");
+  const visible = result.structuredContent.scene.elements.find((element) => element.name === "Visible");
+  assert.equal(visible.actionable, false);
+  assert.equal(visible.binding, undefined);
+  assert.doesNotMatch(JSON.stringify(result.structuredContent), /private-provider-token/u);
 });
 
 test("semantic-first screenshot observations satisfy the strict public result envelope", async () => {
@@ -2371,7 +2396,7 @@ test("agent-computer-use-mcp freezes the local MCP tool contract", () => {
 
   const observe = COMPUTER_USE_MCP_TOOLS.find((tool) => tool.name === "computer.observe");
   assert.equal(observe.annotations.readOnlyHint, true);
-  assert.match(observe.description, /stop observing when it already resolves the next decision/u);
+  assert.match(observe.description, /invalidates prior Scene element identities/u);
   assert.doesNotMatch(observe.description, /Start semantic, then screenshot/u);
   assert.deepEqual(observe.inputSchema.properties.mode.enum, ["state", "semantic", "screenshot", "visual", "capture-window", "ocr-region", "diff"]);
   assert.equal(observe.inputSchema.properties.visualQuestion.type, "string");
@@ -2391,7 +2416,7 @@ test("agent-computer-use-mcp freezes the local MCP tool contract", () => {
   const act = COMPUTER_USE_MCP_TOOLS.find((tool) => tool.name === "computer.act");
   assert.equal(act.annotations.phase, "1.3");
   assert.deepEqual(act.inputSchema.required, ["action"]);
-  assert.deepEqual(act.outputSchema.allOf[0].else.required, ["status", "provider", "action", "result", "pixelLimitedAction", "execution"]);
+  assert.deepEqual(act.outputSchema.allOf[0].else.required, ["status", "provider", "action", "result", "pixelLimitedAction", "outcome", "execution"]);
   assert.deepEqual(act.outputSchema.allOf[0].then.required, ["status", "error"]);
   assert.ok(act.outputSchema.properties.capture);
   assert.ok(act.outputSchema.properties.postActionObservation);
@@ -2462,16 +2487,16 @@ test("agent-computer-use-mcp freezes the local MCP tool contract", () => {
   const modelVisibleContractChars = [acquire, observe, act]
     .reduce((total, tool) => total + tool.description.length + JSON.stringify(tool.inputSchema).length, 0);
   assert.ok(modelVisibleContractChars <= 8500, `agent-visible Computer Use contract stays compact (${modelVisibleContractChars} chars)`);
-  assert.match(observe.description, /OCR elements are observationOnly/u);
-  assert.match(observe.description, /Use visual once only/u);
-  assert.match(act.description, /focus-editable click/u);
-  assert.match(act.description, /activate-recognized-text/u);
-  assert.match(act.description, /finish only after the requested transition is observed/u);
+  assert.match(observe.description, /one versioned Host Scene/u);
+  assert.match(observe.description, /use visual once/u);
+  assert.match(act.description, /latest versioned Host Scene/u);
+  assert.match(act.description, /OCR-only or conflicting evidence cannot authorize an action/u);
+  assert.match(act.description, /never replay an indeterminate mutation/u);
   assert.deepEqual(observe.outputSchema.properties.expiresAt, {
     anyOf: [{ type: "number" }, { type: "null" }],
   });
 
-  for (const field of ["elements", "controllerId", "expiresAt", "dirtyRegion", "observation"]) {
+  for (const field of ["scene", "controllerId", "expiresAt", "dirtyRegion", "observation"]) {
     assert.ok(observe.outputSchema.properties[field], `computer.observe declares ${field}`);
   }
 
@@ -2610,7 +2635,7 @@ test("provider router prewarms OCR buckets during non-fast health", async () => 
 
   assert.equal(health.prewarm.status, "completed");
   assert.equal(health.capabilityHandshake.schemaVersion, 1);
-  assert.equal(health.capabilityHandshake.module.resultSchemaVersion, "5.5");
+  assert.equal(health.capabilityHandshake.module.resultSchemaVersion, "6.0");
   assert.equal(health.capabilityHandshake.supports.observation.focusedElementMetadata, true);
   assert.equal(health.capabilityHandshake.supports.action.executionPathMetadata, true);
   assert.deepEqual(health.prewarm.buckets.map((bucket) => bucket.size), ["128x96", "288x96", "704x320"]);
@@ -2679,7 +2704,7 @@ test("provider router manages request/capture/action/cancel lifecycle", async ()
   assert.equal(observation.elements.length, 3);
 
   const action = await router.act({ action: { kind: "set_value", elementToken: "name", value: "xiaozhi" } });
-  assert.equal(action.status, "ok");
+  assert.equal(action.status, "committed");
   assert.equal(action.pixelLimitedAction, false);
   assert.deepEqual(action.execution, {
     schemaVersion: 1,
@@ -2703,13 +2728,26 @@ test("provider router manages request/capture/action/cancel lifecycle", async ()
   const state = await router.listState();
   assert.equal(state.activeController.window.title, "Computer Use Lab");
   assert.equal(state.lastCapture.observationId, "obs-1");
-  assert.equal(state.auditEvents.map((event) => event.type).includes("computer.action.completed"), true);
+  assert.equal(state.auditEvents.map((event) => event.type).includes("computer.action.committed"), true);
 
   const cancelled = await router.cancel({ reason: "test" });
   assert.equal(cancelled.status, "cancelled");
-  assert.equal((await router.listState()).activeController, null);
-  assert.deepEqual(overlayCalls.map((call) => call.method), ["start", "stop"]);
-  assert.deepEqual(calls.map((call) => call.method), ["findWindow", "capture", "setValue", "capture", "typeText"]);
+  const releasedState = await router.listState();
+  assert.equal(releasedState.activeController, null);
+  assert.equal(releasedState.lastCapture, null);
+  assert.equal(router.lastScreenshot, null);
+  assert.equal(router.consumedSurfaceReceiptId, null);
+  assert.equal(router.recentEditableTarget, null);
+
+  const nextAccess = await router.requestAccess({ titlePart: "Computer Use Lab", tier: "full", agentId: "agent-1" });
+  assert.equal(nextAccess.status, "granted");
+  assert.equal(router.lastCapture, null);
+  assert.equal(router.lastScreenshot, null);
+  assert.equal(router.consumedSurfaceReceiptId, null);
+  assert.equal(router.recentEditableTarget, null);
+  await router.cancel({ reason: "next-session-complete" });
+  assert.deepEqual(overlayCalls.map((call) => call.method), ["start", "stop", "start", "stop"]);
+  assert.deepEqual(calls.map((call) => call.method), ["findWindow", "capture", "setValue", "capture", "typeText", "findWindow"]);
 });
 
 test("provider router fails closed on a secure Windows input desktop", async () => {
@@ -2781,8 +2819,8 @@ test("provider router activates the acquired window without perception coordinat
   await router.requestAccess({ titlePart: "Background App", tier: "full", agentId: "agent-1" });
   const activated = await router.act({ action: { kind: "activate_window" } });
 
-  assert.equal(activated.status, "ok");
-  assert.equal(activated.outcome, "applied");
+  assert.equal(activated.status, "committed");
+  assert.equal(activated.outcome, "committed");
   assert.equal(activated.effectiveDeliveryMode, "foreground");
   assert.equal(activated.pixelLimitedAction, false);
   assert.deepEqual(activated.execution, {
@@ -2952,8 +2990,8 @@ test("semantic action verification preserves the active Host request context", a
     requestContext,
   });
 
-  assert.equal(action.status, "ok");
-  assert.equal(action.result.effect, "verified");
+  assert.equal(action.status, "committed");
+  assert.equal(action.result.outcome, "committed");
   assert.equal(action.result.verification.status, "changed");
   assert.equal(action.result.verification.error, undefined);
   assert.equal(captureCount, 2);

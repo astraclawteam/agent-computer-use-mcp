@@ -11,18 +11,28 @@ test("all public MCP tools declare strict output schemas", () => {
     assert.equal(tool.outputSchema?.type, "object", `${tool.name} outputSchema must be an object`);
     assert.equal(tool.outputSchema?.additionalProperties, false, `${tool.name} outputSchema must reject unknown fields`);
     assert.equal(tool.outputSchema.properties?.includeUserOverlay?.const, false, `${tool.name} must lock overlay exclusion`);
-    assert.equal(tool.outputSchema.properties?.resultSchemaVersion?.const, "5.5", `${tool.name} must expose a versioned result contract`);
+    assert.equal(tool.outputSchema.properties?.resultSchemaVersion?.const, "6.0", `${tool.name} must expose a versioned result contract`);
     assert.equal(tool.outputSchema.required.includes("includeUserOverlay"), true, `${tool.name} must require includeUserOverlay`);
     assert.equal(tool.outputSchema.required.includes("resultSchemaVersion"), true, `${tool.name} must require resultSchemaVersion`);
   }
 });
 
-test("capture element schema freezes perception provenance fields", () => {
+test("Host Scene schema freezes identity ownership evidence and invalidation", () => {
   const capture = COMPUTER_USE_MCP_TOOLS.find((tool) => tool.name === "computer.observe");
-  const element = capture.outputSchema.properties.elements.items;
+  const scene = capture.outputSchema.properties.scene;
+  const element = scene.properties.elements.items;
+  assert.deepEqual(scene.required, [
+    "id",
+    "observationId",
+    "observationVersion",
+    "screenshotId",
+    "windowId",
+    "rootId",
+    "elements",
+  ]);
   assert.equal(element.type, "object");
   assert.equal(element.additionalProperties, false);
-  for (const field of ["sourceRegion", "modelIdentity", "proposalId", "confidence", "support", "guessedAction", "pixelLimitedAction"]) {
+  for (const field of ["id", "type", "role", "parentId", "observationVersion", "coordinate", "evidence", "evidenceConsistency", "actions", "invalidatesOn"]) {
     assert.ok(element.properties[field], field);
   }
 });

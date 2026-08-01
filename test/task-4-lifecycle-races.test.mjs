@@ -592,6 +592,58 @@ test("observe access keeps the user overlay but never starts the control cursor"
   assert.deepEqual(calls, ["overlay.start", "overlay.stop"]);
 });
 
+test("cancel aborts and joins an in-flight desktop mutation before returning", async () => {
+  const calls = [];
+  const actionEntered = deferred();
+  const actionSettled = deferred();
+  const router = new ComputerUseProviderRouter({
+    driver: {
+      async findWindow() {
+        return { windowId: "lab", title: "Computer Use Lab", bounds: { x: 0, y: 0, width: 300, height: 180 } };
+      },
+      async capture() {
+        return {
+          observationId: "obs-1",
+          source: "cua-driver",
+          elements: [{ elementToken: "save", role: "Button", name: "Save", actions: ["click"] }],
+          includeUserOverlay: false,
+        };
+      },
+      async click({ signal }) {
+        calls.push("click.start");
+        actionEntered.resolve();
+        await new Promise((resolve, reject) => {
+          signal.addEventListener("abort", () => {
+            calls.push("click.abort");
+            queueMicrotask(() => {
+              calls.push("click.settled");
+              actionSettled.resolve();
+              const error = new Error("native click cancelled");
+              error.name = "AbortError";
+              reject(error);
+            });
+          }, { once: true });
+        });
+      },
+    },
+  });
+
+  await router.requestAccess({ titlePart: "Computer Use Lab", tier: "full" });
+  await router.capture({ mode: "semantic" });
+  const action = router.act({ action: { kind: "click", elementToken: "save" } });
+  await actionEntered.promise;
+  const release = router.cancel({ reason: "operator-stop" });
+  let releaseReturned = false;
+  release.then(() => { releaseReturned = true; });
+  await actionSettled.promise;
+  assert.equal(releaseReturned, false);
+  await assert.rejects(action, { code: "operation.cancelled" });
+  await release;
+
+  assert.deepEqual(calls, ["click.start", "click.abort", "click.settled"]);
+  assert.equal(router.activeController, null);
+});
+
 test("router close coalesces concurrent calls and repeated success does not duplicate resource cleanup", async () => {
   const calls = [];
   const assetGate = deferred();

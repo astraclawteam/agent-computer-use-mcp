@@ -459,39 +459,52 @@ export async function sendWindowsUnicodeText(options = {}) {
     signal,
   } = options;
 
-  if (signal?.aborted === true) throw unicodeInputAbortError();
+  if (signal?.aborted === true) throw unicodeInputAbortError({
+    stage: "preflight",
+    effect: "not-applied",
+    sideEffects: unicodeInputSideEffects({ inputBehavior, replaceAll, effect: "not-applied" }),
+  });
 
   if (platform !== "win32") {
     throw unicodeInputError(
       "unicode_input.unsupported_platform",
       "Secure Unicode input is available only on Windows.",
+      validationFailureDetail({ inputBehavior, replaceAll }),
     );
   }
   if (typeof text !== "string") {
-    throw unicodeInputError("unicode_input.invalid_text", "Unicode input requires a text string.");
+    throw unicodeInputError(
+      "unicode_input.invalid_text",
+      "Unicode input requires a text string.",
+      validationFailureDetail({ inputBehavior, replaceAll }),
+    );
   }
   if (!["incremental", "commit"].includes(inputBehavior)) {
     throw unicodeInputError(
       "unicode_input.invalid_behavior",
       "Unicode input behavior must be incremental or commit.",
+      validationFailureDetail({ inputBehavior, replaceAll }),
     );
   }
   if (text.length > MAX_TEXT_CODE_UNITS) {
     throw unicodeInputError(
       "unicode_input.payload_too_large",
       `Unicode input exceeds the ${MAX_TEXT_CODE_UNITS} UTF-16 code-unit limit.`,
+      validationFailureDetail({ inputBehavior, replaceAll }),
     );
   }
   if (!isValidWindowId(windowId)) {
     throw unicodeInputError(
       "unicode_input.invalid_window",
       "Unicode input requires an approved target window handle.",
+      validationFailureDetail({ inputBehavior, replaceAll }),
     );
   }
   if (!isValidProcessId(processId)) {
     throw unicodeInputError(
       "unicode_input.invalid_process",
       "Unicode input requires an approved target process identifier.",
+      validationFailureDetail({ inputBehavior, replaceAll }),
     );
   }
 
@@ -531,12 +544,13 @@ export async function sendWindowsUnicodeText(options = {}) {
       finish(reject, unicodeInputError(
         "unicode_input.timeout",
         "The Windows Unicode input bridge timed out.",
+        executionFailureDetail({ inputBehavior, replaceAll }),
       ));
     }, timeoutMs);
     timer.unref?.();
     const onAbort = () => {
       child.kill();
-      finish(reject, unicodeInputAbortError());
+      finish(reject, unicodeInputAbortError(executionFailureDetail({ inputBehavior, replaceAll })));
     };
     signal?.addEventListener?.("abort", onAbort, { once: true });
 
@@ -558,13 +572,23 @@ export async function sendWindowsUnicodeText(options = {}) {
       finish(reject, unicodeInputError(
         "unicode_input.bridge_unavailable",
         "The Windows Unicode input bridge could not be started.",
+        {
+          stage: "bridge-start",
+          effect: "not-applied",
+          sideEffects: unicodeInputSideEffects({ inputBehavior, replaceAll, effect: "not-applied" }),
+        },
       ));
     });
     child.once("close", (code) => {
       if (code !== 0 || outputOverflow) {
         finish(reject, unicodeInputError(
-          "unicode_input.bridge_failed",
+          "unicode_input.bridge_process_failed",
           "The Windows Unicode input bridge rejected the operation.",
+          {
+            ...executionFailureDetail({ inputBehavior, replaceAll }),
+            exitCode: Number.isInteger(code) ? code : null,
+            outputOverflow,
+          },
         ));
         return;
       }
@@ -590,13 +614,23 @@ export async function sendWindowsUnicodeText(options = {}) {
         finish(reject, unicodeInputError(
           "unicode_input.invalid_response",
           "The Windows Unicode input bridge returned an invalid response.",
+          {
+            stage: "bridge-response",
+            effect: "indeterminate",
+            sideEffects: unicodeInputSideEffects({ inputBehavior, replaceAll, effect: "indeterminate" }),
+          },
         ));
       }
     });
     child.stdin.once("error", () => {
       finish(reject, unicodeInputError(
-        "unicode_input.bridge_failed",
+        "unicode_input.bridge_input_failed",
         "The Windows Unicode input bridge rejected the operation.",
+        {
+          stage: "bridge-input",
+          effect: "not-applied",
+          sideEffects: unicodeInputSideEffects({ inputBehavior, replaceAll, effect: "not-applied" }),
+        },
       ));
     });
     child.stdin.end(JSON.stringify({
@@ -617,10 +651,11 @@ export async function sendWindowsUnicodeText(options = {}) {
   });
 }
 
-function unicodeInputAbortError() {
+function unicodeInputAbortError(detail) {
   const error = unicodeInputError(
     "unicode_input.cancelled",
     "The Windows Unicode input operation was cancelled.",
+    detail,
   );
   error.name = "AbortError";
   return error;
@@ -636,8 +671,44 @@ function isValidProcessId(value) {
   return Number.isSafeInteger(numeric) && numeric > 0 && numeric <= 0xffff_ffff;
 }
 
-function unicodeInputError(code, message) {
+function validationFailureDetail({ inputBehavior, replaceAll }) {
+  return {
+    stage: "validate",
+    effect: "not-applied",
+    sideEffects: unicodeInputSideEffects({ inputBehavior, replaceAll, effect: "not-applied" }),
+  };
+}
+
+function executionFailureDetail({ inputBehavior, replaceAll }) {
+  return {
+    stage: "bridge-execution",
+    effect: "indeterminate",
+    sideEffects: unicodeInputSideEffects({ inputBehavior, replaceAll, effect: "indeterminate" }),
+  };
+}
+
+function unicodeInputSideEffects({ inputBehavior, replaceAll, effect }) {
+  if (effect === "not-applied") {
+    return {
+      focus: "not-applied",
+      selection: "not-applied",
+      text: "not-applied",
+      clipboard: "not-used",
+      ime: "not-used",
+    };
+  }
+  return {
+    focus: "indeterminate",
+    selection: replaceAll ? "indeterminate" : "not-used",
+    text: "indeterminate",
+    clipboard: inputBehavior === "commit" ? "indeterminate" : "not-used",
+    ime: inputBehavior === "incremental" ? "indeterminate" : "not-used",
+  };
+}
+
+function unicodeInputError(code, message, detail) {
   const error = new Error(message);
   error.code = code;
+  error.detail = detail;
   return error;
 }

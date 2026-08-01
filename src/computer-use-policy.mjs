@@ -95,7 +95,9 @@ export function createComputerUsePolicy(options = {}) {
       }
 
       const activatesControllerWindow = action.kind === "activate_window";
-      const hasElementRef = action.elementToken !== undefined || action.elementIndex !== undefined;
+      const hasElementRef = action.elementId !== undefined
+        || action.elementToken !== undefined
+        || action.elementIndex !== undefined;
       const hasPixelRef = Number.isFinite(action.x) && Number.isFinite(action.y);
       const isGlobalKeyboardAction = action.kind === "press_key" || action.kind === "type_text";
       if (!activatesControllerWindow && !hasElementRef && !hasPixelRef) {
@@ -174,6 +176,9 @@ function matchDeniedWindow(window, deniedWindows) {
 }
 
 function findObservationElement(observation, action) {
+  if (action.elementId !== undefined) {
+    return observation?.scene?.elements?.find((element) => element.id === action.elementId);
+  }
   const elements = observation?.elements ?? [];
   if (action.elementToken !== undefined) {
     return elements.find((element) => element.elementToken === action.elementToken);
