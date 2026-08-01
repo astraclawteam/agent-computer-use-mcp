@@ -6,8 +6,8 @@
 > three-state action contract. The tables below remain the frozen `.91`
 > baseline audit rather than a description of the new implementation.
 
-Date: 2026-08-01  
-Baseline: `0.0.26-local.20260801.91`  
+Date: 2026-08-01
+Baseline: `0.0.26-local.20260801.91`
 Policy: freeze this baseline; do not publish another candidate or run combination campaigns until the three atomic proof gates pass.
 
 ## 1. Provenance boundary
