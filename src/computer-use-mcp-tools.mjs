@@ -329,6 +329,7 @@ const LEGACY_COMPUTER_USE_MCP_TOOLS = [
       applications: ANY_ARRAY,
       applicationCount: { type: "number" },
       nextAction: { type: "string" },
+      reused: { type: "boolean" },
     }, ["status", "controller"]),
   },
   {

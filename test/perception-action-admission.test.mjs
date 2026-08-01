@@ -1716,6 +1716,118 @@ test("provider router permits one screenshot focus continuation and derives targ
   assert.equal(calls[1].args.deliveryMode, "foreground");
 });
 
+test("provider router safely derives observation and focus receipts for the same editable target", async (t) => {
+  const calls = [];
+  const router = new ComputerUseProviderRouter({
+    driver: {
+      async click(args) {
+        calls.push({ method: "click", args });
+        return { status: "ok", focusVerified: true };
+      },
+      async typeText(args) {
+        calls.push({ method: "typeText", args });
+        return {
+          status: "ok",
+          verified: false,
+          focusVerified: false,
+          foregroundWindow: { windowId: "window-1" },
+        };
+      },
+      async pressKey(args) {
+        calls.push({ method: "pressKey", args });
+        return { status: "ok", verified: true };
+      },
+      async captureScreenshot({ outputPath }) {
+        return {
+          status: "ok",
+          source: "window-capture",
+          path: outputPath,
+          artifactBytes: Buffer.from(
+            "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Y9ZQmcAAAAASUVORK5CYII=",
+            "base64",
+          ),
+          width: 960,
+          height: 720,
+          window: { id: "window-1", title: "Fixture", pid: 100, bounds: { width: 960, height: 720 } },
+        };
+      },
+    },
+    ocrSession: {
+      async start() {},
+      async recognize() { return { status: "ok", items: [] }; },
+      async close() {},
+    },
+  });
+  t.after(() => router.close());
+  router.activeController = {
+    controllerId: "controller-1",
+    tier: "full",
+    window: { id: "window-1", windowId: "window-1", title: "Fixture", pid: 100, bounds: { width: 960, height: 720 } },
+    expiresAt: new Date(Date.now() + 10_000).toISOString(),
+    expiresAtMs: Date.now() + 10_000,
+  };
+  router.lastCapture = {
+    ...observation({
+      observationId: "receipt-observation-1",
+      source: "window-capture",
+      expiresAt: Date.now() + 5_000,
+      capture: { width: 960, height: 720 },
+    }),
+    coordinateSpace: "window-local",
+    surfaceReceipt: {
+      id: "surface-receipt-1",
+      controllerId: "controller-1",
+      windowId: "window-1",
+      observationId: "receipt-observation-1",
+    },
+    elements: [],
+  };
+
+  const bounds = { x: 80, y: 40, width: 240, height: 40 };
+  const clicked = await router.act({
+    action: {
+      kind: "click",
+      observationId: "receipt-observation-1",
+      surfaceReceiptId: "surface-receipt-1",
+      coordinateSpace: "window-local",
+      x: 180,
+      y: 60,
+      targetBounds: bounds,
+      interactionIntent: "focus-editable",
+      targetRole: "editable",
+    },
+  });
+
+  router.lastCapture = {
+    ...router.lastCapture,
+    observationId: "receipt-observation-2",
+    surfaceReceipt: {
+      id: "surface-receipt-2",
+      controllerId: "controller-1",
+      windowId: "window-1",
+      observationId: "receipt-observation-2",
+    },
+  };
+  await router.act({
+    action: {
+      kind: "type_text",
+      surfaceReceiptId: "surface-receipt-2",
+      targetBounds: bounds,
+      value: "query",
+      textMode: "replace-all",
+      inputBehavior: "incremental",
+    },
+  });
+  router.pendingUnverifiedMutation = null;
+  await router.act({ action: { kind: "press_key", key: "return" } });
+
+  assert.equal(clicked.focusReceipt.status, "verified");
+  assert.deepEqual(calls.map((entry) => entry.method), ["click", "typeText", "pressKey"]);
+  assert.equal(calls[1].args.x, 200);
+  assert.equal(calls[1].args.y, 60);
+  assert.equal(calls[2].args.deliveryMode, "foreground");
+});
+
 test("provider router derives a safe window-local center for targetBounds-only text", async (t) => {
   const calls = [];
   const router = new ComputerUseProviderRouter({

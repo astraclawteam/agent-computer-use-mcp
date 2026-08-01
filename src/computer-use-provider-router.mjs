@@ -1299,6 +1299,10 @@ export class ComputerUseProviderRouter {
   async actOperation(args = {}, ticket) {
     await this.awaitExternal(ticket, () => this.requireActiveController(ticket, args.requestContext));
     await this.assertDesktopInteractive(ticket, "act");
+    args = {
+      ...args,
+      action: this.bindCurrentActionReceipts(args.action),
+    };
     const actionObservation = this.lastCapture;
     const action = normalizeActionCoordinates(
       args.action,
@@ -1520,7 +1524,8 @@ export class ComputerUseProviderRouter {
     }
 
     if (outcome === "unverified" && action.kind !== "activate_window") {
-      const independentlyVerifiedTextFocus = action.kind === "type_text" && hasVerifiedFocus(result);
+      const independentlyVerifiedTextFocus = action.kind === "type_text"
+        && (hasVerifiedFocus(result) || focusReceipt?.status === "verified");
       if (!independentlyVerifiedTextFocus) this.activeFocusReceipt = null;
       this.pendingUnverifiedMutation = {
         actionKind: action.kind,
@@ -2539,6 +2544,39 @@ export class ComputerUseProviderRouter {
     };
   }
 
+  bindCurrentActionReceipts(action = {}) {
+    if (!action || typeof action !== "object" || Array.isArray(action)) return action;
+    let normalized = { ...action };
+    const surfaceReceipt = this.lastCapture?.surfaceReceipt;
+    if (typeof normalized.observationId !== "string"
+      && typeof normalized.surfaceReceiptId === "string"
+      && normalized.surfaceReceiptId === surfaceReceipt?.id
+      && typeof surfaceReceipt.observationId === "string") {
+      normalized.observationId = surfaceReceipt.observationId;
+    }
+    const keyboardAction = normalized.kind === "type_text" || normalized.kind === "press_key";
+    const focusReceipt = this.activeFocusReceipt;
+    if (!keyboardAction
+      || typeof normalized.focusReceiptId === "string"
+      || !focusReceipt
+      || focusReceipt.status !== "verified"
+      || focusReceipt.expiresAtMs <= this.clock.now()
+      || focusReceipt.controllerId !== this.activeController?.controllerId
+      || focusReceipt.windowId !== controllerWindowId(this.activeController?.window)) {
+      return normalized;
+    }
+    const suppliedTarget = describeActionTarget(normalized, null, normalized);
+    const hasSuppliedTarget = isCoordinateBox(normalized.targetBounds)
+      || (Number.isFinite(normalized.x) && Number.isFinite(normalized.y))
+      || normalized.elementToken !== undefined
+      || normalized.elementIndex !== undefined;
+    if (hasSuppliedTarget && !actionTargetsOverlap(focusReceipt.target, suppliedTarget)) {
+      return normalized;
+    }
+    normalized.focusReceiptId = focusReceipt.id;
+    return normalized;
+  }
+
   rememberSemanticElements(observation) {
     const elements = observation?.elements ?? observation?.observation?.elements ?? [];
     if (!Array.isArray(elements)) return;
@@ -2568,7 +2606,8 @@ export class ComputerUseProviderRouter {
   }
 
   validateFocusReceipt(action = {}) {
-    if (!isTargetlessKeyboardAction(action)) return null;
+    if ((action.kind !== "type_text" && action.kind !== "press_key")
+      || typeof action.focusReceiptId !== "string") return null;
     if (!this.activeFocusReceipt || action.focusReceiptId !== this.activeFocusReceipt.id) {
       fail(
         "focus.receipt_invalid",
@@ -2591,6 +2630,18 @@ export class ComputerUseProviderRouter {
       fail(
         "focus.receipt_invalid",
         "The focus receipt no longer matches the active controller window.",
+        { focusVerified: false },
+      );
+    }
+    const suppliedTarget = describeActionTarget(action, null, action);
+    const hasSuppliedTarget = isCoordinateBox(action.targetBounds)
+      || (Number.isFinite(action.x) && Number.isFinite(action.y))
+      || action.elementToken !== undefined
+      || action.elementIndex !== undefined;
+    if (hasSuppliedTarget && !actionTargetsOverlap(this.activeFocusReceipt.target, suppliedTarget)) {
+      fail(
+        "focus.receipt_target_mismatch",
+        "The focus receipt does not belong to the supplied keyboard target.",
         { focusVerified: false },
       );
     }

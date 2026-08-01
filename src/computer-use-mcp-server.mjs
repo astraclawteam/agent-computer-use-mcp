@@ -1338,13 +1338,16 @@ function normalizeComputerActArgs(args = {}) {
   if (!outerAction || typeof outerAction !== "object" || Array.isArray(outerAction)
     || typeof outerAction.kind === "string"
     || !nestedAction || typeof nestedAction !== "object" || Array.isArray(nestedAction)
-    || typeof nestedAction.kind !== "string"
-    || Object.keys(outerAction).some((key) => key !== "action")) {
+    || typeof nestedAction.kind !== "string") {
     return args;
   }
+  const { action: _discardedWrapper, ...forwardedActionFields } = outerAction;
   return {
     ...args,
-    action: nestedAction,
+    action: {
+      ...forwardedActionFields,
+      ...nestedAction,
+    },
   };
 }
 

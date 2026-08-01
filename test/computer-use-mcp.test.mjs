@@ -308,6 +308,9 @@ test("computer.acquire recovers a stale application token with fresh discovery i
   assert.equal(result.structuredContent.status, "target_required");
   assert.equal(result.structuredContent.applications[0].applicationToken, "application-fresh");
   assert.match(result.content[0].text, /application-fresh/u);
+  const acquire = COMPUTER_USE_MCP_TOOLS.find((tool) => tool.name === "computer.acquire");
+  const validate = new Ajv({ strict: false }).compile(acquire.outputSchema);
+  assert.equal(validate(result.structuredContent), true, JSON.stringify(validate.errors));
 });
 
 test("computer.act unwraps one structurally duplicated action envelope", async () => {
@@ -346,6 +349,46 @@ test("computer.act unwraps one structurally duplicated action envelope", async (
   assert.equal(result.isError, false);
   assert.equal(received.action.kind, "type_text");
   assert.equal(received.action.value, "宋");
+  assert.equal(received.action.action, undefined);
+});
+
+test("computer.act forwards receipt fields placed beside a duplicated action envelope", async () => {
+  let received;
+  const result = await callTool({
+    async act(args) {
+      received = args;
+      return {
+        status: "ok",
+        provider: "gateway-managed",
+        action: "type_text",
+        result: { status: "ok", verified: true },
+        pixelLimitedAction: true,
+        outcome: "applied",
+        effectiveDeliveryMode: "foreground",
+        execution: {
+          schemaVersion: 1,
+          targetPath: "observation-coordinate",
+          providerPath: "windows-unicode-input",
+          deliveryMode: "foreground",
+          fallback: { used: false, reason: null },
+        },
+      };
+    },
+  }, "computer.act", {
+    action: {
+      action: {
+        kind: "type_text",
+        value: "query",
+        textMode: "replace-all",
+        inputBehavior: "incremental",
+      },
+      surfaceReceiptId: "surface-1",
+    },
+  });
+
+  assert.equal(result.isError, false);
+  assert.equal(received.action.kind, "type_text");
+  assert.equal(received.action.surfaceReceiptId, "surface-1");
   assert.equal(received.action.action, undefined);
 });
 
