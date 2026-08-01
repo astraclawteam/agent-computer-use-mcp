@@ -599,6 +599,14 @@ export class CuaDriverMcpDriver {
     };
   }
 
+  async ensureForegroundActionResources(ticket, window) {
+    const activation = await this.activateWindowResources(ticket, window);
+    if (activation?.verified === true && activation?.foregroundWindow?.isForeground === true) {
+      return activation;
+    }
+    return null;
+  }
+
   setValue({ window, elementToken, elementIndex, value }) {
     return this.runWork(async (ticket) => {
       await this.ensureStartedResources(ticket);
@@ -628,6 +636,10 @@ export class CuaDriverMcpDriver {
   }) {
     return this.runWork(async (ticket) => {
       await this.ensureStartedResources(ticket);
+      if (deliveryMode === "foreground" && Number.isFinite(x) && Number.isFinite(y)) {
+        const activation = await this.ensureForegroundActionResources(ticket, window);
+        if (!activation) return foregroundActionNotApplied("type_text");
+      }
       if (shouldUseWindowsUnicodeInput({
         elementToken,
         elementIndex,
@@ -636,11 +648,6 @@ export class CuaDriverMcpDriver {
         value,
         deliveryMode,
       })) {
-        await this.client.callTool("bring_to_front", {
-          pid: window.pid,
-          window_id: window.windowId,
-        });
-        this.assertWorkTicket(ticket);
         await this.client.callTool("click", {
           pid: window.pid,
           window_id: window.windowId,
@@ -706,11 +713,8 @@ export class CuaDriverMcpDriver {
     return this.runWork(async (ticket) => {
       await this.ensureStartedResources(ticket);
       if (Number.isFinite(x) && Number.isFinite(y) && deliveryMode === "foreground") {
-        await this.client.callTool("bring_to_front", {
-          pid: window.pid,
-          window_id: window.windowId,
-        });
-        this.assertWorkTicket(ticket);
+        const activation = await this.ensureForegroundActionResources(ticket, window);
+        if (!activation) return foregroundActionNotApplied("click");
       }
       const result = await this.client.callTool("click", {
         pid: window.pid,
@@ -727,6 +731,10 @@ export class CuaDriverMcpDriver {
   pressKey({ window, elementToken, elementIndex, x, y, key, modifiers, deliveryMode = "background" }) {
     return this.runWork(async (ticket) => {
       await this.ensureStartedResources(ticket);
+      if (deliveryMode === "foreground") {
+        const activation = await this.ensureForegroundActionResources(ticket, window);
+        if (!activation) return foregroundActionNotApplied("press_key");
+      }
       const result = await this.client.callTool("press_key", {
         pid: window.pid,
         window_id: window.windowId,
@@ -1381,6 +1389,20 @@ function windowSelectionError(code, message, detail) {
   error.code = code;
   error.detail = detail;
   return error;
+}
+
+function foregroundActionNotApplied(action) {
+  return {
+    status: "indeterminate",
+    effect: "not_applied",
+    verified: false,
+    focusVerified: false,
+    replaySafe: true,
+    actionAttempted: false,
+    reason: "foreground.activation_unverified",
+    action,
+    nextAction: "Observe desktop state and reacquire the intended window before another action.",
+  };
 }
 
 function lifecycleClosedError() {

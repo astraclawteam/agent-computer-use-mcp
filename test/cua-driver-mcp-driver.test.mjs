@@ -9,6 +9,7 @@ test("CuaDriverMcpDriver maps request/capture/action to cua-driver MCP tools", a
   const calls = [];
   const driver = new CuaDriverMcpDriver({
     session: "test-session",
+    foregroundWindowProbe: async () => "42",
     client: {
       async start() {
         calls.push({ method: "start" });
@@ -168,6 +169,14 @@ test("CuaDriverMcpDriver maps request/capture/action to cua-driver MCP tools", a
     },
     {
       method: "callTool",
+      name: "bring_to_front",
+      args: {
+        pid: 1234,
+        window_id: 42,
+      },
+    },
+    {
+      method: "callTool",
       name: "type_text",
       args: {
         pid: 1234,
@@ -189,6 +198,14 @@ test("CuaDriverMcpDriver maps request/capture/action to cua-driver MCP tools", a
         y: 210,
         delivery_mode: "background",
         session: "test-session",
+      },
+    },
+    {
+      method: "callTool",
+      name: "bring_to_front",
+      args: {
+        pid: 1234,
+        window_id: 42,
       },
     },
     {
@@ -461,10 +478,11 @@ test("CuaDriverMcpDriver keeps semantic Unicode text on the cua-driver path", as
   });
 });
 
-test("CuaDriverMcpDriver reasserts foreground immediately before a pixel click", async () => {
+test("CuaDriverMcpDriver verifies foreground immediately before a pixel click", async () => {
   const calls = [];
   const driver = new CuaDriverMcpDriver({
     session: "foreground-pixel-click-session",
+    foregroundWindowProbe: async () => "42",
     client: {
       async start() {},
       async callTool(name, args) {
@@ -496,6 +514,37 @@ test("CuaDriverMcpDriver reasserts foreground immediately before a pixel click",
       },
     },
   ]);
+});
+
+test("CuaDriverMcpDriver uses verified foreground fallback before delivering a pixel click", async () => {
+  const calls = [];
+  const driver = new CuaDriverMcpDriver({
+    session: "foreground-pixel-click-fallback-session",
+    foregroundWindowProbe: async () => "999",
+    foregroundWindowActivator: async ({ windowId }) => ({
+      landed_on_target: true,
+      now_fg_hwnd: String(windowId),
+    }),
+    client: {
+      async start() {},
+      async callTool(name, args) {
+        calls.push({ name, args });
+        return name === "bring_to_front"
+          ? { landed_on_target: false }
+          : { status: "ok" };
+      },
+    },
+  });
+
+  await driver.click({
+    window: { windowId: 42, pid: 1234 },
+    x: 160,
+    y: 100,
+    deliveryMode: "foreground",
+  });
+
+  assert.equal(calls.filter(({ name }) => name === "bring_to_front").length, 3);
+  assert.equal(calls.at(-1).name, "click");
 });
 
 test("CuaDriverMcpDriver captures the exact screenshot coordinate source used by pixel actions", async (t) => {

@@ -239,9 +239,14 @@ function isSafeContractRejection(name, toolError) {
       toolError?.detail?.allowed === false
       && toolError?.detail?.pixelLimitedAction === false
     ) || new Set([
+      "action.observation_required",
       "action.surface_receipt_mismatch",
       "action.fresh_observation_required",
       "action.observation_required_after_unverified_mutation",
+      "focus.receipt_required",
+      "focus.receipt_invalid",
+      "focus.receipt_expired",
+      "focus.receipt_target_mismatch",
     ]).has(toolError?.code);
   }
   return name === "computer.acquire"

@@ -977,6 +977,33 @@ test("stale action receipts are non-fatal not-applied preconditions", async () =
   assert.equal(result.structuredContent.error.code, "action.surface_receipt_mismatch");
 });
 
+test("keyboard focus and observation preconditions do not count as tool failures", async () => {
+  for (const code of ["focus.receipt_required", "action.observation_required"]) {
+    const result = await callTool({
+      async act() {
+        const error = new Error("A fresh action precondition is required.");
+        error.code = code;
+        error.detail = { retryable: true, nextTool: "computer.observe" };
+        throw error;
+      },
+    }, "computer.act", {
+      action: {
+        kind: code === "focus.receipt_required" ? "press_key" : "click",
+        ...(code === "focus.receipt_required" ? { key: "return" } : {
+          coordinateSpace: "window-local",
+          x: 20,
+          y: 20,
+        }),
+      },
+    });
+
+    assert.equal(result.isError, false, code);
+    assert.equal(result.structuredContent.status, "not-applied", code);
+    assert.equal(result.structuredContent.outcome, "blocked", code);
+    assert.equal(result.structuredContent.error.code, code);
+  }
+});
+
 test("a missing foreground window is a non-fatal acquire precondition", async () => {
   const result = await callTool({
     async requestAccess() {
