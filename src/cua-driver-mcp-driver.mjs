@@ -701,11 +701,10 @@ export class CuaDriverMcpDriver {
           inputBehavior,
           effect: "possibly_applied",
           verified: false,
-          // A matching foreground top-level window proves delivery stayed
-          // inside the approved app, but it does not prove which custom-drawn
-          // child surface owns keyboard focus. Only a subsequent observation
-          // that confirms the written value can mint a focus receipt.
-          focusVerified: false,
+          // The Windows bridge verifies the exact approved top-level window is
+          // foreground and GetGUIThreadInfo reports a focused window owned by
+          // the approved process immediately after the grounded target click.
+          focusVerified: unicodeResult.focusVerified === true,
           foregroundWindow: windowForegroundVerified
             ? {
                 ...window,

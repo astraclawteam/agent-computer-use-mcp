@@ -12,7 +12,7 @@ test("sendWindowsUnicodeText keeps text off process arguments and delivers it th
     return fakeChild({
       onStdin(value, child) {
         stdinText = value;
-        child.stdout.end('{"status":"ok","utf16CodeUnits":5,"clipboardRestored":true,"changeSignalDelivered":true,"deliveryPath":"windows_sendinput_unicode_incremental"}');
+        child.stdout.end('{"status":"ok","utf16CodeUnits":5,"clipboardRestored":true,"changeSignalDelivered":true,"focusVerified":true,"deliveryPath":"windows_sendinput_unicode_incremental"}');
         child.emit("close", 0, null);
       },
     });
@@ -32,6 +32,7 @@ test("sendWindowsUnicodeText keeps text off process arguments and delivers it th
     utf16CodeUnits: 5,
     clipboardRestored: true,
     changeSignalDelivered: true,
+    focusVerified: true,
     deliveryPath: "windows_sendinput_unicode_incremental",
   });
   const payload = JSON.parse(stdinText);
@@ -65,7 +66,7 @@ test("sendWindowsUnicodeText bypasses active IME composition for non-ASCII incre
     encodedBridge = args.at(-1);
     return fakeChild({
       onStdin(_value, child) {
-        child.stdout.end('{"status":"ok","utf16CodeUnits":1,"clipboardRestored":true,"changeSignalDelivered":true,"deliveryPath":"windows_clipboard_transaction"}');
+        child.stdout.end('{"status":"ok","utf16CodeUnits":1,"clipboardRestored":true,"changeSignalDelivered":true,"focusVerified":true,"deliveryPath":"windows_clipboard_transaction"}');
         child.emit("close", 0, null);
       },
     });
@@ -94,7 +95,7 @@ test("sendWindowsUnicodeText sends replace-all intent through the private stdin 
   const spawnProcess = () => fakeChild({
     onStdin(value, child) {
       stdinText = value;
-      child.stdout.end('{"status":"ok","utf16CodeUnits":2,"clipboardRestored":true,"changeSignalDelivered":true,"deliveryPath":"windows_clipboard_transaction"}');
+      child.stdout.end('{"status":"ok","utf16CodeUnits":2,"clipboardRestored":true,"changeSignalDelivered":true,"focusVerified":true,"deliveryPath":"windows_clipboard_transaction"}');
       child.emit("close", 0, null);
     },
   });

@@ -211,7 +211,7 @@ test("CuaDriverMcpDriver maps request/capture/action to cua-driver MCP tools", a
   ]);
 });
 
-test("CuaDriverMcpDriver distinguishes foreground-window verification from editable focus", async () => {
+test("CuaDriverMcpDriver propagates bridge-verified grounded editable focus", async () => {
   const calls = [];
   const unicodeCalls = [];
   const driver = new CuaDriverMcpDriver({
@@ -224,6 +224,7 @@ test("CuaDriverMcpDriver distinguishes foreground-window verification from edita
         utf16CodeUnits: args.text.length,
         clipboardRestored: true,
         changeSignalDelivered: true,
+        focusVerified: true,
         deliveryPath: "windows_clipboard_transaction",
       };
     },
@@ -282,7 +283,7 @@ test("CuaDriverMcpDriver distinguishes foreground-window verification from edita
     inputBehavior: "incremental",
     effect: "possibly_applied",
     verified: false,
-    focusVerified: false,
+    focusVerified: true,
     foregroundWindow: {
       windowId: 42,
       pid: 1234,

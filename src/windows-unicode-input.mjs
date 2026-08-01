@@ -161,6 +161,7 @@ $utf16CodeUnits = [AgentComputerUseIncrementalInput]::Send(
     utf16CodeUnits = $utf16CodeUnits
     clipboardRestored = $true
     changeSignalDelivered = $true
+    focusVerified = $true
     deliveryPath = "windows_sendinput_unicode_incremental"
 } | ConvertTo-Json -Compress
 `;
@@ -278,6 +279,7 @@ public static class AgentComputerUseUnicodeInput
         public int Utf16CodeUnits { get; set; }
         public bool ClipboardRestored { get; set; }
         public bool ChangeSignalDelivered { get; set; }
+        public bool FocusVerified { get; set; }
     }
 
     public static PasteResult PasteUnicode(
@@ -355,7 +357,8 @@ public static class AgentComputerUseUnicodeInput
         return new PasteResult {
             Utf16CodeUnits = text.Length,
             ClipboardRestored = clipboardRestored,
-            ChangeSignalDelivered = true
+            ChangeSignalDelivered = true,
+            FocusVerified = true
         };
     }
 
@@ -423,6 +426,7 @@ $result = [AgentComputerUseUnicodeInput]::PasteUnicode(
     utf16CodeUnits = $result.Utf16CodeUnits
     clipboardRestored = $result.ClipboardRestored
     changeSignalDelivered = $result.ChangeSignalDelivered
+    focusVerified = $result.FocusVerified
     deliveryPath = "windows_clipboard_transaction"
 } | ConvertTo-Json -Compress
 `;
@@ -554,6 +558,7 @@ export async function sendWindowsUnicodeText(options = {}) {
           || !Number.isInteger(result.utf16CodeUnits)
           || typeof result.clipboardRestored !== "boolean"
           || typeof result.changeSignalDelivered !== "boolean"
+          || typeof result.focusVerified !== "boolean"
           || !["windows_sendinput_unicode_incremental", "windows_clipboard_transaction"].includes(result.deliveryPath)) {
           throw new Error("invalid bridge response");
         }
@@ -562,6 +567,7 @@ export async function sendWindowsUnicodeText(options = {}) {
           utf16CodeUnits: result.utf16CodeUnits,
           clipboardRestored: result.clipboardRestored,
           changeSignalDelivered: result.changeSignalDelivered,
+          focusVerified: result.focusVerified,
           deliveryPath: result.deliveryPath,
         });
       } catch {
