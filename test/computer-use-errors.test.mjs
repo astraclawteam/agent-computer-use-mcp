@@ -37,7 +37,7 @@ test("structured error codes and retry detail survive text normalization", () =>
   error.code = "window.not_found";
   error.detail = {
     retryable: true,
-    nextTool: "computer.list_state",
+    nextTool: "computer.observe",
   };
 
   assert.deepEqual(serializeToolError(error), {
@@ -45,7 +45,7 @@ test("structured error codes and retry detail survive text normalization", () =>
     message: "No matching window",
     detail: {
       retryable: true,
-      nextTool: "computer.list_state",
+      nextTool: "computer.observe",
     },
   });
 });

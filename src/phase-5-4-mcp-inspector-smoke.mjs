@@ -3,10 +3,9 @@ import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js"
 
 const READ_ONLY_CALLS = ["computer.health", "computer.installation"];
 const STATE_CHANGING_TOOLS = new Set([
-  "computer.request_access",
+  "computer.acquire",
   "computer.act",
-  "computer.cancel",
-  "computer.revoke",
+  "computer.release",
   "computer.repair",
 ]);
 

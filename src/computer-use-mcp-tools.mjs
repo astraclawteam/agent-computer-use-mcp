@@ -110,7 +110,7 @@ function outputSchema(properties = {}, required = []) {
   return schema;
 }
 
-const LEGACY_COMPUTER_USE_MCP_TOOLS = [
+const COMPUTER_USE_TOOL_SCHEMAS = [
   {
     name: "computer.health",
     title: "Computer Use Health",
@@ -271,7 +271,7 @@ const LEGACY_COMPUTER_USE_MCP_TOOLS = [
     }, ["phase", "manifest", "clientConfig"]),
   },
   {
-    name: "computer.request_access",
+    name: "computer.acquire",
     title: "Request Computer Access",
     description: "Acquire a Gateway-managed controller lease from trusted discovery evidence and return an initial semantic observation when available. When the user refers to an application, call computer.observe mode=\"state\" first and pass its applicationToken even if auxiliary windows are already listed; the Host will restore and select the primary application window. Use target=\"foreground\" only when the user explicitly means the current OS foreground window. Use windowId only for the exact window returned by the immediately preceding state observation. Never infer, guess, or synthesize a window title.",
     annotations: { phase: "1.3", destructiveHint: false },
@@ -340,86 +340,6 @@ const LEGACY_COMPUTER_USE_MCP_TOOLS = [
       nextAction: { type: "string" },
       reused: { type: "boolean" },
     }, ["status", "controller"]),
-  },
-  {
-    name: "computer.approve",
-    title: "Approve Computer Use",
-    description: "Approve or deny a pending Gateway-managed computer control request.",
-    annotations: { phase: "1.12", destructiveHint: true },
-    inputSchema: {
-      type: "object",
-      required: ["approvalToken"],
-      properties: {
-        approvalToken: { type: "string" },
-        approved: {
-          type: "boolean",
-          description: "When true, grant the pending controller request and start the user-only overlay.",
-        },
-        denied: {
-          type: "boolean",
-          description: "When true, deny and clear the pending controller request.",
-        },
-        reason: { type: "string" },
-        leaseTtlMs: {
-          type: "number",
-          description: "Optional controller lease TTL to apply after approval.",
-        },
-      },
-      additionalProperties: false,
-    },
-    outputSchema: outputSchema({
-      status: { type: "string" },
-      approval: ANY_OBJECT,
-      controller: { anyOf: [ANY_OBJECT, { type: "null" }] },
-      overlay: { anyOf: [ANY_OBJECT, { type: "null" }] },
-      startsDesktopControl: { type: "boolean" },
-    }, ["status", "approval", "controller", "startsDesktopControl"]),
-  },
-  {
-    name: "computer.capture",
-    title: "Capture Computer Observation",
-    description: "Capture the active Gateway-managed target through the provider router.",
-    annotations: { phase: "1.3", readOnlyHint: true },
-    inputSchema: {
-      type: "object",
-      properties: {
-        mode: { type: "string", enum: ["semantic", "ocr-region", "screenshot"] },
-        crop: {
-          type: "object",
-          required: ["x", "y", "width", "height"],
-          properties: {
-            x: { type: "number" },
-            y: { type: "number" },
-            width: { type: "number" },
-            height: { type: "number" },
-          },
-          additionalProperties: false,
-        },
-        timeoutMs: { type: "number" },
-      },
-      additionalProperties: false,
-    },
-    outputSchema: outputSchema({
-      observationId: { type: "string" },
-      coordinateSpace: { type: "string", enum: ["window-local"] },
-      coordinateBounds: { anyOf: [BOX_SCHEMA, { type: "null" }] },
-      coordinateTransform: { type: "string", enum: ["identity", "scale-offset"] },
-      coordinateScale: ANY_OBJECT,
-      surfaceReceipt: ANY_OBJECT,
-      surfaceProvenance: ANY_OBJECT,
-      focusReceipt: ANY_OBJECT,
-      mutationVerification: ANY_OBJECT,
-      provider: { type: "string" },
-      source: { type: "string" },
-      mode: { type: "string" },
-      elements: PERCEPTION_ELEMENT_ARRAY,
-      artifact: ANY_OBJECT,
-      capture: ANY_OBJECT,
-      window: ANY_OBJECT,
-      text: { type: "string" },
-      controllerId: { type: "string" },
-      expiresAt: { anyOf: [{ type: "string" }, { type: "null" }] },
-    }),
   },
   {
     name: "computer.act",
@@ -628,7 +548,7 @@ const LEGACY_COMPUTER_USE_MCP_TOOLS = [
     }, ["status", "provider", "action", "result", "pixelLimitedAction", "execution"]),
   },
   {
-    name: "computer.cancel",
+    name: "computer.release",
     title: "Cancel Computer Use",
     description: "Cancel the active Gateway-managed controller lease.",
     annotations: { phase: "1.3", destructiveHint: false },
@@ -643,159 +563,10 @@ const LEGACY_COMPUTER_USE_MCP_TOOLS = [
       previousApproval: { anyOf: [ANY_OBJECT, { type: "null" }] },
     }, ["status", "previousController"]),
   },
-  {
-    name: "computer.revoke",
-    title: "Revoke Computer Use",
-    description: "Revoke the active Gateway-managed controller lease and clear module state.",
-    annotations: { phase: "1.3", destructiveHint: true },
-    inputSchema: {
-      type: "object",
-      properties: { reason: { type: "string" } },
-      additionalProperties: false,
-    },
-    outputSchema: outputSchema({
-      status: { type: "string" },
-      previousController: { anyOf: [ANY_OBJECT, { type: "null" }] },
-      previousApproval: { anyOf: [ANY_OBJECT, { type: "null" }] },
-    }, ["status", "previousController"]),
-  },
-  {
-    name: "computer.list_state",
-    title: "List Computer Use State",
-    description: "Read Computer Use state and discover desktop windows plus opaque application tokens. For an application-level request, pass the matching applicationToken to computer.acquire so the Host restores and selects the primary window even when only auxiliary windows are visible. Use foregroundWindow only to answer which window is currently frontmost. This tool never acquires control.",
-    annotations: { phase: "1.3", readOnlyHint: true },
-    inputSchema: {
-      type: "object",
-      properties: {},
-      additionalProperties: false,
-    },
-    outputSchema: outputSchema({
-      status: { type: "string" },
-      activeController: { anyOf: [ANY_OBJECT, { type: "null" }] },
-      pendingAccessApproval: { anyOf: [ANY_OBJECT, { type: "null" }] },
-      lastCapture: { anyOf: [ANY_OBJECT, { type: "null" }] },
-      pendingRepairApproval: { anyOf: [ANY_OBJECT, { type: "null" }] },
-      foregroundWindow: { anyOf: [ANY_OBJECT, { type: "null" }] },
-      windows: ANY_ARRAY,
-      windowDiscovery: ANY_OBJECT,
-      desktopState: ANY_OBJECT,
-      blocker: ANY_OBJECT,
-      auditEvents: ANY_ARRAY,
-      startsDesktopControl: { const: false },
-    }, [
-      "status",
-      "activeController",
-      "pendingAccessApproval",
-      "lastCapture",
-      "pendingRepairApproval",
-      "foregroundWindow",
-      "windows",
-      "windowDiscovery",
-      "auditEvents",
-      "startsDesktopControl",
-    ]),
-  },
-  {
-    name: "computer.capture_window",
-    title: "Capture Window",
-    description: "Capture a real OS window to a PNG artifact using a window-level capture path. Use the exact titlePart value \"*\" to capture the current foreground window.",
-    annotations: { phase: "1.0", readOnlyHint: true },
-    inputSchema: {
-      type: "object",
-      required: ["titlePart"],
-      properties: {
-        titlePart: {
-          type: "string",
-          description: "Case-insensitive literal title substring, or the exact value \"*\" for the current foreground window.",
-        },
-        outputPath: { type: "string" },
-        timeoutMs: { type: "number" },
-      },
-      additionalProperties: false,
-    },
-    outputSchema: outputSchema({
-      status: { type: "string" },
-      provider: { type: "string" },
-      source: { type: "string" },
-      capture: ANY_OBJECT,
-      artifact: ANY_OBJECT,
-    }, ["status", "provider", "source", "capture", "artifact"]),
-  },
-  {
-    name: "computer.ocr_region",
-    title: "OCR Region",
-    description: "Run the local OCR sidecar against an image path and optional crop region.",
-    annotations: { phase: "1.1", readOnlyHint: true },
-    inputSchema: {
-      type: "object",
-      properties: {
-        imagePath: { type: "string" },
-        titlePart: { type: "string" },
-        crop: {
-          type: "object",
-          required: ["x", "y", "width", "height"],
-          properties: {
-            x: { type: "number" },
-            y: { type: "number" },
-            width: { type: "number" },
-            height: { type: "number" },
-          },
-          additionalProperties: false,
-        },
-        languages: {
-          type: "array",
-          items: { type: "string" },
-        },
-        timeoutMs: { type: "number" },
-        noCache: { type: "boolean" },
-      },
-      additionalProperties: false,
-    },
-    outputSchema: outputSchema({
-      status: { type: "string" },
-      provider: { type: "string" },
-      mode: { type: "string" },
-      imagePath: { type: "string" },
-      capture: { anyOf: [ANY_OBJECT, { type: "null" }] },
-      observation: ANY_OBJECT,
-    }, ["status", "provider", "mode", "imagePath", "observation"]),
-  },
-  {
-    name: "computer.observe_diff",
-    title: "Observe Diff",
-    description: "Compare two real-window captures and OCR only the dirty region.",
-    annotations: { phase: "1.1", readOnlyHint: true },
-    inputSchema: {
-      type: "object",
-      required: ["baselinePath", "changedPath"],
-      properties: {
-        baselinePath: { type: "string" },
-        changedPath: { type: "string" },
-        threshold: { type: "number" },
-        padding: { type: "number" },
-        languages: {
-          type: "array",
-          items: { type: "string" },
-        },
-        timeoutMs: { type: "number" },
-      },
-      additionalProperties: false,
-    },
-    outputSchema: outputSchema({
-      status: { type: "string" },
-      provider: { type: "string" },
-      mode: { type: "string" },
-      baselinePath: { type: "string" },
-      changedPath: { type: "string" },
-      dirtyRegion: { anyOf: [ANY_OBJECT, { type: "null" }] },
-      ocrRegion: ANY_OBJECT,
-      observation: { anyOf: [ANY_OBJECT, { type: "null" }] },
-    }, ["status", "provider", "mode", "dirtyRegion", "observation"]),
-  },
 ];
 
-const byLegacyName = (name) => {
-  const tool = LEGACY_COMPUTER_USE_MCP_TOOLS.find((candidate) => candidate.name === name);
+const schemaByName = (name) => {
+  const tool = COMPUTER_USE_TOOL_SCHEMAS.find((candidate) => candidate.name === name);
   if (!tool) throw new Error(`Missing Computer Use schema: ${name}`);
   return tool;
 };
@@ -826,7 +597,7 @@ const releaseLifecycleMeta = Object.freeze({
 
 export const COMPUTER_USE_HOST_TOOLS = Object.freeze(
   ["computer.health", "computer.doctor", "computer.installation", "computer.repair"].map((name) =>
-    Object.freeze({ ...byLegacyName(name), _meta: HOST_MANAGEMENT_META })),
+    Object.freeze({ ...schemaByName(name), _meta: HOST_MANAGEMENT_META })),
 );
 
 const semanticCapabilityMeta = ({
@@ -850,8 +621,7 @@ const semanticCapabilityMeta = ({
 });
 
 const acquireTool = {
-  ...byLegacyName("computer.request_access"),
-  name: "computer.acquire",
+  ...schemaByName("computer.acquire"),
   title: "Acquire Computer Access",
   description: "Acquire a lease and initial evidence. For a user-named application, pass applicationName immediately; Host exact-resolves the full fresh inventory and fails closed. Otherwise use an observed applicationToken. Host restores the primary window from tray instead of an auxiliary window. Use target=\"foreground\" only when intended.",
   _meta: Object.freeze({
@@ -1052,8 +822,7 @@ const observeTool = {
 };
 
 const releaseTool = {
-  ...byLegacyName("computer.cancel"),
-  name: "computer.release",
+  ...schemaByName("computer.release"),
   title: "Release Computer Access",
   description: "Release the active Gateway-managed controller lease and any pending access request.",
   _meta: Object.freeze({
@@ -1070,7 +839,7 @@ const releaseTool = {
 };
 
 const actTool = {
-  ...byLegacyName("computer.act"),
+  ...schemaByName("computer.act"),
   _meta: semanticCapabilityMeta({
     summary: "Operate the visible interface of a local graphical application by clicking, entering text, or setting a supported control value.",
     scenarios: [

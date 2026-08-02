@@ -19,7 +19,7 @@ test("qualification evidence seals the exact seven-file inventory", async () => 
     now: timestamps(),
   });
   await run.appendTranscript({ role: "assistant", status: "completed", contentSha256: "c".repeat(64) });
-  await run.appendMcpEvent({ sequence: 1, toolName: "computer.capture", argumentClasses: ["window-token"], resultStatus: "passed" });
+  await run.appendMcpEvent({ sequence: 1, toolName: "computer.observe", argumentClasses: ["window-token"], resultStatus: "passed" });
   await run.appendObservation({ observationId: "observation-1", strategy: "uia", status: "sufficient" });
   await run.seal({
     verification: { status: "passed", invariantKind: "file-bytes", verifierId: "exact-file-bytes" },

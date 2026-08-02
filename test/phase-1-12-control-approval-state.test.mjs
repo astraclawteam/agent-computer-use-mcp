@@ -225,8 +225,6 @@ test("Phase 1.12 exposes control approval through MCP schema and smoke script", 
   const acquire = COMPUTER_USE_MCP_TOOLS.find((tool) => tool.name === "computer.acquire");
   assert.equal(acquire.inputSchema.properties.approvalRequired.type, "boolean");
   assert.equal(acquire.inputSchema.properties.approvalTtlMs.type, "number");
-  const approve = COMPUTER_USE_MCP_TOOLS.find((tool) => tool.name === "computer.approve");
-  assert.equal(approve, undefined);
 
   const { ComputerUseProviderRouter } = await import("../src/computer-use-provider-router.mjs");
   const health = await new ComputerUseProviderRouter().health({ fast: true });

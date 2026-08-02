@@ -119,7 +119,7 @@ function recordingDriver(calls, overrides = {}) {
     modelIdentity: { provider: "openai", modelId: "codex-desktop-default" },
     mcpIdentity: packageIdentity(),
     transcript: [{ role: "assistant", status: "completed" }],
-    mcpEvents: [{ tool: "computer.capture", status: "passed" }],
+    mcpEvents: [{ tool: "computer.observe", status: "passed" }],
   };
   return {
     async discover() {
