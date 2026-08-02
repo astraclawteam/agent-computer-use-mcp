@@ -1852,6 +1852,42 @@ test("CuaDriverMcpDriver restores a tray-only process by exact application ident
   assert.equal(calls.some(({ name }) => name === "launch_app"), false);
 });
 
+test("CuaDriverMcpDriver never launches a second instance when a running tray process cannot be restored", async () => {
+  const calls = [];
+  const driver = new CuaDriverMcpDriver({
+    session: "tray-restore-failed-session",
+    trayApplicationActivator: async ({ name }) => {
+      assert.equal(name, "Tray App");
+      return { status: "not-found" };
+    },
+    client: {
+      async start() {},
+      async callTool(name, args) {
+        calls.push({ name, args });
+        if (name === "list_windows") return { windows: [] };
+        if (name === "launch_app") throw new Error("must not launch a running tray process");
+        return { status: "ok" };
+      },
+    },
+  });
+
+  const result = await driver.launchApp({
+    launchPath: "C:\\Program Files\\Tray App\\tray-app.exe",
+    name: "Tray App",
+    pid: 505,
+    running: true,
+  });
+
+  assert.deepEqual(result, {
+    status: "not-applied",
+    reason: "running-application-window-unavailable",
+    pid: 505,
+    name: "Tray App",
+    windows: [],
+  });
+  assert.equal(calls.some(({ name }) => name === "launch_app"), false);
+});
+
 test("CuaDriverMcpDriver ignores an open auxiliary window until tray restoration exposes the main window", async () => {
   const calls = [];
   let trayInvoked = false;

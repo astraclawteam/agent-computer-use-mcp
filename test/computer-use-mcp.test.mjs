@@ -3051,6 +3051,97 @@ test("provider router exposes foreground discovery without acquiring or cancelli
   ]);
 });
 
+test("provider router binds a foreground-only application token without restoring or launching it", async () => {
+  const { ComputerUseProviderRouter } = await import("../src/computer-use-provider-router.mjs");
+  const calls = [];
+  const foreground = {
+    windowId: 51,
+    title: "Target App",
+    appName: "target.exe",
+    pid: 505,
+    isOnScreen: true,
+    isForeground: true,
+    bounds: { x: 20, y: 30, width: 900, height: 700 },
+  };
+  const router = new ComputerUseProviderRouter({
+    driver: {
+      async listWindows(args) {
+        calls.push({ method: "listWindows", args });
+        return [foreground];
+      },
+      async listApps() {
+        calls.push({ method: "listApps" });
+        return [{
+          name: "Target App",
+          running: true,
+          active: true,
+          pid: 505,
+          processIds: [505],
+          launchPath: "C:\\Program Files\\Target\\target.exe",
+        }];
+      },
+      async launchApp() {
+        calls.push({ method: "launchApp" });
+        throw new Error("foreground-only access must not activate or launch");
+      },
+    },
+  });
+
+  const state = await router.listState();
+  const access = await router.requestAccess({
+    applicationToken: state.applications[0].applicationToken,
+    activationPolicy: "foreground-only",
+    tier: "observe",
+  });
+
+  assert.equal(access.status, "granted");
+  assert.equal(access.controller.window.windowId, 51);
+  assert.equal(calls.some(({ method }) => method === "launchApp"), false);
+  await router.close();
+});
+
+test("provider router rejects foreground-only tray state without starting control or launching", async () => {
+  const { ComputerUseProviderRouter } = await import("../src/computer-use-provider-router.mjs");
+  const calls = [];
+  const router = new ComputerUseProviderRouter({
+    driver: {
+      async listWindows(args) {
+        calls.push({ method: "listWindows", args });
+        return [];
+      },
+      async listApps() {
+        calls.push({ method: "listApps" });
+        return [{
+          name: "Target App",
+          running: true,
+          active: false,
+          pid: 505,
+          processIds: [505],
+          launchPath: "C:\\Program Files\\Target\\target.exe",
+        }];
+      },
+      async launchApp() {
+        calls.push({ method: "launchApp" });
+        throw new Error("foreground-only access must not activate or launch");
+      },
+    },
+  });
+
+  const state = await router.listState();
+  await assert.rejects(
+    () => router.requestAccess({
+      applicationToken: state.applications[0].applicationToken,
+      activationPolicy: "foreground-only",
+      tier: "full",
+    }),
+    { code: "window.application_not_foreground" },
+  );
+
+  assert.equal(calls.some(({ method }) => method === "launchApp"), false);
+  assert.equal(router.activeController, null);
+  await router.close();
+});
+
 test("provider router renews an identical controller request instead of failing already_active", async () => {
   const { ComputerUseProviderRouter } = await import("../src/computer-use-provider-router.mjs");
   let now = 1_000;

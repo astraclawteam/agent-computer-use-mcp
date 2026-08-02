@@ -283,6 +283,15 @@ export class CuaDriverMcpDriver {
           }
         }
       }
+      if (running === true) {
+        return {
+          status: "not-applied",
+          reason: "running-application-window-unavailable",
+          pid: Number.isInteger(pid) && pid > 0 ? pid : 0,
+          name: name ?? null,
+          windows: [],
+        };
+      }
       const result = await this.client.callTool("launch_app", {
         launch_path: launchPath,
         start_minimized: false,

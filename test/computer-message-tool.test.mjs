@@ -15,11 +15,12 @@ test("computer.message owns the exact messaging sequence and controller lifecycl
     applicationName: APP,
     query: QUERY,
     message: MESSAGE,
-    requireForeground: true,
   }, { agentId: "fixture-agent", sessionId: "fixture-session" });
 
   assert.equal(result.outcome, "committed");
   assert.equal(result.released, true);
+  assert.equal(router.requestAccessCalls.length, 1);
+  assert.equal(router.requestAccessCalls[0].activationPolicy, "foreground-only");
   assert.deepEqual(result.history.map((entry) => entry.step), [
     "restore-main-window",
     "focus-search",
@@ -51,7 +52,6 @@ test("computer.message fails closed before actions when foreground is required",
     applicationName: APP,
     query: QUERY,
     message: MESSAGE,
-    requireForeground: true,
   });
 
   assert.equal(result.outcome, "not-applied");
@@ -65,11 +65,57 @@ test("computer.message fails closed before actions when foreground is required",
     applicationName: APP,
     query: QUERY,
     message: MESSAGE,
-    requireForeground: true,
   });
   const schema = COMPUTER_USE_MCP_TOOLS.find((tool) => tool.name === "computer.message").outputSchema;
   const validate = new Ajv({ strict: false }).compile(schema);
   assert.equal(validate(envelope.structuredContent), true, JSON.stringify(validate.errors));
+});
+
+test("computer.message rejects a non-foreground application before capture or control", async () => {
+  let captureCalls = 0;
+  let cancelCalls = 0;
+  let requestAccessArgs;
+  const result = await runDeterministicMessagingTool({
+    async listState() {
+      return {
+        foregroundWindow: null,
+        windows: [],
+        applications: [{ applicationToken: "application:fixture", name: APP }],
+      };
+    },
+    async requestAccess(args) {
+      requestAccessArgs = args;
+      throw Object.assign(new Error("The application is not foreground."), {
+        code: "window.application_not_foreground",
+      });
+    },
+    async capture() {
+      captureCalls += 1;
+      throw new Error("capture must not run before foreground preflight passes");
+    },
+    async cancel() {
+      cancelCalls += 1;
+      return { status: "cancelled" };
+    },
+  }, {
+    applicationName: APP,
+    query: QUERY,
+    message: MESSAGE,
+  });
+
+  assert.equal(requestAccessArgs.activationPolicy, "foreground-only");
+  assert.equal(result.outcome, "not-applied");
+  assert.equal(result.phase, "preflight");
+  assert.equal(result.error.code, "workflow.initial_foreground_required");
+  assert.equal(result.released, true);
+  assert.equal(captureCalls, 0);
+  assert.equal(cancelCalls, 0);
+});
+
+test("computer.message exposes semantic goal slots but no lifecycle policy input", () => {
+  const schema = COMPUTER_USE_MCP_TOOLS.find((tool) => tool.name === "computer.message").inputSchema;
+  assert.deepEqual(schema.required, ["applicationName", "query", "message"]);
+  assert.equal(schema.properties.requireForeground, undefined);
 });
 
 test("computer.message binds MCP cancellation to Stop and releases without later actions", async () => {
@@ -106,12 +152,14 @@ function fixtureRouter({ initialForeground = true, hangFirstAction = false, onAc
   let sent = false;
   let cancelCalls = 0;
   let captureCalls = 0;
+  const requestAccessCalls = [];
   const actions = [];
 
   return {
     actions,
     get cancelCalls() { return cancelCalls; },
     get captureCalls() { return captureCalls; },
+    requestAccessCalls,
     async listState() {
       return {
         foregroundWindow: { id: "window:fixture", title: APP },
@@ -119,7 +167,8 @@ function fixtureRouter({ initialForeground = true, hangFirstAction = false, onAc
         applications: [{ applicationToken: "application:fixture", name: APP }],
       };
     },
-    async requestAccess() {
+    async requestAccess(args) {
+      requestAccessCalls.push(structuredClone(args));
       return { status: "granted", controller: { id: "controller:fixture" } };
     },
     async capture() {

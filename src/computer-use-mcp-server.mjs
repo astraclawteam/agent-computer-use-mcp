@@ -290,12 +290,30 @@ export async function runDeterministicMessagingTool(router, args = {}, requestCo
       message,
       now: startedAt,
     });
-    access = await acquireComputer(router, {
-      applicationName,
-      tier: "full",
-      agentId: requestContext?.agentId ?? "deterministic-messaging-host",
-      reason: "Host-owned deterministic messaging workflow",
-    }, requestContext);
+    try {
+      access = await acquireComputer(router, {
+        applicationName,
+        tier: "full",
+        agentId: requestContext?.agentId ?? "deterministic-messaging-host",
+        reason: "Host-owned deterministic messaging workflow",
+      }, requestContext, {
+        activationPolicy: "foreground-only",
+      });
+    } catch (error) {
+      if (error?.code === "window.application_not_foreground") {
+        return messagingToolResult({
+          outcome: "not-applied",
+          released: true,
+          startedAt,
+          phase: "preflight",
+          error: {
+            code: "workflow.initial_foreground_required",
+            message: "The main application window was not foreground at workflow start.",
+          },
+        });
+      }
+      throw error;
+    }
     if (access?.status !== "granted" && access?.status !== "reused") {
       return messagingToolResult({
         outcome: "not-applied",
@@ -308,7 +326,7 @@ export async function runDeterministicMessagingTool(router, args = {}, requestCo
         },
       });
     }
-    if (args.requireForeground === true && !initialMainWindowIsForeground(access.initialObservation?.scene)) {
+    if (!initialMainWindowIsForeground(access.initialObservation?.scene)) {
       preMachineReleaseAttempted = true;
       await router.cancel({ reason: "workflow.initial_foreground_required", requestContext });
       return messagingToolResult({
@@ -1792,7 +1810,7 @@ export async function observeComputer(router, args, requestContext) {
   throw new Error(`observe_mode_not_found: ${mode}`);
 }
 
-export async function acquireComputer(router, args, requestContext) {
+export async function acquireComputer(router, args, requestContext, options = {}) {
   if (typeof args.applicationName === "string" && args.applicationName.trim() !== "") {
     const resolved = await resolveFreshApplicationName(router, args.applicationName);
     if (!resolved.applicationToken) return resolved;
@@ -1804,7 +1822,11 @@ export async function acquireComputer(router, args, requestContext) {
   }
   let access;
   try {
-    access = await router.requestAccess({ ...args, requestContext });
+    access = await router.requestAccess({
+      ...args,
+      requestContext,
+      ...(options.activationPolicy ? { activationPolicy: options.activationPolicy } : {}),
+    });
   } catch (error) {
     if (error instanceof ComputerUseMcpError && error.code === "application.token_invalid") {
       return freshAcquisitionTargets(router);

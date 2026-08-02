@@ -1149,7 +1149,7 @@ const actTool = {
 const messagingTool = {
   name: "computer.message",
   title: "Run Deterministic Messaging Workflow",
-  description: "Send one exact message through the Host-owned deterministic messaging state machine. This is the only Agent-facing path authorized to mutate a messaging interface: the Host owns search, coordinates, title verification, input, send verification, cancellation, and release. Supply semantic goal slots only; never use computer.act for messaging UI.",
+  description: "Send one exact message through the Host-owned deterministic messaging state machine when the existing main application window is already foreground. This is the only Agent-facing path authorized to mutate a messaging interface: the Host owns application entry conditions, search, coordinates, title verification, input, send verification, cancellation, and release. Supply semantic goal slots only; never use computer.act for messaging UI.",
   _meta: {
     ...semanticCapabilityMeta({
       summary: "Complete one role-based desktop messaging workflow while the Host retains every action target and lifecycle decision.",
@@ -1157,7 +1157,10 @@ const messagingTool = {
         "Send an exact user-authored message to an exact contact or conversation in a desktop messaging application.",
         "Select a semantic result without exposing OCR regions, chat-body text, or coordinates to the model.",
       ],
-      prerequisites: ["The user authorized the destination and exact message content."],
+      prerequisites: [
+        "The user authorized the destination and exact message content.",
+        "The existing main application window is already foreground.",
+      ],
       effects: ["May send one message after every deterministic postcondition succeeds."],
       modalities: ["local desktop messaging GUI", "Host Scene", "deterministic workflow"],
       constraints: ["Never replays an indeterminate action and always releases control on every terminal path."],
@@ -1186,10 +1189,6 @@ const messagingTool = {
         minLength: 1,
         maxLength: 20_000,
         description: "Exact user-authored message to enter and send once.",
-      },
-      requireForeground: {
-        type: "boolean",
-        description: "Fail closed before any workflow action unless the main application window is already foreground.",
       },
       selectionToken: {
         type: "string",

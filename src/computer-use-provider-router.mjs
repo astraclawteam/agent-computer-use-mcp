@@ -593,8 +593,11 @@ export class ComputerUseProviderRouter {
       );
     }
     if (hasApplicationToken) {
-      if (!this.driver?.launchApp) {
-        fail("provider.unavailable", "Application activation is not available.", {
+      const requiredDriverMethod = args.activationPolicy === "foreground-only"
+        ? "listWindows"
+        : "launchApp";
+      if (!this.driver?.[requiredDriverMethod]) {
+        fail("provider.unavailable", "Application window binding is not available.", {
           provider: "cua-driver",
         });
       }
@@ -625,19 +628,41 @@ export class ComputerUseProviderRouter {
               suggestedAction: "Call computer.observe mode=\"state\" and use the returned applicationToken.",
             });
           }
-          const launch = await this.awaitExternal(
-            ticket,
-            () => this.driver.launchApp({
-              launchPath: application.launchPath,
-              name: application.name,
-              pid: application.pid,
-              ...(Array.isArray(application.processIds)
-                ? { processIds: application.processIds }
-                : {}),
-              running: application.running,
-            }),
-          );
-          window = launch.windows?.[0];
+          if (args.activationPolicy === "foreground-only") {
+            const processIds = new Set([
+              application.pid,
+              ...(Array.isArray(application.processIds) ? application.processIds : []),
+            ].filter((value) => Number.isSafeInteger(value) && value > 0));
+            const windows = await this.awaitExternal(
+              ticket,
+              () => this.driver.listWindows({ onScreenOnly: false }),
+            );
+            const foregroundWindows = windows.filter((candidate) => (
+              candidate.isForeground === true && processIds.has(candidate.pid)
+            ));
+            if (foregroundWindows.length !== 1) {
+              fail(
+                "window.application_not_foreground",
+                "The selected application does not have exactly one existing foreground window.",
+                { retryable: true },
+              );
+            }
+            [window] = foregroundWindows;
+          } else {
+            const launch = await this.awaitExternal(
+              ticket,
+              () => this.driver.launchApp({
+                launchPath: application.launchPath,
+                name: application.name,
+                pid: application.pid,
+                ...(Array.isArray(application.processIds)
+                  ? { processIds: application.processIds }
+                  : {}),
+                running: application.running,
+              }),
+            );
+            window = launch.windows?.[0];
+          }
           if (!window) {
             fail("window.not_found", "The application was activated but no controllable window appeared.", {
               retryable: true,
