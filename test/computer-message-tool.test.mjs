@@ -46,6 +46,21 @@ test("computer.message owns the exact messaging sequence and controller lifecycl
   ]);
 });
 
+test("computer.message requests one Host-owned send-role refresh when the post-entry Scene lacks send", async () => {
+  const router = fixtureRouter({ sendRequiresIntent: true });
+  const result = await runDeterministicMessagingTool(router, {
+    applicationName: APP,
+    query: QUERY,
+    message: MESSAGE,
+  });
+
+  assert.equal(result.outcome, "committed");
+  assert.equal(router.captureCalls, 8);
+  assert.equal(router.refineCalls, 1);
+  assert.equal(router.refineArgs.filter((args) => args.messagingSceneIntent === "send").length, 1);
+  assert.equal(router.actions.filter((action) => action.elementId.endsWith(":send")).length, 1);
+});
+
 test("computer.message fails closed before actions when foreground is required", async () => {
   const router = fixtureRouter({ initialForeground: false });
   const result = await runDeterministicMessagingTool(router, {
@@ -141,7 +156,12 @@ test("computer.message binds MCP cancellation to Stop and releases without later
   assert.equal(router.actions.length, 1);
 });
 
-function fixtureRouter({ initialForeground = true, hangFirstAction = false, onAction = () => {} } = {}) {
+function fixtureRouter({
+  initialForeground = true,
+  hangFirstAction = false,
+  onAction = () => {},
+  sendRequiresIntent = false,
+} = {}) {
   let version = 0;
   let foreground = initialForeground;
   let focusedRole = null;
@@ -152,6 +172,9 @@ function fixtureRouter({ initialForeground = true, hangFirstAction = false, onAc
   let sent = false;
   let cancelCalls = 0;
   let captureCalls = 0;
+  let refineCalls = 0;
+  const captureArgs = [];
+  const refineArgs = [];
   const requestAccessCalls = [];
   const actions = [];
 
@@ -159,6 +182,9 @@ function fixtureRouter({ initialForeground = true, hangFirstAction = false, onAc
     actions,
     get cancelCalls() { return cancelCalls; },
     get captureCalls() { return captureCalls; },
+    get refineCalls() { return refineCalls; },
+    captureArgs,
+    refineArgs,
     requestAccessCalls,
     async listState() {
       return {
@@ -171,8 +197,9 @@ function fixtureRouter({ initialForeground = true, hangFirstAction = false, onAc
       requestAccessCalls.push(structuredClone(args));
       return { status: "granted", controller: { id: "controller:fixture" } };
     },
-    async capture() {
+    async capture(args = {}) {
       captureCalls += 1;
+      captureArgs.push(structuredClone(args));
       version += 1;
       return { scene: scene({
         version,
@@ -183,6 +210,23 @@ function fixtureRouter({ initialForeground = true, hangFirstAction = false, onAc
         conversationVisible,
         editorValue,
         sent,
+        includeSend: !sendRequiresIntent || args.messagingSceneIntent === "send",
+      }) };
+    },
+    async refineLatestScreenshotScene(args = {}) {
+      refineCalls += 1;
+      refineArgs.push(structuredClone(args));
+      version += 1;
+      return { scene: scene({
+        version,
+        foreground,
+        focusedRole,
+        query,
+        resultsVisible,
+        conversationVisible,
+        editorValue,
+        sent,
+        includeSend: args.messagingSceneIntent === "send",
       }) };
     },
     async act({ action }) {
@@ -217,7 +261,17 @@ function fixtureRouter({ initialForeground = true, hangFirstAction = false, onAc
   };
 }
 
-function scene({ version, foreground, focusedRole, query, resultsVisible, conversationVisible, editorValue, sent }) {
+function scene({
+  version,
+  foreground,
+  focusedRole,
+  query,
+  resultsVisible,
+  conversationVisible,
+  editorValue,
+  sent,
+  includeSend = true,
+}) {
   const elements = [];
   const add = ({ key, parentKey = null, ...element }) => elements.push({
     id: `scene:${version}:${key}`,
@@ -247,7 +301,11 @@ function scene({ version, foreground, focusedRole, query, resultsVisible, conver
   if (conversationVisible) {
     add({ key: "conversation", type: "Container", role: "conversation", parentKey: "main" });
     add({
-      key: "title", type: "ActionableItem", role: "conversation-title", parentKey: "conversation",
+      key: "conversation-header", type: "Container", role: "conversation-header",
+      parentKey: "conversation",
+    });
+    add({
+      key: "title", type: "ActionableItem", role: "conversation-title", parentKey: "conversation-header",
       name: QUERY, semanticKey: "contact:fixture",
     });
     add({ key: "transcript", type: "Container", role: "transcript", parentKey: "conversation" });
@@ -256,7 +314,7 @@ function scene({ version, foreground, focusedRole, query, resultsVisible, conver
       actions: ["click", "type_text"], actionable: true, value: editorValue,
       state: { focused: focusedRole === "message-editor" },
     });
-    add({
+    if (includeSend) add({
       key: "send", type: "ActionableItem", role: "send", parentKey: "conversation",
       actions: ["click"], actionable: true,
     });

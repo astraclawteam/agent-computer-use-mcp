@@ -1,5 +1,8 @@
 import { proposeSomFromImageFile } from "./som-proposal-provider.mjs";
-import { normalizeRecognizedUiText } from "./ui-text-normalization.mjs";
+import {
+  conversationEntitySemanticKey,
+  normalizeRecognizedUiText,
+} from "./ui-text-normalization.mjs";
 import {
   detectControlSurfaceFromPixels,
   readImagePixels,
@@ -24,9 +27,19 @@ export function stableCompositionOcrElements({
   if (!visualSceneStable) return current;
   const merged = [...current];
   for (const previous of previousElements.filter(isOcrElement)) {
-    const superseded = current.some((candidate) => sameOcrRegion(candidate, previous));
+    const sameRegion = current.filter((candidate) => sameOcrRegion(candidate, previous));
     const duplicate = merged.some((candidate) => sameOcrOccurrence(candidate, previous));
-    if (!superseded && !duplicate) merged.push(previous);
+    if (duplicate) continue;
+    if (sameRegion.length > 0
+      && sameRegion.every((candidate) => isStableOcrFragment(candidate, previous))) {
+      for (const fragment of sameRegion) {
+        const index = merged.indexOf(fragment);
+        if (index >= 0) merged.splice(index, 1);
+      }
+      merged.push(previous);
+    } else if (sameRegion.length === 0) {
+      merged.push(previous);
+    }
   }
   return merged;
 }
@@ -46,20 +59,7 @@ export async function detectMessagingVisualProposals({
     minConfidence: 0.7,
   })));
   const pixels = await readImagePixels(imagePath);
-  const semanticSurfaces = ocrElements.flatMap((element, index) => {
-    if (!isOcrElement(element) || semanticControlRole(elementText(element)) === null) return [];
-    const surface = detectControlSurfaceFromPixels(pixels, semanticLabelBounds(element));
-    if (!surface) return [];
-    return [{
-      proposalId: `semantic-surface-${index + 1}`,
-      role: "region",
-      bounds: surface,
-      confidence: 0.94,
-      source: "som-proposal",
-      pixelLimitedAction: true,
-      guessedAction: false,
-    }];
-  });
+  const semanticSurfaces = semanticControlSurfacesFromPixels(pixels, ocrElements);
   const proposals = [
     ...observations.flatMap((observation) => observation?.proposals ?? []),
     ...semanticSurfaces,
@@ -70,6 +70,43 @@ export async function detectMessagingVisualProposals({
     ...inferSearchVisualStructure({ pixels, proposals: deduplicated }),
     ...inferConversationVisualStructure({ pixels }),
   ]);
+}
+
+export async function detectMessagingSemanticSurfaces({ imagePath, ocrElements = [] } = {}) {
+  if (typeof imagePath !== "string" || imagePath.length === 0) return [];
+  const pixels = await readImagePixels(imagePath);
+  return semanticControlSurfacesFromPixels(pixels, ocrElements);
+}
+
+function semanticControlSurfacesFromPixels(pixels, ocrElements) {
+  return ocrElements.flatMap((element, index) => {
+    if (!isOcrElement(element) || semanticControlRole(elementText(element)) === null) return [];
+    const surface = detectSemanticControlSurfaceFromPixels(pixels, element);
+    if (!surface) return [];
+    return [{
+      proposalId: `semantic-surface-${index + 1}`,
+      semanticOcrKey: semanticOcrEvidenceKey(element),
+      role: "region",
+      bounds: surface,
+      confidence: 0.94,
+      source: "som-proposal",
+      pixelLimitedAction: true,
+      guessedAction: false,
+    }];
+  });
+}
+
+export function detectSemanticControlSurfaceFromPixels(pixels, element) {
+  const labelBounds = semanticLabelBounds(element);
+  const direct = detectControlSurfaceFromPixels(pixels, labelBounds);
+  if (direct) return direct;
+  const inset = {
+    x: labelBounds.x + (labelBounds.width * 0.1),
+    y: labelBounds.y + (labelBounds.height * 0.1),
+    width: labelBounds.width * 0.8,
+    height: labelBounds.height * 0.8,
+  };
+  return detectControlSurfaceFromPixels(pixels, inset);
 }
 
 export function inferSearchVisualStructure({ pixels, proposals = [] } = {}) {
@@ -277,6 +314,10 @@ function composeConversationSceneElements({ ocr, visual, focusedTarget }) {
   const editorVisual = visual
     .filter((proposal) => proposal.source === "som-proposal" && contains(editor.bounds, proposal.bounds))
     .sort(compareArea)[0] ?? null;
+  const editorValueEvidence = ocr
+    .filter((element) => messageEditorOwnsValue(editor.bounds, element))
+    .sort((left, right) => left.bounds.y - right.bounds.y || left.bounds.x - right.bounds.x);
+  const editorValue = editorValueEvidence.map(elementText).join("");
   const transcriptVisual = visual
     .filter((proposal) => proposal.source === "som-proposal" && contains(transcript.bounds, proposal.bounds))
     .sort(compareArea)[0] ?? null;
@@ -286,7 +327,9 @@ function composeConversationSceneElements({ ocr, visual, focusedTarget }) {
     && SEND_LABELS.has(normalizeControlLabel(elementText(element)))
   ));
   const send = sendCandidates.length === 1 ? sendCandidates[0] : null;
-  const sendOwners = send ? visualOwnersForOcr(send, visual) : [];
+  const sendOwners = send
+    ? visualOwnersForOcr(send, visual).filter(isSemanticSurface)
+    : [];
   const sendOwner = sendOwners.length > 0 && !materiallyDifferentOwners(sendOwners)
     ? sendOwners.sort(compareArea)[0]
     : null;
@@ -301,7 +344,8 @@ function composeConversationSceneElements({ ocr, visual, focusedTarget }) {
     name: "Conversation",
     bounds: pane.bounds,
     sourceRegion: pane.bounds,
-    source: "visual-structure",
+    source: "local-proposal-fusion",
+    modelIdentity: { provider: "local-proposal-fusion", model: "conversation-pane-structure-v1" },
     confidence: pane.confidence,
     actions: [],
     support: independentSupport(pane, title ?? editorVisual ?? transcriptVisual ?? transcriptOcr),
@@ -314,7 +358,8 @@ function composeConversationSceneElements({ ocr, visual, focusedTarget }) {
     name: "Conversation header",
     bounds: header.bounds,
     sourceRegion: header.bounds,
-    source: "visual-structure",
+    source: "local-proposal-fusion",
+    modelIdentity: { provider: "local-proposal-fusion", model: "conversation-header-structure-v1" },
     confidence: header.confidence,
     actions: [],
     support: independentSupport(header, title),
@@ -327,7 +372,8 @@ function composeConversationSceneElements({ ocr, visual, focusedTarget }) {
     name: "Transcript",
     bounds: transcript.bounds,
     sourceRegion: transcript.bounds,
-    source: "visual-structure",
+    source: "local-proposal-fusion",
+    modelIdentity: { provider: "local-proposal-fusion", model: "conversation-transcript-structure-v1" },
     confidence: transcript.confidence,
     actions: [],
     support: independentSupport(transcript, transcriptVisual ?? transcriptOcr),
@@ -350,18 +396,25 @@ function composeConversationSceneElements({ ocr, visual, focusedTarget }) {
       actions: [],
       support,
       guessedAction: false,
-      semanticKey: `conversation-title:${normalizeControlLabel(elementText(title))}`,
+      semanticKey: conversationEntitySemanticKey(elementText(title)),
     });
   }
   if (editorVisual) {
-    const support = independentSupport(editor, editorVisual);
+    const support = [
+      ...independentSupport(editor, editorVisual),
+      ...editorValueEvidence.map((element) => ({
+        provider: "ocr",
+        confidence: finiteConfidence(element.confidence, 0.9),
+        proposalId: String(element.proposalId ?? element.elementToken ?? "message-editor-value"),
+      })),
+    ];
     elements.push({
       hostType: "Editable",
       elementToken: editorToken,
       parentElementToken: paneToken,
       role: "message-editor",
       name: "Message editor",
-      value: "",
+      value: editorValue,
       bounds: editor.bounds,
       sourceRegion: editor.bounds,
       source: "local-proposal-fusion",
@@ -372,7 +425,10 @@ function composeConversationSceneElements({ ocr, visual, focusedTarget }) {
       pixelLimitedAction: true,
       guessedAction: false,
       semanticKey: "editor:primary",
-      state: { focused: targetOverlapsBounds(focusedTarget, editor.bounds) },
+      state: {
+        focused: targetOverlapsBounds(focusedTarget, editor.bounds),
+        valueObserved: editorValueEvidence.length > 0,
+      },
     });
   }
   if (send && sendOwner) {
@@ -448,6 +504,16 @@ function isMessageBubbleGeometry(owner, transcript, text) {
   return widthRatio >= 0.08 && widthRatio <= 0.82
     && heightRatio >= 0.025 && heightRatio <= 0.35
     && Math.abs(leftMargin - rightMargin) >= transcript.width * 0.08;
+}
+
+function messageEditorOwnsValue(editorBounds, element) {
+  if (!contains(editorBounds, element.bounds)) return false;
+  const text = elementText(element).trim();
+  if (text.length === 0
+    || finiteConfidence(element.confidence, 0) < 0.8
+    || SEND_LABELS.has(normalizeControlLabel(text))) return false;
+  const centerY = element.bounds.y + (element.bounds.height / 2);
+  return centerY <= editorBounds.y + (editorBounds.height * 0.58);
 }
 
 function editableEvidenceForKnownControl(elements, bounds) {
@@ -594,7 +660,11 @@ function searchValueBoundsFromEvidence(element, ownerBounds) {
 
 function visualOwnersForOcr(ocr, visual) {
   return visual.filter((proposal) => {
-    if (!contains(proposal.bounds, ocr.bounds)) return false;
+    const exactSemanticEvidence = isSemanticSurface(proposal)
+      && proposal.semanticOcrKey === semanticOcrEvidenceKey(ocr)
+      && overlapBySmallerArea(proposal.bounds, ocr.bounds) >= 0.8;
+    if (!exactSemanticEvidence && !contains(proposal.bounds, ocr.bounds)) return false;
+    if (exactSemanticEvidence) return true;
     const horizontalPadding = proposal.bounds.width - ocr.bounds.width;
     const verticalPadding = proposal.bounds.height - ocr.bounds.height;
     const areaRatio = area(proposal.bounds) / area(ocr.bounds);
@@ -603,6 +673,10 @@ function visualOwnersForOcr(ocr, visual) {
       && verticalPadding >= minimumVerticalPadding
       && areaRatio <= 80;
   });
+}
+
+function semanticOcrEvidenceKey(element) {
+  return `${normalizeControlLabel(elementText(element))}:${stableBoxId(element.bounds)}`;
 }
 
 function ocrBelongsToEditable(editableBounds, element) {
@@ -842,6 +916,21 @@ function sameOcrOccurrence(left, right) {
 
 function sameOcrRegion(left, right) {
   return overlapBySmallerArea(left.bounds, right.bounds) >= 0.8;
+}
+
+function isStableOcrFragment(current, previous) {
+  const currentText = normalizeRecognizedUiText(elementText(current), { languageClass: "mixed" })
+    .toLocaleLowerCase();
+  const previousText = normalizeRecognizedUiText(elementText(previous), { languageClass: "mixed" })
+    .toLocaleLowerCase();
+  const currentConfidence = finiteConfidence(current.confidence, 0);
+  const previousConfidence = finiteConfidence(previous.confidence, 0);
+  return currentText.length > 0
+    && currentText.length < previousText.length
+    && currentText.length / previousText.length <= 0.6
+    && previousText.includes(currentText)
+    && previousConfidence >= 0.9
+    && previousConfidence >= currentConfidence - 0.05;
 }
 
 function targetOverlapsBounds(target, bounds) {

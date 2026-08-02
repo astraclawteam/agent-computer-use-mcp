@@ -19,6 +19,8 @@ public static class AgentComputerUseRelatedSurfaceClick
     private const int POINTER_SETTLE_MS = 60;
     private const int CLICK_TRANSITION_MS = 30;
     private const int POST_CLICK_SETTLE_MS = 180;
+    private const int DISMISS_POLL_MS = 50;
+    private const int DISMISS_POLL_ATTEMPTS = 20;
 
     [StructLayout(LayoutKind.Sequential)]
     public struct Point { public int X; public int Y; }
@@ -71,6 +73,12 @@ public static class AgentComputerUseRelatedSurfaceClick
         Thread.Sleep(CLICK_TRANSITION_MS);
         mouse_event(MOUSEEVENTF_LEFTUP, 0, 0, 0, UIntPtr.Zero);
         Thread.Sleep(POST_CLICK_SETTLE_MS);
+        for (int attempt = 0; attempt < DISMISS_POLL_ATTEMPTS; attempt++)
+        {
+            if (!IsWindow(surface) || !IsWindowVisible(surface))
+                return "{\"status\":\"ok\",\"effect\":\"verified\",\"verified\":true,\"postcondition\":\"related-surface-dismissed\",\"deliveryPath\":\"windows-related-surface-click\"}";
+            Thread.Sleep(DISMISS_POLL_MS);
+        }
         return "{\"status\":\"ok\",\"effect\":\"applied\",\"verified\":false,\"deliveryPath\":\"windows-related-surface-click\"}";
     }
 }

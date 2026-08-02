@@ -15,6 +15,13 @@ export function normalizeRecognizedUiText(text, options = {}) {
     .trim();
 }
 
+export function conversationEntitySemanticKey(text) {
+  const normalized = normalizeRecognizedUiText(String(text ?? ""), {
+    languageClass: "mixed",
+  }).toLocaleLowerCase();
+  return normalized === "" ? null : `conversation:${normalized}`;
+}
+
 function normalizationError(code) {
   const error = new Error(code);
   error.code = code;

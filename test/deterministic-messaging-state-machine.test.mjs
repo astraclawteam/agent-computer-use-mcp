@@ -46,6 +46,41 @@ test("the Host-driven workflow commits the fixed role-based sequence and release
   assert.equal(host.actions.every(({ action }) => action.x === undefined && action.y === undefined), true);
 });
 
+test("an already exact search value advances without replaying text entry", async () => {
+  const host = createFixtureHost({
+    initialQuery: QUERY,
+    initialResultsVisible: true,
+  });
+  const machine = new DeterministicMessagingStateMachine({
+    host,
+    goal: { query: QUERY, message: MESSAGE },
+    pollIntervalMs: 1,
+  });
+
+  const result = await machine.run();
+
+  assert.equal(result.status, "committed");
+  assert.equal(host.actions.some(({ step }) => step === "enter-query"), false);
+  assert.equal(host.actions.filter(({ step }) => step === "select-result").length, 1);
+  assert.equal(host.releaseCalls, 1);
+});
+
+test("an already exact message draft advances without replaying text entry", async () => {
+  const host = createFixtureHost({ initialEditorValue: MESSAGE });
+  const machine = new DeterministicMessagingStateMachine({
+    host,
+    goal: { query: QUERY, message: MESSAGE },
+    pollIntervalMs: 1,
+  });
+
+  const result = await machine.run();
+
+  assert.equal(result.status, "committed");
+  assert.equal(host.actions.filter(({ step }) => step === "enter-message").length, 0);
+  assert.equal(host.actions.filter(({ step }) => step === "send").length, 1);
+  assert.equal(host.releaseCalls, 1);
+});
+
 test("the bounded LLM understands the goal and selects only from current Host candidates", async () => {
   const calls = [];
   const host = createFixtureHost({ candidateName: "林舟" });
@@ -72,6 +107,21 @@ test("the bounded LLM understands the goal and selects only from current Host ca
   assert.deepEqual(calls.map((call) => call.kind), ["understand-goal", "select-candidate"]);
   assert.equal(host.actions.filter(({ step }) => step === "select-result").length, 1);
   assert.equal(host.releaseCalls, 1);
+});
+
+test("a native owned-surface dismissal advances selection without a duplicate select observation", async () => {
+  const host = createFixtureHost({ selectDismissalReceipt: true });
+  const machine = new DeterministicMessagingStateMachine({
+    host,
+    goal: { query: QUERY, message: MESSAGE },
+    pollIntervalMs: 1,
+  });
+
+  const result = await machine.run();
+
+  assert.equal(result.status, "committed");
+  assert.equal(host.observedSteps.filter((step) => step === "select-result").length, 1);
+  assert.equal(host.observedSteps.includes("verify-conversation-title"), true);
 });
 
 test("an indeterminate action may trigger one LLM-chosen re-observation but never a replay", async () => {
@@ -102,6 +152,45 @@ test("an indeterminate action may trigger one LLM-chosen re-observation but neve
   });
   assert.equal(host.observedSteps.filter((step) => step === "failure-reobserve").length, 1);
   assert.equal(host.actions.filter(({ step }) => step === "select-result").length, 1);
+  assert.equal(host.releaseCalls, 1);
+});
+
+test("an indeterminate send commits only when fresh postconditions prove its effect", async () => {
+  const host = createFixtureHost({
+    failStep: "send",
+    failOutcome: "indeterminate",
+    failStepApplied: true,
+  });
+  const machine = new DeterministicMessagingStateMachine({
+    host,
+    goal: { query: QUERY, message: MESSAGE },
+    pollIntervalMs: 1,
+  });
+
+  const result = await machine.run();
+
+  assert.equal(result.status, "committed");
+  assert.equal(host.actions.filter(({ step }) => step === "send").length, 1);
+  assert.equal(host.observedSteps.includes("verify-new-bubble"), true);
+  assert.equal(host.releaseCalls, 1);
+});
+
+test("an indeterminate send with no proven effect terminates without replay", async () => {
+  const host = createFixtureHost({ failStep: "send", failOutcome: "indeterminate" });
+  const machine = new DeterministicMessagingStateMachine({
+    host,
+    goal: { query: QUERY, message: MESSAGE },
+    pollIntervalMs: 1,
+    stepTimeouts: { send: 20 },
+  });
+
+  await assert.rejects(machine.run(), (error) => {
+    assert.equal(error.code, "workflow.step_timeout");
+    assert.equal(error.step, "send");
+    assert.equal(error.outcome, "indeterminate");
+    return true;
+  });
+  assert.equal(host.actions.filter(({ step }) => step === "send").length, 1);
   assert.equal(host.releaseCalls, 1);
 });
 
@@ -252,6 +341,11 @@ test("conversation title verification never accepts matching chat-body text", as
     assert.equal(error.code, "workflow.step_timeout");
     assert.equal(error.step, "verify-conversation-title");
     assert.equal(error.outcome, "not-applied");
+    assert.equal(error.diagnostic.expectedConversationIdentity, "contact:fixture");
+    assert.equal(error.diagnostic.observedRoles["conversation-title"], 1);
+    assert.deepEqual(error.diagnostic.conversationTitles.map(({ semanticKey }) => semanticKey), [
+      "contact:other",
+    ]);
     return true;
   });
   assert.equal(host.actions.some(({ step }) => step === "focus-message-editor"), false);
@@ -370,10 +464,10 @@ function createFixtureHost(options = {}) {
   let version = 0;
   let foreground = false;
   let focusedRole = null;
-  let query = "";
-  let resultsVisible = false;
+  let query = options.initialQuery ?? "";
+  let resultsVisible = options.initialResultsVisible === true;
   let conversationVisible = false;
-  let editorValue = "";
+  let editorValue = options.initialEditorValue ?? "";
   let sent = false;
   let released = false;
   const actions = [];
@@ -421,6 +515,10 @@ function createFixtureHost(options = {}) {
         });
       }
       if (options.failStep === step) {
+        if (options.failStepApplied === true && step === "send") {
+          editorValue = "";
+          sent = true;
+        }
         return { outcome: options.failOutcome, status: options.failOutcome };
       }
       if (step === "restore-main-window") foreground = true;
@@ -439,6 +537,16 @@ function createFixtureHost(options = {}) {
       if (step === "send") {
         editorValue = "";
         sent = true;
+      }
+      if (step === "select-result" && options.selectDismissalReceipt === true) {
+        return {
+          outcome: "committed",
+          status: "committed",
+          result: {
+            verified: true,
+            postcondition: "related-surface-dismissed",
+          },
+        };
       }
       return { outcome: "committed", status: "committed" };
     },
@@ -523,10 +631,16 @@ function fixtureScene({
   if (conversationVisible) {
     add({ key: "conversation", type: "Container", role: "conversation", parentKey: "shell" });
     add({
+      key: "conversation-header",
+      type: "Container",
+      role: "conversation-header",
+      parentKey: "conversation",
+    });
+    add({
       key: "title",
       type: "ActionableItem",
       role: "conversation-title",
-      parentKey: "conversation",
+      parentKey: "conversation-header",
       name: wrongTitleWithMatchingBody ? "其他会话" : candidateName,
       semanticKey: wrongTitleWithMatchingBody ? "contact:other" : "contact:fixture",
     });

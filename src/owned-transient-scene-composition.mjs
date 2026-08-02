@@ -1,4 +1,7 @@
-import { normalizeRecognizedUiText } from "./ui-text-normalization.mjs";
+import {
+  conversationEntitySemanticKey,
+  normalizeRecognizedUiText,
+} from "./ui-text-normalization.mjs";
 
 const MAX_RESULT_LINE_HEIGHT = 96;
 
@@ -117,7 +120,7 @@ function searchResultElements({ surface, parentElementToken, coordinate }) {
       modelIdentity: { provider: "local-proposal-fusion", model: "owned-surface-som-ocr-v1" },
       actions: row.conflicting ? [] : ["click"],
       name,
-      semanticKey: `search-result:${normalizedName}`,
+      semanticKey: conversationEntitySemanticKey(normalizedName),
       confidence,
       proposalId: row.ownerId,
       pixelLimitedAction: true,

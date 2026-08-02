@@ -1589,6 +1589,60 @@ test("CuaDriverMcpDriver falls back to exact-HWND PrintWindow capture after boun
   assert.deepEqual(await readFile(outputPath), png);
 });
 
+test("CuaDriverMcpDriver can prefer exact-HWND capture for a main-window-only verification", async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), "cua-driver-native-main-preferred-"));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const outputPath = join(directory, "window.png");
+  const png = Buffer.alloc(24);
+  Buffer.from("89504e470d0a1a0a", "hex").copy(png, 0);
+  png.write("IHDR", 12, "ascii");
+  png.writeUInt32BE(642, 16);
+  png.writeUInt32BE(482, 20);
+  let screenshotCalls = 0;
+  let nativeCalls = 0;
+  const driver = new CuaDriverMcpDriver({
+    client: {
+      async start() {},
+      async callTool(name) {
+        if (name === "get_window_state") screenshotCalls += 1;
+        return { status: "ok" };
+      },
+    },
+    async mainWindowCapture(_windowId, path) {
+      nativeCalls += 1;
+      await writeFile(path, png);
+      return {
+        status: "ok",
+        hwnd: 42,
+        processId: 1234,
+        method: "PrintWindow",
+        x: 10,
+        y: 20,
+        width: 642,
+        height: 482,
+      };
+    },
+  });
+
+  const capture = await driver.captureScreenshot({
+    window: {
+      windowId: 42,
+      title: "Native preferred",
+      pid: 1234,
+      bounds: { x: 10, y: 20, width: 642, height: 482 },
+    },
+    outputPath,
+    includeRelatedSurfaces: false,
+    preferNativeMainCapture: true,
+  });
+
+  assert.equal(screenshotCalls, 0);
+  assert.equal(nativeCalls, 1);
+  assert.equal(capture.method, "PrintWindow");
+  assert.equal(capture.relatedSurfaces, undefined);
+  assert.deepEqual(await readFile(outputPath), png);
+});
+
 test("CuaDriverMcpDriver reports a capture error instead of exposing a missing path", async (t) => {
   const directory = await mkdtemp(join(tmpdir(), "cua-driver-missing-png-"));
   t.after(() => rm(directory, { recursive: true, force: true }));

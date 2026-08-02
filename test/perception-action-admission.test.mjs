@@ -397,6 +397,68 @@ test("a non-editable click cannot reuse the latest text-entry surface as a resul
   assert.equal(admitted.allowed, true);
 });
 
+test("an independently grounded control remains actionable inside its owning editable surface", () => {
+  const value = observation({
+    observationId: "message-editor-with-control",
+    source: "window-capture",
+    expiresAt: 1_000,
+    capture: { width: 960, height: 720 },
+  });
+  const recentEditableTarget = {
+    controllerId: "controller-1",
+    windowId: "window-1",
+    bounds: { x: 320, y: 580, width: 620, height: 140 },
+    expiresAtMs: 1_000,
+  };
+  const controlBounds = { x: 850, y: 650, width: 80, height: 36 };
+  const control = fusedElement({
+    role: "primary-action",
+    bounds: controlBounds,
+    sourceRegion: recentEditableTarget.bounds,
+  });
+  const controlAction = action({
+    kind: "click",
+    observationId: "message-editor-with-control",
+    coordinateSpace: "window-local",
+    interactionIntent: "activate-control",
+    targetRole: "primary-action",
+    targetBounds: controlBounds,
+    x: 890,
+    y: 668,
+  });
+
+  assert.equal(admitPerceptionAction({
+    observation: value,
+    element: control,
+    recentEditableTarget,
+    action: controlAction,
+    now: 100,
+  }).allowed, true);
+  assert.equal(admitPerceptionAction({
+    observation: value,
+    element: null,
+    recentEditableTarget,
+    action: controlAction,
+    now: 100,
+  }).code, "target.overlaps_recent_editable_surface");
+  assert.equal(admitPerceptionAction({
+    observation: value,
+    element: fusedElement({
+      role: "primary-action",
+      bounds: recentEditableTarget.bounds,
+      sourceRegion: recentEditableTarget.bounds,
+    }),
+    recentEditableTarget,
+    action: {
+      ...controlAction,
+      targetBounds: recentEditableTarget.bounds,
+      x: 630,
+      y: 650,
+    },
+    now: 100,
+  }).code, "target.overlaps_recent_editable_surface");
+});
+
 test("editable pixel clicks require explicit focus intent", () => {
   const decision = admitPerceptionAction({
     observation: observation({
@@ -769,13 +831,18 @@ test("Host derives a main-window editable focus click from its pixel Scene eleme
   assert.equal(bound.derivedInteractionPoint, "target-bounds-center");
 });
 
-test("owned transient Scene actions translate related-screenshot geometry into the controller window", async (t) => {
+test("owned transient selection translates its click and verifies from a full controller-window Scene", async (t) => {
   const clicks = [];
+  const captures = [];
   const router = new ComputerUseProviderRouter({
+    ocrSession: {},
     driver: {
       async click(input) {
         clicks.push(input);
-        return { status: "ok", verified: true };
+        return { status: "ok", effect: "applied", verified: false };
+      },
+      async captureScreenshot() {
+        throw new Error("captureOperation is stubbed by this test");
       },
     },
   });
@@ -849,6 +916,34 @@ test("owned transient Scene actions translate related-screenshot geometry into t
     }],
   });
   const target = router.lastCapture.scene.elements.find((element) => element.role === "search-result");
+  const beforeVersion = router.lastCapture.scene.observationVersion;
+  router.captureOperation = async (args) => {
+    captures.push(args);
+    return {
+      observationId: "conversation-after-owned-selection",
+      scene: {
+        observationId: "conversation-after-owned-selection",
+        observationVersion: beforeVersion + 1,
+        elements: [{
+          id: "conversation",
+          type: "Container",
+          role: "conversation",
+          parentId: "main-window",
+        }, {
+          id: "header",
+          type: "Container",
+          role: "conversation-header",
+          parentId: "conversation",
+        }, {
+          id: "title",
+          type: "ActionableItem",
+          role: "conversation-title",
+          parentId: "header",
+          name: "联系人甲",
+        }],
+      },
+    };
+  };
 
   const result = await router.act({
     action: { kind: "click", elementId: target.id, interactionIntent: "select-item" },
@@ -859,6 +954,9 @@ test("owned transient Scene actions translate related-screenshot geometry into t
   assert.equal(clicks[0].window, router.activeController.window);
   assert.deepEqual({ x: clicks[0].x, y: clicks[0].y }, { x: 153, y: 137 });
   assert.equal(clicks[0].relatedWindowId, "77");
+  assert.equal(captures.length, 1);
+  assert.deepEqual(captures[0].crop, { x: 0, y: 0, width: 954, height: 724 });
+  assert.equal(captures[0].effectHintRegion, undefined);
 });
 
 test("owned result selection is verified only by a newer matching header-owned conversation title", () => {
@@ -2666,6 +2764,422 @@ test("indeterminate pixel text entry automatically returns target-local OCR evid
   );
   assert.equal(typed.result.verificationRequired, "satisfied_by_post_action_capture");
   assert.match(typed.result.nextAction, /actionable element from this Scene/u);
+});
+
+test("role-owned replace-all verifies only its editable region and excludes transient surfaces", async (t) => {
+  const captures = [];
+  const router = new ComputerUseProviderRouter({
+    ocrSession: {},
+    driver: {
+      async typeText() {
+        return {
+          status: "ok",
+          effect: "possibly_applied",
+          verified: false,
+          focusVerified: true,
+          changeSignalDelivered: true,
+        };
+      },
+      async captureScreenshot() {
+        throw new Error("captureOperation is stubbed by this test");
+      },
+    },
+  });
+  t.after(() => router.close());
+  router.activeController = {
+    controllerId: "controller-1",
+    tier: "full",
+    window: {
+      id: "window-1",
+      windowId: "window-1",
+      title: "Fixture",
+      pid: 100,
+      bounds: { width: 952, height: 722 },
+    },
+    expiresAtMs: Date.now() + 60_000,
+  };
+  router.lastCapture = router.createActionObservation({
+    ...observation({
+      observationId: "role-owned-search-before",
+      source: "window-capture",
+      expiresAt: Date.now() + 5_000,
+      capture: { width: 952, height: 722 },
+    }),
+    coordinateBounds: { x: 0, y: 0, width: 952, height: 722 },
+    elements: [fusedElement({
+      hostType: "Editable",
+      elementToken: "role-owned-search",
+      role: "search",
+      bounds: { x: 60, y: 40, width: 200, height: 40 },
+      sourceRegion: { x: 60, y: 40, width: 200, height: 40 },
+      actions: ["click", "type_text"],
+      state: { focused: true, valueBounds: { x: 88, y: 40, width: 136, height: 40 } },
+    })],
+  });
+  const search = router.lastCapture.scene.elements.find((element) => element.role === "search");
+  router.captureOperation = async (args) => {
+    captures.push(args);
+    return {
+      observationId: "role-owned-search-after",
+      mutationVerification: { status: "confirmed", method: "exact-observed-value" },
+      scene: router.lastCapture.scene,
+    };
+  };
+
+  const typed = await router.act({
+    action: {
+      kind: "type_text",
+      elementId: search.id,
+      value: "联系人甲",
+      textMode: "replace-all",
+      inputBehavior: "commit",
+    },
+  });
+
+  assert.equal(typed.outcome, "committed");
+  assert.equal(captures.length, 1);
+  assert.deepEqual(captures[0].crop, { x: 88, y: 40, width: 136, height: 40 });
+  assert.equal(captures[0].includeChangedRegionAlongsideCrop, false);
+  assert.equal(captures[0].includeRelatedSurfaces, false);
+  assert.equal(captures[0].preferNativeMainCapture, true);
+});
+
+test("idempotent replace-all accepts a fresh exact postcondition that existed before delivery", async (t) => {
+  const query = "Y-大风";
+  const searchBounds = { x: 60, y: 40, width: 200, height: 40 };
+  const router = new ComputerUseProviderRouter({
+    ocrSession: {},
+    driver: {
+      async typeText() {
+        return {
+          status: "ok",
+          effect: "possibly_applied",
+          verified: false,
+          focusVerified: true,
+          changeSignalDelivered: true,
+        };
+      },
+      async captureScreenshot() {
+        throw new Error("captureOperation is stubbed by this test");
+      },
+    },
+  });
+  t.after(() => router.close());
+  router.activeController = {
+    controllerId: "controller-1",
+    tier: "full",
+    window: {
+      id: "window-1",
+      windowId: "window-1",
+      title: "Fixture",
+      pid: 100,
+      bounds: { width: 952, height: 722 },
+    },
+    expiresAtMs: Date.now() + 60_000,
+  };
+  router.lastCapture = router.createActionObservation({
+    ...observation({
+      observationId: "verified-scene-before",
+      source: "window-capture",
+      expiresAt: Date.now() + 5_000,
+      capture: { width: 952, height: 722 },
+    }),
+    coordinateBounds: { x: 0, y: 0, width: 952, height: 722 },
+    elements: [
+      ocrElement({
+        elementToken: "preexisting-query-ocr",
+        name: query,
+        value: query,
+        bounds: { x: 92, y: 47, width: 54, height: 24 },
+        sourceRegion: { x: 92, y: 47, width: 54, height: 24 },
+      }),
+      fusedElement({
+        hostType: "Editable",
+        elementToken: "verified-scene-search-before",
+        role: "search",
+        bounds: searchBounds,
+        sourceRegion: searchBounds,
+        actions: ["click", "type_text"],
+        value: "",
+        state: { focused: true },
+      }),
+    ],
+  });
+  const search = router.lastCapture.scene.elements.find((element) => element.role === "search");
+  router.captureOperation = async () => {
+    const observed = router.createActionObservation({
+      ...observation({
+        observationId: "verified-scene-after",
+        source: "window-capture",
+        expiresAt: Date.now() + 5_000,
+        capture: { width: 952, height: 722 },
+      }),
+      coordinateBounds: { x: 0, y: 0, width: 952, height: 722 },
+      localObservation: {
+        source: "ocr",
+        elements: [
+          ocrElement({
+            elementToken: "verified-query-ocr",
+            name: query,
+            value: query,
+            bounds: { x: 92, y: 47, width: 54, height: 24 },
+            sourceRegion: { x: 92, y: 47, width: 54, height: 24 },
+          }),
+          fusedElement({
+            hostType: "Editable",
+            elementToken: "verified-scene-search-after",
+            role: "search",
+            bounds: searchBounds,
+            sourceRegion: searchBounds,
+            actions: ["click", "type_text"],
+            value: "",
+            state: { focused: true },
+          }),
+        ],
+      },
+    });
+    router.reconcilePendingTextFocus(observed);
+    return observed;
+  };
+
+  const typed = await router.act({
+    action: {
+      kind: "type_text",
+      elementId: search.id,
+      value: query,
+      textMode: "replace-all",
+      inputBehavior: "commit",
+    },
+  });
+
+  assert.equal(typed.outcome, "committed");
+  assert.equal(typed.capture.mutationVerification.status, "confirmed");
+  const returnedSearch = typed.capture.scene.elements.filter((element) => (
+    element.type === "Editable" && element.role === "search"
+  ));
+  assert.equal(returnedSearch.length, 1);
+  assert.equal(returnedSearch[0].evidenceConsistency, "consistent");
+  assert.equal(returnedSearch[0].value, query);
+  assert.deepEqual(returnedSearch[0].state.valueBounds, {
+    x: 92,
+    y: 47,
+    width: 54,
+    height: 24,
+  });
+});
+
+test("native read-back commits an exact replace-all value into the same returned Host Scene", async (t) => {
+  const query = "Y-大风";
+  const searchBounds = { x: 60, y: 40, width: 200, height: 40 };
+  const router = new ComputerUseProviderRouter({
+    driver: {
+      async typeText() {
+        return {
+          status: "ok",
+          effect: "verified",
+          verified: true,
+          focusVerified: true,
+        };
+      },
+    },
+  });
+  t.after(() => router.close());
+  router.activeController = {
+    controllerId: "controller-1",
+    tier: "full",
+    window: {
+      id: "window-1",
+      windowId: "window-1",
+      title: "Fixture",
+      pid: 100,
+      bounds: { width: 952, height: 722 },
+    },
+    expiresAtMs: Date.now() + 60_000,
+  };
+  router.lastCapture = router.createActionObservation({
+    ...observation({
+      observationId: "native-read-back-before",
+      source: "window-capture",
+      expiresAt: Date.now() + 5_000,
+      capture: { width: 952, height: 722 },
+    }),
+    coordinateBounds: { x: 0, y: 0, width: 952, height: 722 },
+    elements: [fusedElement({
+      hostType: "Editable",
+      elementToken: "native-read-back-search-before",
+      role: "search",
+      bounds: searchBounds,
+      sourceRegion: searchBounds,
+      actions: ["click", "type_text"],
+      value: "",
+      state: { focused: true },
+    })],
+  });
+  const search = router.lastCapture.scene.elements.find((element) => element.role === "search");
+  router.captureOperation = async () => router.createActionObservation({
+    ...observation({
+      observationId: "native-read-back-after",
+      source: "window-capture",
+      expiresAt: Date.now() + 5_000,
+      capture: { width: 952, height: 722 },
+    }),
+    coordinateBounds: { x: 0, y: 0, width: 952, height: 722 },
+    localObservation: {
+      source: "ocr",
+      elements: [fusedElement({
+        hostType: "Editable",
+        elementToken: "native-read-back-search-after",
+        role: "search",
+        bounds: searchBounds,
+        sourceRegion: searchBounds,
+        actions: ["click", "type_text"],
+        value: "",
+        state: { focused: true },
+      })],
+    },
+  });
+
+  const typed = await router.act({
+    action: {
+      kind: "type_text",
+      elementId: search.id,
+      value: query,
+      textMode: "replace-all",
+      inputBehavior: "commit",
+      captureAfter: true,
+    },
+  });
+
+  assert.equal(typed.outcome, "committed");
+  const returnedSearch = typed.capture.scene.elements.filter((element) => (
+    element.type === "Editable" && element.role === "search"
+  ));
+  assert.equal(returnedSearch.length, 1);
+  assert.equal(returnedSearch[0].value, query);
+  assert.equal(returnedSearch[0].state.valueObserved, true);
+  assert.equal(returnedSearch[0].state.valueVerification, "native-read-back");
+});
+
+test("replace-all falls back to the full owned editable when compact OCR clips the value", async (t) => {
+  const query = "Y-大风";
+  const searchBounds = { x: 68, y: 37, width: 192, height: 38 };
+  const captures = [];
+  const router = new ComputerUseProviderRouter({
+    ocrSession: {},
+    driver: {
+      async typeText() {
+        return {
+          status: "ok",
+          effect: "possibly_applied",
+          verified: false,
+          focusVerified: true,
+          changeSignalDelivered: true,
+        };
+      },
+      async captureScreenshot() {
+        throw new Error("captureOperation is stubbed by this test");
+      },
+    },
+  });
+  t.after(() => router.close());
+  router.activeController = {
+    controllerId: "controller-1",
+    tier: "full",
+    window: {
+      id: "window-1",
+      windowId: "window-1",
+      title: "Fixture",
+      pid: 100,
+      bounds: { width: 952, height: 722 },
+    },
+    expiresAtMs: Date.now() + 60_000,
+  };
+  router.lastCapture = router.createActionObservation({
+    ...observation({
+      observationId: "full-editable-before",
+      source: "window-capture",
+      expiresAt: Date.now() + 5_000,
+      capture: { width: 952, height: 722 },
+    }),
+    coordinateBounds: { x: 0, y: 0, width: 952, height: 722 },
+    elements: [fusedElement({
+      hostType: "Editable",
+      elementToken: "full-editable-search-before",
+      role: "search",
+      bounds: searchBounds,
+      sourceRegion: searchBounds,
+      actions: ["click", "type_text"],
+      value: "",
+      state: {
+        focused: true,
+        valueBounds: { x: 97, y: 37, width: 121, height: 38 },
+      },
+    })],
+  });
+  const search = router.lastCapture.scene.elements.find((element) => element.role === "search");
+  router.captureOperation = async (args) => {
+    captures.push(args);
+    if (captures.length < 3) {
+      return {
+        observationId: `compact-clipped-${captures.length}`,
+        mutationVerification: { status: "not-confirmed" },
+        scene: router.lastCapture.scene,
+      };
+    }
+    const observed = router.createActionObservation({
+      ...observation({
+        observationId: "full-editable-after",
+        source: "window-capture",
+        expiresAt: Date.now() + 5_000,
+        capture: { width: 952, height: 722 },
+      }),
+      coordinateBounds: { x: 0, y: 0, width: 952, height: 722 },
+      localObservation: {
+        source: "ocr",
+        elements: [
+          ocrElement({
+            elementToken: "decorated-query-ocr",
+            name: `Q ${query}`,
+            value: `Q ${query}`,
+            bounds: { x: 74, y: 41, width: 82, height: 31 },
+            sourceRegion: { x: 74, y: 41, width: 82, height: 31 },
+          }),
+          fusedElement({
+            hostType: "Editable",
+            elementToken: "full-editable-search-after",
+            role: "search",
+            bounds: searchBounds,
+            sourceRegion: searchBounds,
+            actions: ["click", "type_text"],
+            value: "",
+            state: { focused: true },
+          }),
+        ],
+      },
+    });
+    router.reconcilePendingTextFocus(observed);
+    return observed;
+  };
+
+  const typed = await router.act({
+    action: {
+      kind: "type_text",
+      elementId: search.id,
+      value: query,
+      textMode: "replace-all",
+      inputBehavior: "commit",
+    },
+  });
+
+  assert.equal(captures.length, 3);
+  assert.deepEqual(captures[2].crop, searchBounds);
+  assert.equal(captures[2].includeChangedRegionAlongsideCrop, false);
+  assert.equal(typed.outcome, "committed");
+  assert.equal(typed.capture.mutationVerification.status, "confirmed");
+  assert.equal(
+    typed.capture.scene.elements.find((element) => element.role === "search")?.value,
+    query,
+  );
 });
 
 test("Host preserves a requested transient list click without rewriting it to Enter", async (t) => {

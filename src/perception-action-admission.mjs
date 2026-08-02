@@ -50,7 +50,8 @@ export function admitPerceptionAction({
     if (action.kind === "click"
       && action.targetRole !== "editable"
       && isRecentEditableTarget(recentEditableTarget, action, now)
-      && pointWithinBox(action, recentEditableTarget.bounds)) {
+      && pointWithinBox(action, recentEditableTarget.bounds)
+      && !isIndependentlyGroundedControl(element, action, recentEditableTarget.bounds)) {
       return denied("target.overlaps_recent_editable_surface", {
         reason: "The proposed non-editable click lands inside the editable surface used by the latest text entry, so it cannot select a result, menu item, or independent control.",
         targetRole: action.targetRole ?? null,
@@ -176,6 +177,35 @@ function pointWithinBox(action, box) {
     && action.x < box.x + box.width
     && action.y >= box.y
     && action.y < box.y + box.height;
+}
+
+function isIndependentlyGroundedControl(element, action, editableBounds) {
+  if (action.interactionIntent !== "activate-control"
+    || !isRecord(element)
+    || element.pixelLimitedAction !== true
+    || element.source !== "local-proposal-fusion"
+    || element.role !== action.targetRole
+    || !Array.isArray(element.actions)
+    || !element.actions.includes("click")
+    || !sameBox(element.bounds, action.targetBounds)
+    || !isBox(editableBounds)
+    || (element.bounds.width * element.bounds.height)
+      > (editableBounds.width * editableBounds.height * 0.35)) {
+    return false;
+  }
+  const providers = new Set((Array.isArray(element.support) ? element.support : [])
+    .map((entry) => entry?.provider)
+    .filter((provider) => typeof provider === "string" && provider.trim() !== ""));
+  return providers.size >= 2;
+}
+
+function sameBox(left, right) {
+  return isBox(left)
+    && isBox(right)
+    && left.x === right.x
+    && left.y === right.y
+    && left.width === right.width
+    && left.height === right.height;
 }
 
 function coordinatesWithinObservation(action, observation) {

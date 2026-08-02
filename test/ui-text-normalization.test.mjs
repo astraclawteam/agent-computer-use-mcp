@@ -4,7 +4,11 @@ import { test } from "node:test";
 
 import { normalizeOcrSidecarResponse } from "../src/ocr-sidecar.mjs";
 import { normalizeUiText } from "../src/perception-benchmark-metrics.mjs";
-import { UI_TEXT_NORMALIZATION_VERSION, normalizeRecognizedUiText } from "../src/ui-text-normalization.mjs";
+import {
+  UI_TEXT_NORMALIZATION_VERSION,
+  conversationEntitySemanticKey,
+  normalizeRecognizedUiText,
+} from "../src/ui-text-normalization.mjs";
 
 test("UI text normalization is deterministic across Unicode and whitespace forms", () => {
   assert.equal(UI_TEXT_NORMALIZATION_VERSION, "ui-text-v1");
@@ -17,6 +21,11 @@ test("normalization preserves meaningful punctuation and never performs fuzzy co
   assert.equal(normalizeRecognizedUiText("Svae... [A/B]", { languageClass: "english" }), "Svae... [A/B]");
   assert.equal(normalizeRecognizedUiText("轨道 A1 - 02:30", { languageClass: "mixed" }), "轨道 A1 - 02:30");
   assert.notEqual(normalizeRecognizedUiText("Svae", { languageClass: "english" }), "Save");
+});
+
+test("conversation entity identity is role-independent and exact", () => {
+  assert.equal(conversationEntitySemanticKey("  Y-大风\u200B "), "conversation:y-大风");
+  assert.equal(conversationEntitySemanticKey(""), null);
 });
 
 test("runtime OCR and benchmark metrics share the same normalizer", () => {

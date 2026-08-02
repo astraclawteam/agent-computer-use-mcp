@@ -354,14 +354,27 @@ export async function runDeterministicMessagingTool(router, args = {}, requestCo
     let lastObservedStep = null;
     machine = new DeterministicMessagingStateMachine({
       host: {
-        observe: async ({ step, signal }) => {
+        observe: async ({ step, signal, requiredRole }) => {
           if (signal?.aborted) throw signal.reason ?? new DOMException("Aborted", "AbortError");
-          if (latestScene && (latestScenePending || step !== lastObservedStep)) {
+          const requiresSendRoleRefresh = requiredRole === "send"
+            && !hasUniqueConsistentSceneRole(latestScene, "send");
+          if (latestScene && !requiresSendRoleRefresh && (latestScenePending || step !== lastObservedStep)) {
             latestScenePending = false;
             lastObservedStep = step;
             return latestScene;
           }
-          const observation = await router.capture({ mode: "screenshot", requestContext });
+          const refinement = requiresSendRoleRefresh
+            && typeof router.refineLatestScreenshotScene === "function"
+            ? await router.refineLatestScreenshotScene({
+                messagingSceneIntent: "send",
+                requestContext,
+              })
+            : null;
+          const observation = refinement ?? await router.capture({
+            mode: "screenshot",
+            requestContext,
+            ...(requiresSendRoleRefresh ? { messagingSceneIntent: "send" } : {}),
+          });
           latestScene = observation.scene;
           latestScenePending = false;
           lastObservedStep = step;
@@ -429,6 +442,7 @@ export async function runDeterministicMessagingTool(router, args = {}, requestCo
       error: {
         code: error?.code ?? "workflow.host_failure",
         message: error instanceof Error ? error.message : "The deterministic messaging workflow failed.",
+        ...(error?.diagnostic ? { diagnostic: error.diagnostic } : {}),
       },
     });
   }
@@ -541,6 +555,14 @@ function prunePendingMessagingSelections(now) {
 
 function normalizeMessagingText(value) {
   return String(value ?? "").normalize("NFKC").trim().toLocaleLowerCase();
+}
+
+function hasUniqueConsistentSceneRole(scene, role) {
+  return Array.isArray(scene?.elements)
+    && scene.elements.filter((element) => (
+      element?.role === role
+      && element.evidenceConsistency === "consistent"
+    )).length === 1;
 }
 
 function sameMessagingCandidate(left, right) {

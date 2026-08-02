@@ -39,7 +39,9 @@ const STEP_DEFINITIONS = [
   {
     id: "select-result",
     preconditions: ["exactly one stable actionable result semantically matches the query"],
-    postconditions: ["a conversation Container is visible in a newer Scene"],
+    postconditions: [
+      "the exact owned result surface is natively dismissed or a conversation Container is visible in a newer Scene",
+    ],
   },
   {
     id: "verify-conversation-title",
@@ -108,6 +110,7 @@ export class DeterministicMessagingStateMachine {
   #baselineMatchingBubbleCount = 0;
   #sendObservationVersion = null;
   #decisionPort = null;
+  #lastSceneDiagnostic = null;
 
   constructor({
     host,
@@ -336,6 +339,7 @@ export class DeterministicMessagingStateMachine {
       state: { focused: true },
       step: "enter-query",
     });
+    if (search.value === this.#goal.query) return;
     await this.#act("enter-query", textAction(search.id, this.#goal.query), signal);
     await this.#observeUntil({
       step: "enter-query",
@@ -428,11 +432,17 @@ export class DeterministicMessagingStateMachine {
     }
     this.#selectedIdentity = typeof selected.semanticKey === "string" ? selected.semanticKey : null;
     this.#selectedLabel = elementText(selected);
-    await this.#act("select-result", {
+    const receipt = await this.#act("select-result", {
       kind: "click",
       elementId: selected.id,
       interactionIntent: "select-item",
     }, signal);
+    if ((receipt?.outcome === "committed" || receipt?.status === "committed")
+      && receipt?.result?.verified === true
+      && receipt.result.postcondition === "related-surface-dismissed") {
+      this.#inFlightMutation = false;
+      return;
+    }
     await this.#observeUntil({
       step: "select-result",
       signal,
@@ -443,18 +453,43 @@ export class DeterministicMessagingStateMachine {
   }
 
   async #verifyConversationTitle(signal) {
-    await this.#observeUntil({
+    const verified = await this.#observeUntil({
       step: "verify-conversation-title",
       signal,
       predicate: (scene) => {
         const conversation = findUniqueElement(scene, { type: "Container", role: "conversation" });
         if (!conversation) return false;
-        const title = findUniqueElement(scene, { role: "conversation-title", ownerId: conversation.id });
+        const header = findUniqueElement(scene, {
+          type: "Container",
+          role: "conversation-header",
+          ownerId: conversation.id,
+        });
+        if (!header) return false;
+        const title = findUniqueElement(scene, {
+          role: "conversation-title",
+          ownerId: header.id,
+        });
         if (!title) return false;
         if (this.#selectedIdentity !== null) return title.semanticKey === this.#selectedIdentity;
         return normalizeText(elementText(title)) === normalizeText(this.#selectedLabel);
       },
     });
+    const conversation = requireUniqueElement(verified, {
+      type: "Container",
+      role: "conversation",
+      step: "verify-conversation-title",
+    });
+    const transcript = requireUniqueElement(verified, {
+      type: "Container",
+      role: "transcript",
+      ownerId: conversation.id,
+      step: "verify-conversation-title",
+    });
+    this.#baselineMatchingBubbleCount = matchingSelfBubbleCount(
+      verified,
+      transcript.id,
+      this.#goal.message,
+    );
   }
 
   async #focusMessageEditor(signal) {
@@ -495,6 +530,7 @@ export class DeterministicMessagingStateMachine {
       state: { focused: true },
       step: "enter-message",
     });
+    if (editor.value === this.#goal.message) return;
     await this.#act("enter-message", textAction(editor.id, this.#goal.message), signal);
     await this.#observeUntil({
       step: "enter-message",
@@ -507,14 +543,8 @@ export class DeterministicMessagingStateMachine {
   }
 
   async #send(signal) {
-    const before = await this.#observe("send", signal);
+    const before = await this.#observe("send", signal, { requiredRole: "send" });
     const conversation = requireUniqueElement(before, { type: "Container", role: "conversation", step: "send" });
-    const transcript = requireUniqueElement(before, {
-      type: "Container",
-      role: "transcript",
-      ownerId: conversation.id,
-      step: "send",
-    });
     const editor = requireUniqueElement(before, {
       type: "Editable",
       role: "message-editor",
@@ -531,13 +561,12 @@ export class DeterministicMessagingStateMachine {
       ownerId: conversation.id,
       step: "send",
     });
-    this.#baselineMatchingBubbleCount = matchingSelfBubbleCount(before, transcript.id, this.#goal.message);
     this.#sendObservationVersion = before.observationVersion;
     await this.#act("send", {
       kind: "click",
       elementId: send.id,
       interactionIntent: "activate-control",
-    }, signal);
+    }, signal, { allowIndeterminatePostcondition: true });
     await this.#observeUntil({
       step: "send",
       signal,
@@ -568,10 +597,13 @@ export class DeterministicMessagingStateMachine {
     });
   }
 
-  async #observe(step, signal) {
+  async #observe(step, signal, { requiredRole } = {}) {
     assertNotAborted(signal, step, this.#inFlightMutation);
-    const scene = await this.#host.observe({ step, signal });
+    const scene = await this.#host.observe({ step, signal, requiredRole });
     validateScene(scene, step);
+    this.#lastSceneDiagnostic = workflowSceneDiagnostic(scene, {
+      expectedConversationIdentity: this.#selectedIdentity,
+    });
     return scene;
   }
 
@@ -584,7 +616,7 @@ export class DeterministicMessagingStateMachine {
     }
   }
 
-  async #act(step, action, signal) {
+  async #act(step, action, signal, { allowIndeterminatePostcondition = false } = {}) {
     assertNotAborted(signal, step, false);
     this.#inFlightMutation = true;
     const receipt = await this.#host.act({ step, action: Object.freeze({ ...action }), signal });
@@ -596,6 +628,9 @@ export class DeterministicMessagingStateMachine {
         step,
         outcome: "indeterminate",
       });
+    }
+    if (outcome === "indeterminate" && allowIndeterminatePostcondition) {
+      return receipt;
     }
     if (outcome !== "committed") {
       this.#inFlightMutation = outcome === "indeterminate";
@@ -631,6 +666,7 @@ export class DeterministicMessagingStateMachine {
           step: step.id,
           outcome: this.#inFlightMutation ? "indeterminate" : "not-applied",
         });
+        error.diagnostic = this.#lastSceneDiagnostic;
         reject(error);
         controller.abort(error);
       }, timeoutMs);
@@ -848,6 +884,28 @@ function elementText(element) {
 
 function normalizeText(value) {
   return String(value ?? "").normalize("NFKC").trim().toLocaleLowerCase();
+}
+
+function workflowSceneDiagnostic(scene, { expectedConversationIdentity = null } = {}) {
+  const observedRoles = {};
+  for (const element of scene.elements) {
+    observedRoles[element.role] = (observedRoles[element.role] ?? 0) + 1;
+  }
+  const conversationTitles = scene.elements
+    .filter((element) => element.role === "conversation-title")
+    .map((element) => ({
+      name: element.name ?? null,
+      semanticKey: element.semanticKey ?? null,
+      evidenceConsistency: element.evidenceConsistency,
+      parentId: element.parentId,
+    }));
+  return Object.freeze({
+    observationId: scene.observationId,
+    observationVersion: scene.observationVersion,
+    expectedConversationIdentity,
+    observedRoles: Object.freeze(observedRoles),
+    conversationTitles: Object.freeze(conversationTitles.map((title) => Object.freeze(title))),
+  });
 }
 
 function matchingSelfBubbleCount(scene, transcriptId, message) {

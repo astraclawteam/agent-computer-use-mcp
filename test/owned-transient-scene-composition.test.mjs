@@ -99,6 +99,10 @@ test("owned related screenshot composes a search-results surface and one exact d
   assert.equal(transient.parentElementToken, ownedWindow.elementToken);
   assert.equal(candidates.filter((candidate) => candidate.name === "联系人甲").length, 1);
   assert.equal(candidates.some((candidate) => candidate.name.includes("包含联系人乙")), true);
+  assert.equal(
+    candidates.find((candidate) => candidate.name === "联系人甲").semanticKey,
+    "conversation:联系人甲",
+  );
   assert.deepEqual(candidates.find((candidate) => candidate.name === "联系人甲").coordinate, {
     screenshotId: "screenshot-1",
     windowId: "77",

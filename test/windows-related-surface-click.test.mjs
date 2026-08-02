@@ -15,8 +15,9 @@ test("related-surface click binds a foreground controller to one visible owned H
       queueMicrotask(() => {
         child.stdout.emit("data", Buffer.from(JSON.stringify({
           status: "ok",
-          effect: "applied",
-          verified: false,
+          effect: "verified",
+          verified: true,
+          postcondition: "related-surface-dismissed",
           deliveryPath: "windows-related-surface-click",
         })));
         child.emit("close", 0);
@@ -49,10 +50,13 @@ test("related-surface click binds a foreground controller to one visible owned H
   assert.match(script, /GetAncestor\(hit, GA_ROOT\) != surface/u);
   assert.match(script, /SetCursorPos\(x, y\)[\s\S]*Thread\.Sleep\(POINTER_SETTLE_MS\)/u);
   assert.match(script, /mouse_event\(MOUSEEVENTF_LEFTDOWN[\s\S]*CLICK_TRANSITION_MS[\s\S]*MOUSEEVENTF_LEFTUP/u);
+  assert.match(script, /!IsWindow\(surface\) \|\| !IsWindowVisible\(surface\)/u);
+  assert.match(script, /related-surface-dismissed/u);
   assert.deepEqual(result, {
     status: "ok",
-    effect: "applied",
-    verified: false,
+    effect: "verified",
+    verified: true,
+    postcondition: "related-surface-dismissed",
     deliveryPath: "windows-related-surface-click",
   });
 });

@@ -27,11 +27,11 @@ relationship, evidence consistency, action availability, and observed state.
 | `focus-search` | One clickable `Editable/search` belongs to the main window. | The search editable owns focus in a newer Scene. | 5 s | `enter-query` |
 | `enter-query` | The focused search editable allows `type_text`. | Its value exactly equals the requested query in a newer Scene. | 5 s | `wait-results-stable` |
 | `wait-results-stable` | A `TransientSurface/search-results` belongs to the main window. | The same owned actionable candidate identities occur in two consecutive Scenes. | 5 s | `select-result` |
-| `select-result` | Exactly one stable result has an exact normalized semantic label match. | A conversation container is visible in a newer Scene. | 5 s | `verify-conversation-title` |
+| `select-result` | Exactly one stable result has an exact normalized semantic label match. | The exact owned result surface is natively dismissed, or a conversation container is visible in a newer Scene; the next step still must verify the conversation title. | 5 s | `verify-conversation-title` |
 | `verify-conversation-title` | One title belongs to that conversation container. | Its semantic identity, or label when no semantic identity exists, matches the selected result. | 5 s | `focus-message-editor` |
 | `focus-message-editor` | One clickable message editor belongs to the conversation. | The editor owns focus in a newer Scene. | 5 s | `enter-message` |
 | `enter-message` | The focused editor allows `type_text`. | Its value exactly equals the requested message in a newer Scene. | 5 s | `send` |
-| `send` | The editor still has the exact draft; one clickable send item belongs to the conversation. | The action is committed and the editor is cleared in a newer Scene. | 5 s | `verify-new-bubble` |
+| `send` | The editor still has the exact draft; one clickable send item belongs to the conversation. | The action is committed, or one fresh post-action Scene proves both a cleared editor and a new exact self-authored bubble. An indeterminate click is never replayed. | 5 s | `verify-new-bubble` |
 | `verify-new-bubble` | One transcript belongs to the conversation. | A fresh self-authored exact-value bubble exists under that transcript. | 5 s | `release` |
 | `release` | A lease is held, or terminal cleanup is required. | Host returns a committed release receipt. | 2 s | none |
 
@@ -66,6 +66,22 @@ and is invalidated by the next observation.
 element tokens remain internal bindings and are not promoted into semantic
 identity. If no semantic key exists, the exact normalized visible label is used
 only for this deterministic exact-result phase.
+
+Exact editable values remain Host-owned postconditions. A verified native
+read-back is projected into the same returned Scene instead of creating a
+parallel value store. When native read-back is unavailable, one delivered
+`replace-all` mutation may be confirmed by a fresh exact OCR value inside the
+same editable even if that value was already present before the idempotent
+action. Insert mode still requires a newly observed occurrence.
+
+The send role is also composed inside the Host. OCR supplies the exact semantic
+label, pixels supply the control surface, and their evidence association must be
+explicit before the Scene exposes `ActionableItem/send`. If a fresh Scene lacks
+that role, the Host may refine the same unconsumed screenshot with a bounded
+editor OCR pass; it does not recapture the desktop, change coordinate versions,
+or let the model choose geometry. New-bubble verification compares against the
+full pre-send transcript baseline so a partial crop cannot turn an older bubble
+into a new one.
 
 ## Verification
 

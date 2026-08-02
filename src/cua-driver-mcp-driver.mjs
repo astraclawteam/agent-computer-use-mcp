@@ -462,7 +462,13 @@ export class CuaDriverMcpDriver {
     });
   }
 
-  captureScreenshot({ window, outputPath, timeoutMs = DEFAULT_SCREENSHOT_TIMEOUT_MS }) {
+  captureScreenshot({
+    window,
+    outputPath,
+    timeoutMs = DEFAULT_SCREENSHOT_TIMEOUT_MS,
+    includeRelatedSurfaces = true,
+    preferNativeMainCapture = false,
+  }) {
     return this.runWork(async (ticket) => {
       await this.ensureStartedResources(ticket);
       const request = {
@@ -480,7 +486,33 @@ export class CuaDriverMcpDriver {
       let result;
       let screenshot;
       let primaryCaptureMethod = "cua-driver-get_window_state";
-      for (let attempt = 0; attempt < 2; attempt += 1) {
+      if (preferNativeMainCapture === true && this.mainWindowCapture) {
+        const nativeCapture = await this.mainWindowCapture(window.windowId, outputPath, {
+          expectedProcessId: window.pid,
+          timeoutMs,
+        });
+        if (sameNativeWindowId(nativeCapture?.hwnd, window.windowId)
+          && Number(nativeCapture?.processId) === Number(window.pid)) {
+          screenshot = await readPngArtifact(outputPath, { attempts: 2 });
+          if (screenshot) {
+            primaryCaptureMethod = nativeCapture.method ?? "PrintWindow";
+            result = {
+              window: {
+                id: String(nativeCapture.hwnd),
+                title: nativeCapture.title ?? window.title,
+                pid: Number(nativeCapture.processId),
+                bounds: {
+                  x: nativeCapture.x,
+                  y: nativeCapture.y,
+                  width: nativeCapture.width,
+                  height: nativeCapture.height,
+                },
+              },
+            };
+          }
+        }
+      }
+      for (let attempt = 0; !screenshot && attempt < 2; attempt += 1) {
         result = await this.client.callTool("get_window_state", request, {
           timeoutMs,
           selectResult: selectWindowStateWithScreenshots,
@@ -518,7 +550,7 @@ export class CuaDriverMcpDriver {
         };
         throw error;
       }
-      const resultWindow = result.window ?? {};
+      const resultWindow = result?.window ?? {};
       const surfaceProvenance = verifyCaptureWindowIdentity(window, resultWindow);
       const reconciledWindow = reconcileReportedWindow(window, resultWindow);
       const reportedBounds = reconciledWindow.bounds;
@@ -560,7 +592,7 @@ export class CuaDriverMcpDriver {
         ...window,
         windowId: reconciledWindow.id,
       }], {
-        includeOwnedWindows: true,
+        includeOwnedWindows: includeRelatedSurfaces === true,
         processIds: [reconciledWindow.pid],
       });
       const nativeMainBounds = relationshipBoundsForWindow(
@@ -595,24 +627,28 @@ export class CuaDriverMcpDriver {
         ...reconciledWindow,
         bounds: nativeMainBounds,
       };
-      const driverRelatedSurfaces = await buildRelatedScreenshotCaptures({
-        result,
-        primaryScreenshot: screenshot,
-        requestedWindow: window,
-        reconciledWindow: reconciledNativeWindow,
-        outputPath,
-        windowRelationships: relatedWindowRelationships,
-      });
-      const nativeRelatedSurfaces = await captureMissingRelatedWindows({
-        relationships: relatedWindowRelationships,
-        existingCaptures: driverRelatedSurfaces,
-        mainBounds: nativeMainBounds ?? window?.bounds,
-        mainWindowId: String(reconciledWindow.id),
-        processId: reconciledWindow.pid,
-        outputPath,
-        captureWindow: this.relatedWindowCapture,
-        timeoutMs,
-      });
+      const driverRelatedSurfaces = includeRelatedSurfaces === true
+        ? await buildRelatedScreenshotCaptures({
+            result,
+            primaryScreenshot: screenshot,
+            requestedWindow: window,
+            reconciledWindow: reconciledNativeWindow,
+            outputPath,
+            windowRelationships: relatedWindowRelationships,
+          })
+        : [];
+      const nativeRelatedSurfaces = includeRelatedSurfaces === true
+        ? await captureMissingRelatedWindows({
+            relationships: relatedWindowRelationships,
+            existingCaptures: driverRelatedSurfaces,
+            mainBounds: nativeMainBounds ?? window?.bounds,
+            mainWindowId: String(reconciledWindow.id),
+            processId: reconciledWindow.pid,
+            outputPath,
+            captureWindow: this.relatedWindowCapture,
+            timeoutMs,
+          })
+        : [];
       this.assertWorkTicket(ticket);
       const relatedSurfaces = [...driverRelatedSurfaces, ...nativeRelatedSurfaces];
       if (relatedSurfaces.length > 0) capture.relatedSurfaces = relatedSurfaces;

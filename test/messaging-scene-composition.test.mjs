@@ -4,12 +4,14 @@ import test from "node:test";
 import {
   composeMessagingSceneElements,
   deduplicateVisualProposals,
+  detectSemanticControlSurfaceFromPixels,
   inferConversationVisualStructure,
   inferSearchVisualStructure,
   stableCompositionOcrElements,
 } from "../src/messaging-scene-composition.mjs";
 import { detectControlSurfaceFromPixels } from "../src/control-surface-detection.mjs";
 import { ComputerUseProviderRouter } from "../src/computer-use-provider-router.mjs";
+import { buildHostScene } from "../src/scene-region-ownership.mjs";
 
 const bounds = { x: 0, y: 0, width: 960, height: 720 };
 const searchOcr = {
@@ -87,6 +89,36 @@ test("current OCR supersedes stale text at the same owned region", () => {
   }), [currentValue]);
 });
 
+test("a stable high-confidence full label outranks a fresh strict OCR fragment", () => {
+  const fullTitle = {
+    ...searchOcr,
+    elementToken: "ocr-full-title",
+    name: "Y-大风",
+    value: "Y-大风",
+    bounds: { x: 317, y: 43, width: 57, height: 23 },
+    confidence: 0.998,
+  };
+  const fragment = {
+    ...fullTitle,
+    elementToken: "ocr-title-fragment",
+    name: "Y",
+    value: "Y",
+    bounds: { x: 317, y: 43, width: 14, height: 23 },
+    confidence: 0.995,
+  };
+
+  assert.deepEqual(stableCompositionOcrElements({
+    currentElements: [fragment],
+    previousElements: [fullTitle],
+    visualSceneStable: true,
+  }), [fullTitle]);
+  assert.deepEqual(stableCompositionOcrElements({
+    currentElements: [fullTitle],
+    previousElements: [fragment],
+    visualSceneStable: true,
+  }), [fullTitle]);
+});
+
 test("pixel evidence finds the enclosing control surface instead of reusing OCR glyph bounds", () => {
   const image = solidImage(320, 120, 240);
   fillRect(image, { x: 76, y: 38, width: 178, height: 36 }, 255);
@@ -108,6 +140,58 @@ test("pixel evidence samples just inside a rounded surface when wider offsets mi
     detectControlSurfaceFromPixels(image, searchOcr.bounds),
     shallowSurface,
   );
+});
+
+test("pixel evidence recovers a semantic control when upscaled OCR expands to its border", () => {
+  const image = solidImage(180, 90, 230);
+  const surface = { x: 80, y: 40, width: 50, height: 24 };
+  fillRect(image, surface, 250);
+  fillRect(image, { x: 88, y: 43, width: 34, height: 18 }, 20);
+  const expandedOcr = {
+    source: "ocr",
+    role: "text",
+    name: "发送",
+    value: "发送",
+    bounds: { x: 84, y: 40, width: 42, height: 24 },
+  };
+
+  assert.deepEqual(detectSemanticControlSurfaceFromPixels(image, expandedOcr), surface);
+});
+
+test("an exact semantic OCR-to-pixel association owns a control when both boxes share a border", () => {
+  const sendOcr = {
+    elementToken: "ocr-send-border",
+    role: "text",
+    name: "发送",
+    value: "发送",
+    bounds: { x: 879, y: 676, width: 40, height: 24 },
+    confidence: 0.99,
+    source: "ocr",
+    proposalId: "ocr-send-border",
+  };
+  const result = composeMessagingSceneElements({
+    coordinateBounds: bounds,
+    ocrElements: [sendOcr],
+    visualProposals: [
+      structuralProposal("conversation-pane", { x: 300, y: 30, width: 660, height: 690 }),
+      structuralProposal("conversation-header", { x: 300, y: 30, width: 660, height: 50 }),
+      structuralProposal("conversation-transcript", { x: 300, y: 80, width: 660, height: 500 }),
+      structuralProposal("message-editor", { x: 300, y: 580, width: 660, height: 140 }),
+      {
+        proposalId: "semantic-surface-border",
+        semanticOcrKey: "发送:879:676:40:24",
+        role: "region",
+        bounds: { x: 875, y: 676, width: 48, height: 24 },
+        confidence: 0.94,
+        source: "som-proposal",
+      },
+    ],
+  });
+
+  const send = result.elements.find((element) => element.role === "send");
+  assert.ok(send);
+  assert.deepEqual(send.bounds, { x: 875, y: 676, width: 48, height: 24 });
+  assert.deepEqual(send.actions, ["click"]);
 });
 
 test("pixel evidence accepts a shallow control with three grounded vertical padding pixels", () => {
@@ -264,7 +348,7 @@ test("owned layout separators plus header OCR and editor SOM compose one convers
     source: "som-proposal",
   };
   const sendSom = {
-    proposalId: "som-send",
+    proposalId: "semantic-surface-send",
     role: "region",
     bounds: { x: 850, y: 650, width: 80, height: 36 },
     confidence: 0.92,
@@ -298,10 +382,30 @@ test("owned layout separators plus header OCR and editor SOM compose one convers
     confidence: 0.99,
     source: "ocr",
   };
+  const draftOcr = {
+    elementToken: "ocr-message-draft",
+    role: "text",
+    name: "这是一条测试消息",
+    value: "这是一条测试消息",
+    bounds: { x: 320, y: 600, width: 128, height: 20 },
+    confidence: 0.99,
+    source: "ocr",
+    proposalId: "ocr-message-draft",
+  };
+  const editorBorderNoise = {
+    elementToken: "ocr-editor-border-noise",
+    role: "text",
+    name: "7",
+    value: "7",
+    bounds: { x: 923, y: 581, width: 20, height: 13 },
+    confidence: 0.2,
+    source: "ocr",
+    proposalId: "ocr-editor-border-noise",
+  };
   const structures = inferConversationVisualStructure({ pixels: image });
   const result = composeMessagingSceneElements({
     coordinateBounds: bounds,
-    ocrElements: [titleOcr, bubbleOcr, sendOcr],
+    ocrElements: [titleOcr, bubbleOcr, sendOcr, draftOcr, editorBorderNoise],
     visualProposals: [editorSom, bubbleSom, sendSom, ...structures],
   });
   const conversation = result.elements.find((element) => element.role === "conversation");
@@ -322,19 +426,88 @@ test("owned layout separators plus header OCR and editor SOM compose one convers
   assert.equal(transcript.parentElementToken, conversation.elementToken);
   assert.equal(title.parentElementToken, header.elementToken);
   assert.equal(title.name, "联系人甲");
+  assert.equal(title.semanticKey, "conversation:联系人甲");
   assert.equal(editor.parentElementToken, conversation.elementToken);
+  assert.equal(editor.value, "这是一条测试消息");
+  assert.equal(editor.state.valueObserved, true);
   assert.deepEqual(editor.actions, ["click", "type_text"]);
   assert.deepEqual(editor.support.map(({ provider }) => provider).sort(), [
+    "ocr",
     "som-proposal",
     "visual-structure",
   ]);
   assert.deepEqual(conversation.support.map(({ provider }) => provider).sort(), ["ocr", "visual-structure"]);
   assert.deepEqual(header.support.map(({ provider }) => provider).sort(), ["ocr", "visual-structure"]);
   assert.deepEqual(transcript.support.map(({ provider }) => provider).sort(), ["som-proposal", "visual-structure"]);
+  const scene = buildHostScene({
+    observationVersion: 1,
+    observation: {
+      observationId: "conversation-composition",
+      coordinateSpace: "window-local",
+      coordinateBounds: bounds,
+      surfaceReceipt: {
+        generation: 1,
+        screenshotId: "conversation-composition-shot",
+        windowId: "conversation-composition-window",
+      },
+      window: {
+        id: "conversation-composition-window",
+        title: "Fixture",
+        bounds,
+      },
+      elements: result.elements,
+    },
+  });
+  for (const element of [conversation, header, transcript]) {
+    const hostElement = scene.elements.find(
+      (candidate) => candidate.binding?.elementToken === element.elementToken,
+    );
+    assert.equal(hostElement.evidenceConsistency, "consistent");
+  }
   assert.equal(send.parentElementToken, conversation.elementToken);
   assert.deepEqual(send.actions, ["click"]);
   assert.equal(bubble.parentElementToken, transcript.elementToken);
   assert.equal(bubble.state.authoredBySelf, true);
+});
+
+test("a broad SOM region cannot masquerade as the role-owned send control", () => {
+  const image = solidImage(960, 720, 230);
+  fillRect(image, { x: 301, y: 0, width: 659, height: 720 }, 250);
+  fillRect(image, { x: 301, y: 32, width: 659, height: 1 }, 170);
+  fillRect(image, { x: 301, y: 80, width: 659, height: 1 }, 170);
+  fillRect(image, { x: 301, y: 580, width: 659, height: 1 }, 170);
+  const structures = inferConversationVisualStructure({ pixels: image });
+  const editor = structures.find((proposal) => proposal.role === "message-editor");
+  const editorSom = {
+    proposalId: "som-editor",
+    role: "region",
+    bounds: editor.bounds,
+    confidence: 0.95,
+    source: "som-proposal",
+  };
+  const sendOcr = {
+    elementToken: "ocr-send",
+    role: "text",
+    name: "发送",
+    value: "发送",
+    bounds: { x: 870, y: 658, width: 40, height: 20 },
+    confidence: 0.99,
+    source: "ocr",
+  };
+  const broadSom = {
+    proposalId: "som-broad-editor-region",
+    role: "region",
+    bounds: { x: 650, y: 620, width: 280, height: 90 },
+    confidence: 0.95,
+    source: "som-proposal",
+  };
+  const result = composeMessagingSceneElements({
+    coordinateBounds: bounds,
+    ocrElements: [sendOcr],
+    visualProposals: [editorSom, broadSom, ...structures],
+  });
+
+  assert.equal(result.elements.some((element) => element.role === "send"), false);
 });
 
 test("a pane-wide editor separator outranks a darker short text stroke", () => {
@@ -892,6 +1065,120 @@ test("a full-window OCR baseline composes the fused search control without an LL
   assert.deepEqual(ocr.actions, []);
 });
 
+test("the production screenshot path retries composition with one editor-owned OCR crop when send is absent", async (t) => {
+  const editorBounds = { x: 301, y: 581, width: 658, height: 138 };
+  const sendBounds = { x: 877, y: 677, width: 45, height: 23 };
+  const sendOcr = {
+    elementToken: "ocr-send-targeted",
+    role: "text",
+    name: "发送",
+    value: "发送",
+    bounds: { x: 884, y: 679, width: 28, height: 16 },
+    confidence: 0.99,
+    source: "ocr",
+    proposalId: "ocr-send-targeted",
+  };
+  const editor = {
+    hostType: "Editable",
+    elementToken: "message-editor:targeted-fixture",
+    role: "message-editor",
+    name: "Message editor",
+    value: "这是一条测试消息",
+    bounds: editorBounds,
+    sourceRegion: editorBounds,
+    source: "local-proposal-fusion",
+    modelIdentity: { provider: "local-proposal-fusion", model: "fixture" },
+    confidence: 0.98,
+    actions: ["click", "type_text"],
+    support: [
+      { provider: "visual-structure", confidence: 0.98, proposalId: "structure-editor" },
+      { provider: "som-proposal", confidence: 0.95, proposalId: "som-editor" },
+    ],
+    pixelLimitedAction: true,
+    guessedAction: false,
+  };
+  const send = {
+    hostType: "ActionableItem",
+    elementToken: "send:targeted-fixture",
+    role: "send",
+    name: "发送",
+    value: "发送",
+    bounds: sendBounds,
+    sourceRegion: editorBounds,
+    source: "local-proposal-fusion",
+    modelIdentity: { provider: "local-proposal-fusion", model: "fixture" },
+    confidence: 0.98,
+    actions: ["click"],
+    support: [
+      { provider: "ocr", confidence: 0.99, proposalId: "ocr-send-targeted" },
+      { provider: "som-proposal", confidence: 0.94, proposalId: "semantic-surface-send" },
+    ],
+    pixelLimitedAction: true,
+    guessedAction: false,
+  };
+  let compositionCalls = 0;
+  let visualProposalCalls = 0;
+  let semanticSurfaceCalls = 0;
+  const ocrCrops = [];
+  const router = new ComputerUseProviderRouter({
+    messagingVisualProposalOperation: async ({ ocrElements }) => {
+      visualProposalCalls += 1;
+      return [];
+    },
+    messagingSemanticSurfaceOperation: async ({ ocrElements }) => {
+      semanticSurfaceCalls += 1;
+      return ocrElements.some((element) => element.name === "发送")
+        ? [{ proposalId: "semantic-surface-send", bounds: sendBounds }]
+        : [];
+    },
+    messagingSceneComposition: ({ ocrElements }) => {
+      compositionCalls += 1;
+      return {
+        elements: ocrElements.some((element) => element.name === "发送")
+          ? [editor, send]
+          : [editor],
+        knownControls: [],
+      };
+    },
+  });
+  t.after(() => router.close());
+  router.activeController = {
+    controllerId: "controller-1",
+    tier: "full",
+    window: { id: "window-1", windowId: "window-1", title: "Fixture", bounds },
+    expiresAtMs: Date.now() + 60_000,
+  };
+  router.readOwnedArtifact = async () => Buffer.from("fixture-pixels");
+  router.ocrRegionOperation = async ({ crop }) => {
+    ocrCrops.push(crop ?? null);
+    return {
+      observation: {
+        source: "ocr",
+        elements: crop ? [sendOcr] : [],
+      },
+    };
+  };
+
+  const observation = await router.runOperation((ticket) => (
+    router.prioritizeLocalScreenshotPerception({
+      observationId: "shot-targeted-send",
+      artifact: { path: "C:\\owned\\shot.png" },
+      capture: { width: bounds.width, height: bounds.height },
+      coordinateSpace: "window-local",
+      coordinateBounds: bounds,
+      window: { id: "window-1", bounds },
+      includeUserOverlay: false,
+    }, { messagingSceneIntent: "send" }, ticket)
+  ));
+
+  assert.deepEqual(ocrCrops, [null, editorBounds]);
+  assert.equal(visualProposalCalls, 1);
+  assert.equal(semanticSurfaceCalls, 1);
+  assert.equal(compositionCalls, 2);
+  assert.equal(observation.localObservation.elements.filter((element) => element.role === "send").length, 1);
+  assert.equal(observation.localObservation.elements.some((element) => element === sendOcr), true);
+});
+
 test("the production screenshot path merges a proven related search surface into one Host Scene", async (t) => {
   const relatedPath = "C:\\owned\\shot.related-1.png";
   const router = new ComputerUseProviderRouter({
@@ -994,6 +1281,16 @@ test("the production screenshot path merges a proven related search surface into
   assert.equal(result.coordinate.screenshotId, "screenshot-1");
   assert.equal(result.coordinate.windowId, "77");
 });
+
+function structuralProposal(role, proposalBounds) {
+  return {
+    proposalId: `visual-${role}`,
+    role,
+    bounds: proposalBounds,
+    confidence: 0.98,
+    source: "visual-structure",
+  };
+}
 
 function solidImage(width, height, value) {
   const data = new Uint8ClampedArray(width * height * 4);
