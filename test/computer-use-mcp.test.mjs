@@ -1328,6 +1328,60 @@ test("successful unified OCR observations satisfy the public result envelope", a
   assert.doesNotMatch(JSON.stringify(result.structuredContent), /private-provider-token/u);
 });
 
+test("owned transient Scene coordinates satisfy the strict public result envelope", async () => {
+  const scene = buildHostScene({
+    observationVersion: 2,
+    observation: {
+      observationId: "owned-surface-observation",
+      coordinateSpace: "window-local",
+      coordinateBounds: { x: 0, y: 0, width: 320, height: 200 },
+      window: { id: "main-window", bounds: { width: 320, height: 200 } },
+      elements: [{
+        hostType: "TransientSurface",
+        role: "search-results",
+        source: "semantic",
+        bounds: { x: 0, y: 0, width: 180, height: 120 },
+        actions: [],
+        coordinate: {
+          screenshotId: "owned-surface-screenshot",
+          windowId: "owned-window",
+          space: "window-local",
+          cropOffset: { x: 0, y: 0 },
+          scale: { x: 1, y: 1 },
+          actionWindowId: "main-window",
+          actionTransform: { scaleX: 1, scaleY: 1, offsetX: 40, offsetY: 60 },
+        },
+      }],
+    },
+  });
+  const result = await callTool({
+    async capture() {
+      return {
+        status: "ok",
+        source: "window-capture",
+        observationId: "owned-surface-observation",
+        scene,
+        includeUserOverlay: false,
+      };
+    },
+  }, "computer.observe", { mode: "capture-window" });
+
+  assert.equal(result.isError, false);
+  const observe = COMPUTER_USE_MCP_TOOLS.find((tool) => tool.name === "computer.observe");
+  const validate = new Ajv({ strict: false }).compile(observe.outputSchema);
+  assert.equal(validate(result.structuredContent), true, JSON.stringify(validate.errors));
+  const transient = result.structuredContent.scene.elements.find(
+    (element) => element.type === "TransientSurface",
+  );
+  assert.equal(transient.coordinate.actionWindowId, "main-window");
+  assert.deepEqual(transient.coordinate.actionTransform, {
+    scaleX: 1,
+    scaleY: 1,
+    offsetX: 40,
+    offsetY: 60,
+  });
+});
+
 test("semantic-first screenshot observations satisfy the strict public result envelope", async () => {
   const result = await callTool({
     async capture() {

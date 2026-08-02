@@ -78,6 +78,21 @@ const HOST_SCENE_SCHEMA = {
                 additionalProperties: false,
               },
               bounds: BOX_SCHEMA,
+              actionWindowId: {
+                type: "string",
+                description: "Controller window that receives input for an owned or same-process auxiliary surface.",
+              },
+              actionTransform: {
+                type: "object",
+                required: ["scaleX", "scaleY", "offsetX", "offsetY"],
+                properties: {
+                  scaleX: { type: "number", exclusiveMinimum: 0 },
+                  scaleY: { type: "number", exclusiveMinimum: 0 },
+                  offsetX: { type: "number" },
+                  offsetY: { type: "number" },
+                },
+                additionalProperties: false,
+              },
             },
             additionalProperties: false,
           },
