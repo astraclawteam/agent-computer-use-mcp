@@ -296,6 +296,21 @@ test("owned layout separators plus header OCR and editor SOM compose one convers
   ]);
 });
 
+test("a pane-wide editor separator outranks a darker short text stroke", () => {
+  const image = solidImage(960, 720, 230);
+  fillRect(image, { x: 301, y: 0, width: 659, height: 720 }, 250);
+  fillRect(image, { x: 301, y: 32, width: 659, height: 1 }, 170);
+  fillRect(image, { x: 301, y: 80, width: 659, height: 1 }, 170);
+  fillRect(image, { x: 301, y: 580, width: 659, height: 1 }, 246);
+  fillRect(image, { x: 315, y: 599, width: 127, height: 1 }, 100);
+
+  const structures = inferConversationVisualStructure({ pixels: image });
+  const editor = structures.find((proposal) => proposal.role === "message-editor");
+
+  assert.equal(editor.bounds.y, 581);
+  assert.equal(editor.bounds.height, 139);
+});
+
 test("a remembered search control cannot fabricate OCR support", () => {
   const result = composeMessagingSceneElements({
     coordinateBounds: bounds,

@@ -618,14 +618,26 @@ function strongestHorizontalEdge(pixels, { start, end, xStart, xEnd }) {
   for (let y = Math.max(1, start); y <= Math.min(pixels.height - 2, end); y += 1) {
     let total = 0;
     let samples = 0;
+    let coveredSamples = 0;
     for (let x = Math.max(1, xStart); x <= Math.min(pixels.width - 2, xEnd); x += 4) {
-      total += adjacentPixelDifference(pixels, x, y, x, y - 1);
+      const difference = adjacentPixelDifference(pixels, x, y, x, y - 1);
+      total += difference;
+      if (difference >= 8) coveredSamples += 1;
       samples += 1;
     }
     const score = samples > 0 ? total / samples : 0;
-    if (!best || score > best.score) best = { position: y, score };
+    const coverage = samples > 0 ? coveredSamples / samples : 0;
+    const candidate = { position: y, score, coverage };
+    if (!best || compareHorizontalEdge(candidate, best) < 0) best = candidate;
   }
   return best;
+}
+
+function compareHorizontalEdge(left, right) {
+  const leftSpansPane = left.coverage >= 0.55;
+  const rightSpansPane = right.coverage >= 0.55;
+  if (leftSpansPane !== rightSpansPane) return leftSpansPane ? -1 : 1;
+  return right.score - left.score || right.coverage - left.coverage || left.position - right.position;
 }
 
 function adjacentPixelDifference(pixels, x1, y1, x2, y2) {
