@@ -2876,6 +2876,20 @@ export class ComputerUseProviderRouter {
           : this.surfaceGeneration,
       });
     }
+    if (isMessagingScene(this.lastCapture?.scene)
+      && action.kind !== "activate_window"
+      && typeof action.elementId !== "string") {
+      fail(
+        "scene.messaging_element_required",
+        "Messaging interfaces accept actions only through a consistent current Host Scene element.",
+        {
+          allowed: false,
+          pixelLimitedAction: false,
+          retryable: false,
+          nextAction: "Use the deterministic messaging workflow; OCR text, visual regions, coordinates, provider tokens, and chat-body text cannot authorize a messaging action.",
+        },
+      );
+    }
     const sceneElement = resolveHostSceneElement(this.lastCapture?.scene, action);
     const targetsElement = action.elementId !== undefined
       || action.elementToken !== undefined
@@ -5048,6 +5062,18 @@ function normalizeRuntimeCleanupDoctor(report) {
     includeUserOverlay: false,
     startsDesktopControl: false,
   };
+}
+
+function isMessagingScene(scene) {
+  const roles = new Set((Array.isArray(scene?.elements) ? scene.elements : [])
+    .map((element) => element?.role)
+    .filter((role) => typeof role === "string"));
+  return roles.has("search") && (
+    roles.has("conversation")
+    || roles.has("conversation-title")
+    || roles.has("message-editor")
+    || roles.has("search-results")
+  );
 }
 
 function policyMessage(decision) {

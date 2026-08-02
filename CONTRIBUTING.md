@@ -32,8 +32,9 @@ instead of a public issue.
 
 - **Natural-language capability routing.** Tool selection is driven by semantic
   descriptions and model reasoning, never application-name keywords or regexes.
-- **Compact public surface.** Improve the four Agent tools before proposing a
-  new tool. Host-only diagnostics belong in the connector settings surface.
+- **Compact public surface.** Keep Agent tools task-level and bounded.
+  Messaging mutations belong to `computer.message`; lifecycle operations and
+  diagnostics remain Host-owned.
 - **Evidence before mutation.** Semantic elements, focus receipts, or a fresh
   observation must ground actions.
 - **No guessed coordinates.** Pixel actions stay bound to observation identity,

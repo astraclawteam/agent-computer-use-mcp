@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { randomUUID } from "node:crypto";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
@@ -15,6 +16,10 @@ import {
   sendWindowsUnicodeText,
 } from "./windows-unicode-input.mjs";
 import { verifyWindowsFocusedProcess } from "./windows-focus-verification.mjs";
+import { DeterministicMessagingStateMachine } from "./deterministic-messaging-state-machine.mjs";
+
+const PENDING_MESSAGING_SELECTION_TTL_MS = 60_000;
+const pendingMessagingSelections = new Map();
 
 export async function runComputerUseMcpServer(options = {}) {
   const router = new ComputerUseProviderRouter({
@@ -52,9 +57,15 @@ export async function runComputerUseMcpServer(options = {}) {
     tools: COMPUTER_USE_MCP_TOOLS,
   }));
 
-  server.setRequestHandler(CallToolRequestSchema, async (request) => {
+  server.setRequestHandler(CallToolRequestSchema, async (request, extra) => {
     const { name, arguments: args = {} } = request.params;
-    return callTool(router, name, args, request.params._meta?.["xiaozhiclaw/requestContext"]);
+    return callTool(
+      router,
+      name,
+      args,
+      request.params._meta?.["xiaozhiclaw/requestContext"],
+      { signal: extra.signal },
+    );
   });
 
   let unregisterShutdownHandlers = () => {};
@@ -95,7 +106,7 @@ export function createPlatformOcrSession(platformRuntime, options = {}) {
   });
 }
 
-export async function callTool(router, name, args, requestContext) {
+export async function callTool(router, name, args, requestContext, options = {}) {
   if (name === "computer.act") args = normalizeComputerActArgs(args);
   let structuredContent;
   try {
@@ -112,6 +123,8 @@ export async function callTool(router, name, args, requestContext) {
       });
     } else if (name === "computer.acquire") {
       structuredContent = await acquireComputer(router, args, requestContext);
+    } else if (name === "computer.message") {
+      structuredContent = await runDeterministicMessagingTool(router, args, requestContext, options);
     } else if (name === "computer.observe") {
       structuredContent = await observeComputer(router, args, requestContext);
     } else if (name === "computer.act") {
@@ -258,6 +271,275 @@ export async function callTool(router, name, args, requestContext) {
   };
 }
 
+export async function runDeterministicMessagingTool(router, args = {}, requestContext, options = {}) {
+  const startedAt = Date.now();
+  let machine;
+  let access;
+  let preMachineReleaseAttempted = false;
+  try {
+    const applicationName = requiredMessagingInput(args.applicationName, "applicationName", 256);
+    const query = requiredMessagingInput(args.query, "query", 512);
+    const message = requiredMessagingInput(args.message, "message", 20_000);
+    const scopeKey = messagingSelectionScopeKey(requestContext);
+    prunePendingMessagingSelections(startedAt);
+    const pendingSelection = resolvePendingMessagingSelection({
+      args,
+      scopeKey,
+      applicationName,
+      query,
+      message,
+      now: startedAt,
+    });
+    access = await acquireComputer(router, {
+      applicationName,
+      tier: "full",
+      agentId: requestContext?.agentId ?? "deterministic-messaging-host",
+      reason: "Host-owned deterministic messaging workflow",
+    }, requestContext);
+    if (access?.status !== "granted" && access?.status !== "reused") {
+      return messagingToolResult({
+        outcome: "not-applied",
+        released: access?.controller == null,
+        startedAt,
+        phase: "acquire",
+        error: {
+          code: "workflow.acquire_not_granted",
+          message: "The Host did not grant the deterministic messaging controller lease.",
+        },
+      });
+    }
+    if (args.requireForeground === true && !initialMainWindowIsForeground(access.initialObservation?.scene)) {
+      preMachineReleaseAttempted = true;
+      await router.cancel({ reason: "workflow.initial_foreground_required", requestContext });
+      return messagingToolResult({
+        outcome: "not-applied",
+        released: true,
+        startedAt,
+        phase: "preflight",
+        error: {
+          code: "workflow.initial_foreground_required",
+          message: "The main application window was not foreground at workflow start.",
+        },
+      });
+    }
+
+    const decisionPort = createMessagingDecisionPort({
+      args,
+      pendingSelection,
+      scopeKey,
+      applicationName,
+      query,
+      message,
+    });
+    let latestScene = access.initialObservation?.scene ?? null;
+    let latestScenePending = latestScene !== null;
+    let lastObservedStep = null;
+    machine = new DeterministicMessagingStateMachine({
+      host: {
+        observe: async ({ step, signal }) => {
+          if (signal?.aborted) throw signal.reason ?? new DOMException("Aborted", "AbortError");
+          if (latestScene && (latestScenePending || step !== lastObservedStep)) {
+            latestScenePending = false;
+            lastObservedStep = step;
+            return latestScene;
+          }
+          const observation = await router.capture({ mode: "screenshot", requestContext });
+          latestScene = observation.scene;
+          latestScenePending = false;
+          lastObservedStep = step;
+          return latestScene;
+        },
+        act: async ({ step, action, signal }) => {
+          if (signal?.aborted) throw signal.reason ?? new DOMException("Aborted", "AbortError");
+          const receipt = await router.act({
+            action: { ...action, captureAfter: true },
+            requestContext,
+          });
+          if (receipt?.capture?.scene) {
+            latestScene = receipt.capture.scene;
+            latestScenePending = true;
+            lastObservedStep = step;
+          }
+          return normalizePublicComputerActResult(receipt);
+        },
+        release: async ({ reason }) => {
+          const release = await router.cancel({ reason, requestContext });
+          return release?.status === "cancelled" || release?.status === "idle"
+            ? { status: "committed", outcome: "committed" }
+            : { status: "indeterminate", outcome: "indeterminate" };
+        },
+      },
+      goal: { query, message },
+      decisionPort,
+      pollIntervalMs: 50,
+      signal: options.signal,
+    });
+    const result = await machine.run();
+    if (typeof args.selectionToken === "string") pendingMessagingSelections.delete(args.selectionToken);
+    return messagingToolResult({
+      outcome: "committed",
+      released: result.released === true,
+      startedAt,
+      phase: "complete",
+      history: result.history,
+    });
+  } catch (error) {
+    if (!machine && access?.controller && !preMachineReleaseAttempted) {
+      preMachineReleaseAttempted = true;
+      await router.cancel({ reason: error?.code ?? "workflow.failed_before_machine", requestContext }).catch(() => {});
+    }
+    const snapshot = machine?.snapshot;
+    if (error?.selection) {
+      return messagingToolResult({
+        outcome: "not-applied",
+        released: snapshot?.released === true,
+        startedAt,
+        phase: "selection-required",
+        history: error.history,
+        selectionToken: error.selection.selectionToken,
+        candidates: error.selection.candidates,
+        error: { code: error.code, message: error.message },
+      });
+    }
+    const outcome = canonicalActionOutcome(error?.outcome ?? "not-applied");
+    return messagingToolResult({
+      outcome,
+      released: snapshot?.released === true || access?.controller == null,
+      startedAt,
+      phase: error?.step ?? "failed",
+      history: error?.history,
+      error: {
+        code: error?.code ?? "workflow.host_failure",
+        message: error instanceof Error ? error.message : "The deterministic messaging workflow failed.",
+      },
+    });
+  }
+}
+
+function createMessagingDecisionPort({ args, pendingSelection, scopeKey, applicationName, query, message }) {
+  return {
+    async selectCandidate({ candidates }) {
+      const exact = candidates.filter((candidate) => normalizeMessagingText(candidate.label) === normalizeMessagingText(query));
+      if (exact.length === 1 && !pendingSelection) return { candidateId: exact[0].candidateId };
+      if (pendingSelection) {
+        const selected = pendingSelection.candidates.find((candidate) => candidate.candidateId === args.candidateId);
+        const current = candidates.filter((candidate) => sameMessagingCandidate(candidate, selected));
+        if (current.length !== 1) throw boundedMessagingError(
+          "llm.selection_stale",
+          "The selected Host candidate is no longer present in the current stable Scene.",
+        );
+        pendingMessagingSelections.delete(args.selectionToken);
+        return { candidateId: current[0].candidateId };
+      }
+      const selectionToken = randomUUID();
+      const publicCandidates = candidates.map((candidate) => Object.freeze({
+        candidateId: candidate.candidateId,
+        label: candidate.label,
+        role: candidate.role,
+        parentRole: candidate.parentRole,
+        evidenceSources: Object.freeze([...candidate.evidenceSources]),
+      }));
+      pendingMessagingSelections.set(selectionToken, Object.freeze({
+        scopeKey,
+        applicationName,
+        query,
+        message,
+        expiresAt: Date.now() + PENDING_MESSAGING_SELECTION_TTL_MS,
+        candidates: Object.freeze(publicCandidates),
+      }));
+      const error = boundedMessagingError(
+        "llm.selection_required",
+        "Select one opaque Host candidate and call computer.message again with selectionToken and candidateId.",
+      );
+      error.selection = Object.freeze({ selectionToken, candidates: Object.freeze(publicCandidates) });
+      throw error;
+    },
+    async decideFailure() {
+      return { decision: "report" };
+    },
+  };
+}
+
+function resolvePendingMessagingSelection({ args, scopeKey, applicationName, query, message, now }) {
+  const token = typeof args.selectionToken === "string" ? args.selectionToken.trim() : "";
+  const candidateId = typeof args.candidateId === "string" ? args.candidateId.trim() : "";
+  if (!token && !candidateId) return null;
+  if (!token || !candidateId) throw boundedMessagingError(
+    "llm.selection_contract_invalid",
+    "selectionToken and candidateId must be supplied together.",
+  );
+  const pending = pendingMessagingSelections.get(token);
+  if (!pending || pending.expiresAt <= now || pending.scopeKey !== scopeKey
+    || pending.applicationName !== applicationName || pending.query !== query || pending.message !== message
+    || !pending.candidates.some((candidate) => candidate.candidateId === candidateId)) {
+    pendingMessagingSelections.delete(token);
+    throw boundedMessagingError("llm.selection_invalid", "The opaque Host candidate selection is invalid or expired.");
+  }
+  return pending;
+}
+
+function messagingToolResult({ outcome, released, startedAt, phase, history, selectionToken, candidates, error }) {
+  return {
+    status: outcome,
+    outcome,
+    released: released === true,
+    elapsedMs: Math.max(0, Date.now() - startedAt),
+    ...(phase ? { phase } : {}),
+    ...(Array.isArray(history) ? { history } : {}),
+    ...(selectionToken ? { selectionToken } : {}),
+    ...(Array.isArray(candidates) ? { candidates } : {}),
+    ...(error ? { error } : {}),
+  };
+}
+
+function initialMainWindowIsForeground(scene) {
+  return Array.isArray(scene?.elements) && scene.elements.some((element) => (
+    element.type === "Window" && element.role === "main-window"
+    && element.evidenceConsistency === "consistent" && element.state?.foreground === true
+  ));
+}
+
+function requiredMessagingInput(value, field, maxLength) {
+  if (typeof value !== "string" || value.length === 0 || value.length > maxLength) {
+    throw boundedMessagingError("workflow.invalid_goal", `${field} must be a non-empty string within ${maxLength} characters.`);
+  }
+  return value;
+}
+
+function messagingSelectionScopeKey(requestContext) {
+  return JSON.stringify([
+    requestContext?.ownerId ?? null,
+    requestContext?.agentId ?? null,
+    requestContext?.projectId ?? null,
+    requestContext?.sessionId ?? null,
+  ]);
+}
+
+function prunePendingMessagingSelections(now) {
+  for (const [token, pending] of pendingMessagingSelections) {
+    if (pending.expiresAt <= now) pendingMessagingSelections.delete(token);
+  }
+}
+
+function normalizeMessagingText(value) {
+  return String(value ?? "").normalize("NFKC").trim().toLocaleLowerCase();
+}
+
+function sameMessagingCandidate(left, right) {
+  return right && left.label === right.label && left.role === right.role
+    && left.parentRole === right.parentRole
+    && JSON.stringify([...left.evidenceSources].sort()) === JSON.stringify([...right.evidenceSources].sort());
+}
+
+function boundedMessagingError(code, message) {
+  const error = new Error(message);
+  error.name = "BoundedLlmInteractionError";
+  error.code = code;
+  error.outcome = "not-applied";
+  error.replayAllowed = false;
+  return error;
+}
+
 function normalizePublicComputerActResult(value = {}) {
   const outcome = canonicalActionOutcome(value.outcome ?? value.status);
   const result = value.result && typeof value.result === "object" ? value.result : {};
@@ -302,11 +584,32 @@ function stripLegacyObservationAuthorities(value) {
 }
 
 function publicHostScene(scene) {
+  const sourceElements = Array.isArray(scene?.elements) ? scene.elements : [];
+  const byId = new Map(sourceElements.map((element) => [element.id, element]));
+  const retainedIds = new Set(sourceElements
+    .filter((element) => (
+      element.evidenceConsistency === "consistent"
+      && element.role !== "message-bubble"
+    ))
+    .map((element) => element.id));
+  for (const id of [...retainedIds]) {
+    let parentId = byId.get(id)?.parentId;
+    while (typeof parentId === "string" && !retainedIds.has(parentId)) {
+      retainedIds.add(parentId);
+      parentId = byId.get(parentId)?.parentId;
+    }
+  }
   return {
     ...scene,
-    elements: Array.isArray(scene.elements)
-      ? scene.elements.map(({ binding: _hostOnlyBinding, ...element }) => element)
-      : [],
+    elements: sourceElements
+      .filter((element) => retainedIds.has(element.id))
+      .map(({ binding: _hostOnlyBinding, evidence, ...element }) => ({
+        ...element,
+        evidence: [...new Set((Array.isArray(evidence) ? evidence : [])
+          .map((item) => item?.source)
+          .filter((source) => typeof source === "string" && source.length > 0))]
+          .map((source) => ({ source })),
+      })),
   };
 }
 

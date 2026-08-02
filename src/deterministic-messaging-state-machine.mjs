@@ -1,6 +1,6 @@
 import { setTimeout as delay } from "node:timers/promises";
 
-const DEFAULT_TIMEOUT_MS = 5_000;
+const DEFAULT_TIMEOUT_MS = 15_000;
 const RELEASE_TIMEOUT_MS = 2_000;
 const FAILURE_DECISION_TIMEOUT_MS = 2_000;
 const FAILURE_REOBSERVE_TIMEOUT_MS = 2_000;
@@ -617,6 +617,12 @@ export class DeterministicMessagingStateMachine {
     else this.#runController.signal.addEventListener("abort", onRunAbort, { once: true });
 
     let timer;
+    let onStepAbort;
+    const aborted = new Promise((resolve, reject) => {
+      onStepAbort = () => reject(controller.signal.reason ?? new DOMException("Aborted", "AbortError"));
+      if (controller.signal.aborted) onStepAbort();
+      else controller.signal.addEventListener("abort", onStepAbort, { once: true });
+    });
     const timeout = new Promise((resolve, reject) => {
       timer = setTimeout(() => {
         const error = workflowError({
@@ -632,7 +638,7 @@ export class DeterministicMessagingStateMachine {
     });
 
     try {
-      return await Promise.race([operation(controller.signal), timeout]);
+      return await Promise.race([operation(controller.signal), timeout, aborted]);
     } catch (caught) {
       if (this.#runController.signal.aborted && caught?.code !== "workflow.step_timeout") {
         throw workflowError({
@@ -645,6 +651,7 @@ export class DeterministicMessagingStateMachine {
       throw caught;
     } finally {
       clearTimeout(timer);
+      controller.signal.removeEventListener("abort", onStepAbort);
       this.#runController.signal.removeEventListener("abort", onRunAbort);
     }
   }

@@ -43,17 +43,16 @@ Act through a semantic element, focus receipt, or observation-bound coordinate
 Verify the outcome and release control on success, failure, or cancellation
 ```
 
-The Agent sees four focused tools:
+The Agent sees one task-level tool:
 
 | Tool | Purpose |
 | --- | --- |
-| `computer.acquire` | Select a foreground, visible, or restorable application and obtain a bounded lease. |
-| `computer.observe` | Read semantic state, OCR, screenshots, focused controls, truncation, and coordinate metadata. |
-| `computer.act` | Activate, click, enter Unicode text, set values, or press keys with execution-path evidence. |
-| `computer.release` | End control and clean up the cursor, overlay, focus receipts, and session state. |
+| `computer.message` | Run the Host-owned deterministic messaging state machine; exact targets are resolved without exposing coordinate or lifecycle decisions to the Agent. |
 
-Four additional management tools—health, doctor, installation, and repair—stay
-with the Host and are not projected into the Agent's normal tool inventory.
+The lifecycle tools (`computer.acquire`, `computer.observe`, `computer.act`,
+and `computer.release`) are workflow-internal. Health, doctor, installation,
+and repair are also Host-only. None are projected into the Agent's normal tool
+inventory.
 
 ## Why this implementation
 

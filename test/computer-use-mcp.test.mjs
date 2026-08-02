@@ -1322,9 +1322,8 @@ test("successful unified OCR observations satisfy the public result envelope", a
   assert.equal(validate(result.structuredContent), true, JSON.stringify(validate.errors));
   assert.equal(result.structuredContent.focusReceipt.id, "focus-post-write-1");
   assert.equal(result.structuredContent.mutationVerification.status, "confirmed");
-  const visible = result.structuredContent.scene.elements.find((element) => element.name === "Visible");
-  assert.equal(visible.actionable, false);
-  assert.equal(visible.binding, undefined);
+  assert.equal(result.structuredContent.scene.elements.some((element) => element.name === "Visible"), false);
+  assert.equal(result.structuredContent.scene.elements.every((element) => element.binding === undefined), true);
   assert.doesNotMatch(JSON.stringify(result.structuredContent), /private-provider-token/u);
 });
 
@@ -2462,6 +2461,7 @@ test("agent-computer-use-mcp freezes the local MCP tool contract", () => {
 
   const toolNames = COMPUTER_USE_MCP_TOOLS.map((tool) => tool.name);
   assert.deepEqual(toolNames, [
+    "computer.message",
     "computer.acquire",
     "computer.observe",
     "computer.act",
@@ -2473,8 +2473,22 @@ test("agent-computer-use-mcp freezes the local MCP tool contract", () => {
   ]);
   assert.deepEqual(
     COMPUTER_USE_MCP_TOOLS.filter((tool) => tool._meta?.["xiaozhiclaw/visibility"] === "host").map((tool) => tool.name),
-    ["computer.health", "computer.doctor", "computer.installation", "computer.repair"],
+    [
+      "computer.acquire",
+      "computer.observe",
+      "computer.act",
+      "computer.release",
+      "computer.health",
+      "computer.doctor",
+      "computer.installation",
+      "computer.repair",
+    ],
   );
+
+  const message = COMPUTER_USE_MCP_TOOLS.find((tool) => tool.name === "computer.message");
+  assert.match(message.description, /only Agent-facing path authorized/u);
+  assert.deepEqual(message.inputSchema.required, ["applicationName", "query", "message"]);
+  assert.equal(message._meta["xiaozhiclaw/requestTimeoutMs"], 65_000);
 
   const health = COMPUTER_USE_MCP_TOOLS.find((tool) => tool.name === "computer.health");
   assert.equal(health.annotations.phase, "0.9");
@@ -2646,6 +2660,7 @@ test("agent-computer-use-mcp answers initialize, tools/list, and health over std
     await client.connect();
     const listed = await client.listTools();
     assert.deepEqual(listed.tools.map((tool) => tool.name), [
+      "computer.message",
       "computer.acquire",
       "computer.observe",
       "computer.act",
@@ -2655,7 +2670,7 @@ test("agent-computer-use-mcp answers initialize, tools/list, and health over std
       "computer.installation",
       "computer.repair",
     ]);
-    for (const tool of listed.tools.slice(0, 4)) {
+    for (const tool of listed.tools.slice(0, 5)) {
       assert.equal(
         tool._meta?.["xiaozhiclaw/semanticCapability"]?.schemaVersion,
         1,
@@ -3357,6 +3372,43 @@ test("provider router enforces action safety policy", async () => {
 
   const state = await router.listState();
   assert.equal(state.auditEvents.map((event) => event.type).includes("computer.action.failed"), false);
+});
+
+test("provider router rejects non-Scene messaging mutations even when a provider token exists", async () => {
+  const { ComputerUseProviderRouter } = await import("../src/computer-use-provider-router.mjs");
+  const router = new ComputerUseProviderRouter({
+    driver: {
+      async findWindow() {
+        return { windowId: "win-message", title: "Messaging Fixture", pid: 123, bounds: { x: 0, y: 0, width: 400, height: 300 } };
+      },
+      async click() {
+        assert.fail("a raw provider-token click must not reach the driver in a messaging Scene");
+      },
+    },
+  });
+  await router.requestAccess({ titlePart: "Messaging Fixture", tier: "full" });
+  router.lastCapture = {
+    observationId: "observation:messaging",
+    elements: [{ elementToken: "provider-search", actions: ["click"] }],
+    scene: {
+      id: "scene:messaging",
+      observationVersion: 1,
+      elements: [
+        { id: "scene:search", role: "search", evidenceConsistency: "consistent", actions: ["click"] },
+        { id: "scene:editor", role: "message-editor", evidenceConsistency: "consistent", actions: ["click"] },
+      ],
+    },
+  };
+
+  await assert.rejects(
+    () => router.act({ action: {
+      kind: "click",
+      elementToken: "provider-search",
+      interactionIntent: "focus-editable",
+    } }),
+    { code: "scene.messaging_element_required" },
+  );
+  await router.cancel({ reason: "test-complete" });
 });
 
 function createSdkClient(name) {

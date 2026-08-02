@@ -840,6 +840,10 @@ const HOST_MANAGEMENT_META = Object.freeze({
   "xiaozhiclaw/visibility": "host",
   "xiaozhiclaw/management": true,
 });
+const HOST_WORKFLOW_INTERNAL_META = Object.freeze({
+  "xiaozhiclaw/visibility": "host",
+  "xiaozhiclaw/workflowInternal": true,
+});
 
 const TURN_CONTROL_RESOURCE = "desktop-control";
 const acquireLifecycleMeta = Object.freeze({
@@ -889,10 +893,10 @@ const acquireTool = {
   ...byLegacyName("computer.request_access"),
   name: "computer.acquire",
   title: "Acquire Computer Access",
-  description: "Acquire a lease and initial evidence. For a user-named application, pass applicationName immediately; Host exact-resolves the full fresh inventory and fails closed. Otherwise use an observed applicationToken. Host restores the primary window from tray instead of an auxiliary window. Use target=\"foreground\" only when intended.",
+  description: "Acquire a lease and initial evidence for a generic non-messaging desktop task. Never use this tool for a request to find a contact, open a conversation, or send a message; call computer.message directly so the Host owns the entire messaging lifecycle. For other tasks, pass applicationName for an exact Host resolution, or use a fresh observed applicationToken.",
   _meta: Object.freeze({
     ...semanticCapabilityMeta({
-    summary: "Establish bounded control of a local graphical application window so it can be observed or operated for the user's requested outcome.",
+    summary: "Establish bounded control for a generic non-messaging desktop workflow; messaging requests must use computer.message instead.",
     scenarios: [
       "A task requires seeing or interacting with a native desktop application's visible interface.",
       "The target is the current foreground window or a specifically identified application window.",
@@ -900,8 +904,12 @@ const acquireTool = {
     prerequisites: ["The user and Host policy permit local desktop control."],
     effects: ["Creates a time-bounded controller lease and user-visible control overlay."],
     modalities: ["local desktop GUI", "native application window"],
-    constraints: ["Identify the target from observed state; never guess a window title."],
+    constraints: [
+      "Identify the target from observed state; never guess a window title.",
+      "Never acquire directly for contact, conversation, chat, or message-sending tasks; use computer.message.",
+    ],
     }),
+    ...HOST_WORKFLOW_INTERNAL_META,
     ...acquireLifecycleMeta,
   }),
 };
@@ -909,9 +917,10 @@ const acquireTool = {
 const observeTool = {
   name: "computer.observe",
   title: "Observe Computer",
-    description: "Discover compact desktop state or inspect the leased window. Detailed observations return one versioned Host Scene; provider elements are evidence, not parallel targets. Start semantic, use OCR only as non-actionable text evidence, and use visual once for remaining layout ambiguity. Conflicting evidence suppresses actions. Each observation returns a single-use surfaceReceipt and invalidates prior Scene element identities.",
-  _meta: semanticCapabilityMeta({
-    summary: "Inspect visible state in local graphical applications using window discovery, semantic elements, screenshots, OCR, or visual differences.",
+    description: "For generic non-messaging tasks only; never inspect contacts, conversations, chat editors, or message bubbles here—use computer.message. Discover compact desktop state or inspect the leased window. Detailed observations return one versioned Host Scene; provider elements are evidence, not parallel targets. Start semantic, use OCR only as non-actionable text evidence, and use visual once for remaining layout ambiguity. Conflicting evidence suppresses actions. Each observation returns a single-use surfaceReceipt and invalidates prior Scene element identities.",
+  _meta: Object.freeze({
+    ...semanticCapabilityMeta({
+    summary: "Inspect visible state for generic non-messaging desktop workflows; messaging observations remain private to computer.message.",
     scenarios: [
       "Understand what is currently displayed before deciding where or how to interact.",
       "Verify the visible result after an interface action.",
@@ -919,7 +928,12 @@ const observeTool = {
     prerequisites: ["State discovery is available; detailed window capture requires an active controller lease."],
     effects: ["Reads visible desktop and accessibility state without intentionally changing the target application."],
     modalities: ["local desktop GUI", "visual observation", "OCR", "accessibility state"],
-    constraints: ["Treat each observation as time-bounded and observe again after the interface changes."],
+    constraints: [
+      "Treat each observation as time-bounded and observe again after the interface changes.",
+      "Never inspect chat search, conversation title, editor, or message bubbles outside computer.message.",
+    ],
+    }),
+    ...HOST_WORKFLOW_INTERNAL_META,
   }),
   annotations: { phase: "5.8", readOnlyHint: true },
   inputSchema: {
@@ -1089,7 +1103,7 @@ const releaseTool = {
   ...byLegacyName("computer.cancel"),
   name: "computer.release",
   title: "Release Computer Access",
-  description: "Release the active Gateway-managed controller lease and any pending access request.",
+  description: "Release a generic non-messaging controller lease or pending access request. Do not use this tool around computer.message; the Host-owned messaging workflow releases itself on every terminal path.",
   _meta: Object.freeze({
     ...semanticCapabilityMeta({
       summary: "End local desktop control and clear any pending access request after the requested interaction is finished or cannot continue safely.",
@@ -1097,16 +1111,22 @@ const releaseTool = {
       prerequisites: ["A controller lease or pending access request may exist."],
       effects: ["Revokes desktop control and removes the user-visible control overlay."],
       modalities: ["local desktop GUI", "controller lifecycle"],
-      constraints: ["Release control when the task finishes or is abandoned."],
+      constraints: [
+        "Release control when a generic task finishes or is abandoned.",
+        "Never manage the computer.message controller lifecycle from the Agent.",
+      ],
     }),
+    ...HOST_WORKFLOW_INTERNAL_META,
     ...releaseLifecycleMeta,
   }),
 };
 
 const actTool = {
   ...byLegacyName("computer.act"),
-  _meta: semanticCapabilityMeta({
-    summary: "Operate the visible interface of a local graphical application by clicking, entering text, or setting a supported control value.",
+  description: "For generic non-messaging tasks only; never search contacts, select conversations, enter chat text, or send messages here—use computer.message. Act once on an actionable element from the latest versioned Host Scene. OCR-only or conflicting evidence cannot authorize an action. The result outcome is exactly committed, not-applied, or indeterminate; never replay an indeterminate mutation.",
+  _meta: Object.freeze({
+    ...semanticCapabilityMeta({
+    summary: "Operate a generic non-messaging desktop interface through a current Host Scene element; messaging mutations must use computer.message.",
     scenarios: [
       "Complete a user-requested workflow in a native desktop application.",
       "Enter content into a visible field and activate the application's own controls.",
@@ -1117,19 +1137,122 @@ const actTool = {
     ],
     effects: ["Changes application state and may cause the application to submit or send content when its visible controls are activated."],
     modalities: ["local desktop GUI", "pointer interaction", "keyboard text entry"],
-    constraints: ["Ground coordinates or element targets in observation evidence and verify consequential results afterward."],
+    constraints: [
+      "Ground element targets in current Host Scene evidence and verify consequential results afterward.",
+      "Never search contacts, select conversations, enter chat content, or send messages with computer.act.",
+    ],
+    }),
+    ...HOST_WORKFLOW_INTERNAL_META,
   }),
 };
 
+const messagingTool = {
+  name: "computer.message",
+  title: "Run Deterministic Messaging Workflow",
+  description: "Send one exact message through the Host-owned deterministic messaging state machine. This is the only Agent-facing path authorized to mutate a messaging interface: the Host owns search, coordinates, title verification, input, send verification, cancellation, and release. Supply semantic goal slots only; never use computer.act for messaging UI.",
+  _meta: {
+    ...semanticCapabilityMeta({
+      summary: "Complete one role-based desktop messaging workflow while the Host retains every action target and lifecycle decision.",
+      scenarios: [
+        "Send an exact user-authored message to an exact contact or conversation in a desktop messaging application.",
+        "Select a semantic result without exposing OCR regions, chat-body text, or coordinates to the model.",
+      ],
+      prerequisites: ["The user authorized the destination and exact message content."],
+      effects: ["May send one message after every deterministic postcondition succeeds."],
+      modalities: ["local desktop messaging GUI", "Host Scene", "deterministic workflow"],
+      constraints: ["Never replays an indeterminate action and always releases control on every terminal path."],
+    }),
+    "xiaozhiclaw/requestTimeoutMs": 65_000,
+  },
+  annotations: { phase: "6.0", destructiveHint: true },
+  inputSchema: {
+    type: "object",
+    required: ["applicationName", "query", "message"],
+    properties: {
+      applicationName: {
+        type: "string",
+        minLength: 1,
+        maxLength: 256,
+        description: "Exact current application name supplied by the user goal; the Host resolves it without guessing a window.",
+      },
+      query: {
+        type: "string",
+        minLength: 1,
+        maxLength: 512,
+        description: "Semantic contact or conversation query from the user goal.",
+      },
+      message: {
+        type: "string",
+        minLength: 1,
+        maxLength: 20_000,
+        description: "Exact user-authored message to enter and send once.",
+      },
+      requireForeground: {
+        type: "boolean",
+        description: "Fail closed before any workflow action unless the main application window is already foreground.",
+      },
+      selectionToken: {
+        type: "string",
+        description: "Opaque Host token returned only when fuzzy candidate selection is required.",
+      },
+      candidateId: {
+        type: "string",
+        description: "One opaque candidate id returned with selectionToken; never a Scene element id.",
+      },
+    },
+    additionalProperties: false,
+  },
+  outputSchema: {
+    ...outputSchema({
+      status: { type: "string", enum: ["committed", "not-applied", "indeterminate"] },
+      outcome: { type: "string", enum: ["committed", "not-applied", "indeterminate"] },
+      phase: { type: "string" },
+      history: ANY_ARRAY,
+      released: { type: "boolean" },
+      elapsedMs: { type: "number", minimum: 0 },
+      selectionToken: { type: "string" },
+      candidates: {
+        type: "array",
+        items: {
+          type: "object",
+          required: ["candidateId", "label", "role", "parentRole", "evidenceSources"],
+          properties: {
+            candidateId: { type: "string" },
+            label: { type: "string" },
+            role: { type: "string" },
+            parentRole: { type: "string" },
+            evidenceSources: { type: "array", items: { type: "string" } },
+          },
+          additionalProperties: false,
+        },
+      },
+      error: ANY_OBJECT,
+    }),
+    required: [
+      "resultSchemaVersion",
+      "includeUserOverlay",
+      "status",
+      "outcome",
+      "released",
+      "elapsedMs",
+    ],
+  },
+};
+
 export const COMPUTER_USE_AGENT_TOOLS = Object.freeze([
+  Object.freeze(messagingTool),
+]);
+
+export const COMPUTER_USE_WORKFLOW_INTERNAL_TOOLS = Object.freeze([
   Object.freeze(acquireTool),
   Object.freeze(observeTool),
   Object.freeze(actTool),
   Object.freeze(releaseTool),
 ]);
 
-/** Raw MCP inventory: four Agent tools plus four Host-only management tools. */
+/** Raw MCP inventory: one Agent tool plus eight Host-only workflow/management tools. */
 export const COMPUTER_USE_MCP_TOOLS = Object.freeze([
   ...COMPUTER_USE_AGENT_TOOLS,
+  ...COMPUTER_USE_WORKFLOW_INTERNAL_TOOLS,
   ...COMPUTER_USE_HOST_TOOLS,
 ]);

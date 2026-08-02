@@ -256,6 +256,20 @@ test("owned layout separators plus header OCR and editor SOM compose one convers
     confidence: 0.86,
     source: "som-proposal",
   };
+  const bubbleSom = {
+    proposalId: "som-self-bubble",
+    role: "region",
+    bounds: { x: 700, y: 120, width: 180, height: 44 },
+    confidence: 0.9,
+    source: "som-proposal",
+  };
+  const sendSom = {
+    proposalId: "som-send",
+    role: "region",
+    bounds: { x: 850, y: 650, width: 80, height: 36 },
+    confidence: 0.92,
+    source: "som-proposal",
+  };
   const titleOcr = {
     elementToken: "ocr-conversation-title",
     role: "text",
@@ -266,17 +280,37 @@ test("owned layout separators plus header OCR and editor SOM compose one convers
     source: "ocr",
     proposalId: "ocr-conversation-title",
   };
+  const bubbleOcr = {
+    elementToken: "ocr-self-bubble",
+    role: "text",
+    name: "测试消息",
+    value: "测试消息",
+    bounds: { x: 720, y: 132, width: 100, height: 20 },
+    confidence: 0.99,
+    source: "ocr",
+  };
+  const sendOcr = {
+    elementToken: "ocr-send",
+    role: "text",
+    name: "发送",
+    value: "发送",
+    bounds: { x: 870, y: 658, width: 40, height: 20 },
+    confidence: 0.99,
+    source: "ocr",
+  };
   const structures = inferConversationVisualStructure({ pixels: image });
   const result = composeMessagingSceneElements({
     coordinateBounds: bounds,
-    ocrElements: [titleOcr],
-    visualProposals: [editorSom, ...structures],
+    ocrElements: [titleOcr, bubbleOcr, sendOcr],
+    visualProposals: [editorSom, bubbleSom, sendSom, ...structures],
   });
   const conversation = result.elements.find((element) => element.role === "conversation");
   const header = result.elements.find((element) => element.role === "conversation-header");
   const transcript = result.elements.find((element) => element.role === "transcript");
   const title = result.elements.find((element) => element.role === "conversation-title");
   const editor = result.elements.find((element) => element.role === "message-editor");
+  const send = result.elements.find((element) => element.role === "send");
+  const bubble = result.elements.find((element) => element.role === "message-bubble");
 
   assert.deepEqual(structures.map(({ role }) => role), [
     "conversation-pane",
@@ -294,6 +328,13 @@ test("owned layout separators plus header OCR and editor SOM compose one convers
     "som-proposal",
     "visual-structure",
   ]);
+  assert.deepEqual(conversation.support.map(({ provider }) => provider).sort(), ["ocr", "visual-structure"]);
+  assert.deepEqual(header.support.map(({ provider }) => provider).sort(), ["ocr", "visual-structure"]);
+  assert.deepEqual(transcript.support.map(({ provider }) => provider).sort(), ["som-proposal", "visual-structure"]);
+  assert.equal(send.parentElementToken, conversation.elementToken);
+  assert.deepEqual(send.actions, ["click"]);
+  assert.equal(bubble.parentElementToken, transcript.elementToken);
+  assert.equal(bubble.state.authoredBySelf, true);
 });
 
 test("a pane-wide editor separator outranks a darker short text stroke", () => {

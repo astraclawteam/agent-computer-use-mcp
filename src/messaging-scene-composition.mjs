@@ -6,6 +6,7 @@ import {
 } from "./control-surface-detection.mjs";
 
 const SEARCH_LABELS = new Set(["search", "find", "搜索", "查找"]);
+const SEND_LABELS = new Set(["send", "发送"]);
 const VISUAL_THRESHOLDS = Object.freeze([8, 24]);
 const CONVERSATION_STRUCTURE_ROLES = Object.freeze([
   "conversation-pane",
@@ -276,6 +277,19 @@ function composeConversationSceneElements({ ocr, visual, focusedTarget }) {
   const editorVisual = visual
     .filter((proposal) => proposal.source === "som-proposal" && contains(editor.bounds, proposal.bounds))
     .sort(compareArea)[0] ?? null;
+  const transcriptVisual = visual
+    .filter((proposal) => proposal.source === "som-proposal" && contains(transcript.bounds, proposal.bounds))
+    .sort(compareArea)[0] ?? null;
+  const transcriptOcr = ocr.find((element) => contains(transcript.bounds, element.bounds)) ?? null;
+  const sendCandidates = ocr.filter((element) => (
+    contains(editor.bounds, element.bounds)
+    && SEND_LABELS.has(normalizeControlLabel(elementText(element)))
+  ));
+  const send = sendCandidates.length === 1 ? sendCandidates[0] : null;
+  const sendOwners = send ? visualOwnersForOcr(send, visual) : [];
+  const sendOwner = sendOwners.length > 0 && !materiallyDifferentOwners(sendOwners)
+    ? sendOwners.sort(compareArea)[0]
+    : null;
   const paneToken = `conversation:${stableBoxId(pane.bounds)}`;
   const headerToken = `conversation-header:${stableBoxId(header.bounds)}`;
   const transcriptToken = `conversation-transcript:${stableBoxId(transcript.bounds)}`;
@@ -290,7 +304,7 @@ function composeConversationSceneElements({ ocr, visual, focusedTarget }) {
     source: "visual-structure",
     confidence: pane.confidence,
     actions: [],
-    support: independentSupport(pane, null),
+    support: independentSupport(pane, title ?? editorVisual ?? transcriptVisual ?? transcriptOcr),
     guessedAction: false,
   }, {
     hostType: "Container",
@@ -303,7 +317,7 @@ function composeConversationSceneElements({ ocr, visual, focusedTarget }) {
     source: "visual-structure",
     confidence: header.confidence,
     actions: [],
-    support: independentSupport(header, null),
+    support: independentSupport(header, title),
     guessedAction: false,
   }, {
     hostType: "Container",
@@ -316,7 +330,7 @@ function composeConversationSceneElements({ ocr, visual, focusedTarget }) {
     source: "visual-structure",
     confidence: transcript.confidence,
     actions: [],
-    support: independentSupport(transcript, null),
+    support: independentSupport(transcript, transcriptVisual ?? transcriptOcr),
     guessedAction: false,
   }];
   if (title) {
@@ -361,7 +375,79 @@ function composeConversationSceneElements({ ocr, visual, focusedTarget }) {
       state: { focused: targetOverlapsBounds(focusedTarget, editor.bounds) },
     });
   }
+  if (send && sendOwner) {
+    const support = independentSupport(sendOwner, send);
+    elements.push({
+      hostType: "ActionableItem",
+      elementToken: `send:${stableBoxId(sendOwner.bounds)}`,
+      parentElementToken: paneToken,
+      role: "send",
+      name: elementText(send),
+      value: elementText(send),
+      bounds: sendOwner.bounds,
+      sourceRegion: editor.bounds,
+      source: "local-proposal-fusion",
+      modelIdentity: { provider: "local-proposal-fusion", model: "conversation-send-control-v1" },
+      confidence: complementConfidence(support.map((entry) => entry.confidence)),
+      actions: ["click"],
+      support,
+      pixelLimitedAction: true,
+      guessedAction: false,
+      semanticKey: "send:primary",
+    });
+  }
+  elements.push(...composeMessageBubbles({ ocr, visual, transcript, transcriptToken }));
   return elements;
+}
+
+function composeMessageBubbles({ ocr, visual, transcript, transcriptToken }) {
+  const bubbles = [];
+  const seenOwners = new Set();
+  for (const text of ocr) {
+    if (!contains(transcript.bounds, text.bounds)) continue;
+    const owners = visualOwnersForOcr(text, visual)
+      .filter((owner) => contains(transcript.bounds, owner.bounds))
+      .sort(compareArea);
+    if (owners.length === 0 || materiallyDifferentOwners(owners)) continue;
+    const owner = owners[0];
+    const ownerId = stableBoxId(owner.bounds);
+    if (seenOwners.has(ownerId) || !isMessageBubbleGeometry(owner.bounds, transcript.bounds, text.bounds)) continue;
+    seenOwners.add(ownerId);
+    const support = independentSupport(owner, text);
+    const authoredBySelf = owner.bounds.x + (owner.bounds.width / 2)
+      > transcript.bounds.x + (transcript.bounds.width / 2);
+    bubbles.push({
+      hostType: "ActionableItem",
+      elementToken: `message-bubble:${ownerId}`,
+      parentElementToken: transcriptToken,
+      role: "message-bubble",
+      name: elementText(text),
+      value: elementText(text),
+      bounds: owner.bounds,
+      sourceRegion: transcript.bounds,
+      source: "local-proposal-fusion",
+      modelIdentity: { provider: "local-proposal-fusion", model: "conversation-message-bubble-v1" },
+      confidence: complementConfidence(support.map((entry) => entry.confidence)),
+      actions: [],
+      support,
+      guessedAction: false,
+      semanticKey: `message-bubble:${authoredBySelf ? "self" : "other"}:${normalizeControlLabel(elementText(text))}`,
+      state: { authoredBySelf },
+    });
+  }
+  return bubbles;
+}
+
+function isMessageBubbleGeometry(owner, transcript, text) {
+  if (!contains(owner, text)) return false;
+  const widthRatio = owner.width / transcript.width;
+  const heightRatio = owner.height / transcript.height;
+  const centerX = owner.x + (owner.width / 2);
+  const leftMargin = centerX - transcript.x;
+  const rightMargin = transcript.x + transcript.width - centerX;
+  return widthRatio >= 0.08 && widthRatio <= 0.82
+    && heightRatio >= 0.025 && heightRatio <= 0.35
+    && Math.abs(leftMargin - rightMargin) >= transcript.width * 0.08;
 }
 
 function editableEvidenceForKnownControl(elements, bounds) {
@@ -691,6 +777,7 @@ function semanticControlRole(value) {
   if (isSearchIconDecoratedText(value)) return "search";
   const normalized = normalizeControlLabel(value);
   if (SEARCH_LABELS.has(normalized)) return "search";
+  if (SEND_LABELS.has(normalized)) return "send";
   const label = [...SEARCH_LABELS].find((candidate) => normalized.endsWith(candidate));
   if (!label) return null;
   const prefix = normalized.slice(0, -label.length).trim();

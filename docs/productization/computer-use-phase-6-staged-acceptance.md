@@ -1,13 +1,21 @@
 # Computer Use Phase 6: staged real-application acceptance
 
-Status: both known Level 1 composition blockers are repaired on `main`, and
-Level 1 remains open until a real attempt verifies the sent result and final
-idle state. The Host can compose the
+Status: the known Level 1 Scene and composition-root blockers are repaired on
+`main`, and Level 1 remains at 0/10 until a new real XiaozhiClaw attempt verifies
+the sent result and final idle state. The Host can compose the
 search editable from consistent evidence, import relationship-proven owned or
 same-process auxiliary screenshots, and merge their windows, transient
 surfaces, and independently grounded result rows into one versioned Scene. No
 preflight is counted as passed or failed, no later level was started, and no
 candidate artifact was generated.
+
+The most recent failed real attempt used the former raw-tool composition: the
+Agent inspected OCR/chat-body evidence, chose a visual coordinate, and exceeded
+the 60-second limit. It was stopped before send and does not count. The current
+composition exposes `computer.message`, keeps action targets and controller
+lifecycle inside the Host, rejects raw messaging coordinates, and propagates
+MCP cancellation into the in-flight deterministic workflow. Acceptance must
+restart from Level 1 attempt 1 with this composition.
 
 ## Gate contract
 

@@ -11,7 +11,7 @@ All notable changes to `agent-computer-use-mcp` are tracked here.
 - Make OCR geometry observation-only, reject repeated unconfirmed mutations, and execute screenshot-grounded clicks at the verified target center.
 - Prefer changed-region and local-crop OCR, suppress repeated visual understanding for materially unchanged frames, and keep explicit visual crops bounded to the requested scene.
 - Compact application state, semantic elements, OCR rows, lifecycle receipts, and routing metadata on the model-facing channel while retaining complete Host-verifiable structured results.
-- Keep the Agent-facing contract at four tools and preserve Host-only health, diagnostics, installation, and repair operations.
+- Add `computer.message` as the sole Agent-facing deterministic messaging path; move acquire, observe, act, and release behind the Host workflow boundary; reject raw coordinate mutations in messaging Scenes; and preserve Host-only management operations.
 
 ## 0.0.25
 

@@ -11,10 +11,11 @@ This review records the public `computer.*` MCP contract that requires human PR 
 
 | Tool | Review Status | Compatibility | Overlay Exclusion | Desktop Control | Notes |
 | --- | --- | --- | --- | --- | --- |
-| computer.acquire | reviewed | compatible | overlay-free | reviewed | May start desktop control only after policy and approval requirements and an interactive input-desktop check. |
-| computer.observe | reviewed | compatible | overlay-free | reviewed | Detailed observations expose one versioned Host Scene, including structural parentage, observable control state, and optional Host-declared semantic identity; raw provider elements remain evidence and are not parallel action targets. |
-| computer.act | reviewed | compatible | overlay-free | reviewed | Targets the current Scene by elementId and returns exactly committed, not-applied, or indeterminate; indeterminate mutations are never replay-safe. |
-| computer.release | reviewed | compatible | overlay-free | reviewed | Stops active control and clears pending access without leaving an observation overlay. |
+| computer.message | reviewed | compatible | overlay-free | reviewed | Agent-facing deterministic messaging workflow; the Host owns Scene coordinates, fixed step ordering, mutation verification, no-replay policy, and controller release. |
+| computer.acquire | reviewed | compatible | overlay-free | reviewed | Host workflow-internal; may start desktop control only after policy and approval requirements and an interactive input-desktop check. |
+| computer.observe | reviewed | compatible | overlay-free | reviewed | Host workflow-internal; detailed observations expose one versioned Host Scene, and raw provider elements remain evidence rather than parallel action targets. |
+| computer.act | reviewed | compatible | overlay-free | reviewed | Host workflow-internal; targets the current Scene by elementId and returns exactly committed, not-applied, or indeterminate. |
+| computer.release | reviewed | compatible | overlay-free | reviewed | Host workflow-internal; stops active control and clears pending access without leaving an observation overlay. |
 | computer.health | reviewed | compatible | overlay-free | reviewed | Host-only health report includes the versioned capability handshake; never projected to the Agent. |
 | computer.doctor | reviewed | compatible | overlay-free | reviewed | Host-only diagnostics; repair actions remain plan-only. |
 | computer.installation | reviewed | compatible | overlay-free | reviewed | Host-only install manifest and client config templates. |

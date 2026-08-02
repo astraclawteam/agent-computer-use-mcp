@@ -1,10 +1,11 @@
 # Computer Use Phase 5: bounded LLM interaction
 
-Status: implemented and verified with an injected Host completion port on
-`main`. The Computer Use module does not own model credentials, provider
-routing, or Agent lifecycle. Runtime/Agent supplies the structured completion
-function; this module owns the admissible decision contract and validates every
-model result before it can affect the deterministic workflow.
+Status: implemented in the real MCP composition root on `main`. The
+Agent-facing `computer.message` tool accepts only the semantic application,
+query, and message slots, then runs the Phase 4 state machine inside the Host.
+Exact matches complete without another model decision; ambiguous candidates
+are returned only as opaque IDs for a bounded follow-up selection. The module
+does not own model credentials, provider routing, or Agent lifecycle.
 
 ## Allowed model authority
 
@@ -38,6 +39,14 @@ evidence-consistent, actionable results reach this list. A model-selected ID is
 therefore a semantic choice, not an action target supplied by the model.
 
 ## Workflow composition
+
+`computer.message` is the only Agent-facing messaging mutation path. It owns
+acquire, current Scene observation, element-targeted actions, fixed transition
+order, canonical receipts, Stop propagation, and release. Raw coordinate or
+provider-token mutations are rejected once the Host Scene is recognized as a
+messaging interface. The low-level lifecycle tools are Host-only and cannot be
+selected by the Agent. Model-facing observations omit inconsistent evidence,
+provider bindings, and chat-body bubbles.
 
 `runLlmBoundedMessagingWorkflow` performs goal understanding before creating
 the deterministic Phase 4 state machine. During `select-result`, the state

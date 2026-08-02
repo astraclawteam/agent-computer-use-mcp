@@ -13,9 +13,14 @@ test("Windows SEA smoke uses the released executable directly and fails closed o
   assert.match(source, /connection\.call\("computer\.release"/u);
   assert.match(source, /allowToolError: true/u);
   assert.match(source, /clickOutcomeVerified/u);
-  assert.match(source, /click\.outcome === "delivered"/u);
-  assert.match(source, /click\.result\?\.verified === true/u);
+  assert.match(source, /capture\.scene\?\.elements/u);
+  assert.match(source, /elementId: name\.id/u);
+  assert.match(source, /click\.outcome === "committed"/u);
+  assert.match(source, /click\.outcome === "indeterminate"/u);
+  assert.match(source, /postcondition: "saved-file"/u);
+  assert.match(source, /replayed: false/u);
   assert.match(source, /savedText !== "windows-sea-layer-a"/u);
+  assert.doesNotMatch(source, /elementToken|elementIndex/u);
   assert.doesNotMatch(source, /connection\.call\("computer\.(?:request_access|capture|cancel|list_state)"/u);
   assert.doesNotMatch(source, /command:\s*process\.execPath/u);
 });
@@ -24,7 +29,8 @@ test("Windows SEA smoke defaults to the current package version and releases con
   const script = await readFile(new URL("../scripts/smoke-windows-sea-artifact.mjs", import.meta.url), "utf8");
   const source = await readFile(new URL("../src/windows-sea-smoke.mjs", import.meta.url), "utf8");
   assert.match(script, /JSON\.parse\(await readFile\("package\.json", "utf8"\)\)/u);
-  assert.match(script, /artifacts\/mcp-executable\/\$\{packageJson\.version\}/u);
+  assert.match(script, /const version = readOption\("--version"\) \?\? packageJson\.version/u);
+  assert.match(script, /artifacts\/mcp-executable\/\$\{version\}/u);
   assert.doesNotMatch(script, /artifacts\/mcp-executable\/0\.0\.\d+/u);
   assert.match(source, /name: "computer\.release"/u);
   assert.doesNotMatch(source, /name: "computer\.revoke"/u);

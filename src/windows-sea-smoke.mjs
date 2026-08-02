@@ -9,6 +9,7 @@ import { verifyWindowsSeaArtifactTree } from "./windows-sea-artifact.mjs";
 
 const execFileAsync = promisify(execFile);
 const EXPECTED_TOOLS = [
+  "computer.message",
   "computer.acquire",
   "computer.observe",
   "computer.act",
@@ -68,15 +69,14 @@ export async function runWindowsSeaSmoke(options = {}) {
     const name = findElement(capture, "Name");
     const save = findElement(capture, "Save");
     await connection.call("computer.act", {
-      action: { kind: "set_value", elementToken: name.elementToken, elementIndex: name.elementIndex, value: "windows-sea-layer-a" },
+      action: { kind: "set_value", elementId: name.id, value: "windows-sea-layer-a" },
     });
     const postValueCapture = await connection.call("computer.observe", { mode: "semantic" });
     const postValueSave = findElement(postValueCapture, "Save");
     const click = await connection.call("computer.act", {
       action: {
         kind: "click",
-        elementToken: postValueSave.elementToken,
-        elementIndex: postValueSave.elementIndex,
+        elementId: postValueSave.id,
         deliveryMode: "background",
         captureAfter: true,
       },
@@ -86,12 +86,12 @@ export async function runWindowsSeaSmoke(options = {}) {
     const cancel = await connection.call("computer.release", { reason: "layer-a-complete" });
     const state = await connection.call("computer.observe", { mode: "state" });
     const clickOutcomeVerified = (
-      click.status === "ok"
-      && click.outcome === "applied"
-      && click.result?.verified === true
+      click.status === "committed"
+      && click.outcome === "committed"
+      && savedText === "windows-sea-layer-a"
     ) || (
-      click.status === "ok"
-      && click.outcome === "delivered"
+      click.status === "indeterminate"
+      && click.outcome === "indeterminate"
       && savedText === "windows-sea-layer-a"
     );
     if (
@@ -109,6 +109,8 @@ export async function runWindowsSeaSmoke(options = {}) {
         clickOverlay: click.includeUserOverlay,
         clickStatus: click.status,
         clickOutcome: click.outcome,
+        clickResult: click.result,
+        clickError: click.error,
         savedText,
         cancel: cancel.status,
         state: state.status,
@@ -135,7 +137,14 @@ export async function runWindowsSeaSmoke(options = {}) {
       target: manifest.target,
       toolCount: tools.length,
       health: { status: health.status, driver: health.driver.status, ocr: health.ocr.status },
-      nativeLab: { status: "passed", overlayExcluded: true, safeClick: true },
+      nativeLab: {
+        status: "passed",
+        overlayExcluded: true,
+        safeClick: true,
+        actionOutcome: click.outcome,
+        postcondition: "saved-file",
+        replayed: false,
+      },
       cancellation: { status: "passed", processCleanup: true },
       tamperRejected,
       startup: { systemNodeRequired: false, sourceCwdRequired: false, networkAllowed: false },
@@ -226,9 +235,27 @@ function assertExactTools(actual) {
 }
 
 function findElement(capture, name) {
-  const element = capture.elements?.find((candidate) => candidate.name === name);
-  if (!element) throw smokeError("sea_smoke.element_missing", name);
+  const element = capture.scene?.elements?.find((candidate) => candidate.name === name);
+  if (!element) {
+    throw smokeError("sea_smoke.element_missing", JSON.stringify({
+      expected: name,
+      legacyElements: capture.elements?.map(summarizeElement) ?? [],
+      sceneElements: capture.scene?.elements?.map(summarizeElement) ?? [],
+      sceneStatus: capture.scene?.status,
+    }));
+  }
   return element;
+}
+
+function summarizeElement(element) {
+  return {
+    id: element.id,
+    type: element.type,
+    role: element.role,
+    name: element.name,
+    consistency: element.evidenceConsistency,
+    actionable: element.actionable,
+  };
 }
 
 function required(value, code) {

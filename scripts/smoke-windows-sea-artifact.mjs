@@ -3,10 +3,11 @@ import { readFile } from "node:fs/promises";
 import { runWindowsSeaSmoke } from "../src/windows-sea-smoke.mjs";
 
 const packageJson = JSON.parse(await readFile("package.json", "utf8"));
+const version = readOption("--version") ?? packageJson.version;
 const artifactPath = readOption("--artifact")
   ?? resolve(
-    `artifacts/mcp-executable/${packageJson.version}/win32-x64/`
-    + `agent-computer-use-mcp-${packageJson.version}-win32-x64.tar.gz`,
+    `artifacts/mcp-executable/${version}/win32-x64/`
+    + `agent-computer-use-mcp-${version}-win32-x64.tar.gz`,
   );
 
 const result = await runWindowsSeaSmoke({ artifactPath });
