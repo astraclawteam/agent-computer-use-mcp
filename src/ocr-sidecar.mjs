@@ -7,6 +7,9 @@ import { fileURLToPath } from "node:url";
 import { normalizeRecognizedUiText } from "./ui-text-normalization.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
+const RUNTIME_ENV = globalThis.process?.env ?? {};
+const RUNTIME_PLATFORM = globalThis.process?.platform ?? "unknown";
+const RUNTIME_EXECUTABLE = globalThis.process?.execPath ?? "node";
 const DEFAULT_SIDECAR_PATH = resolveOcrSidecarPath();
 
 const RUNTIME_PRIORITY = [
@@ -43,7 +46,7 @@ const RUNTIME_PRIORITY = [
 ];
 
 export function resolveOcrSidecarPath(options = {}) {
-  const env = options.env ?? process.env;
+  const env = options.env ?? RUNTIME_ENV;
   const moduleDirectory = options.moduleDirectory ?? __dirname;
   const pathExists = options.pathExists ?? existsSync;
   const currentModulePath = resolve(options.currentModulePath ?? fileURLToPath(import.meta.url));
@@ -57,13 +60,13 @@ export function resolveOcrSidecarPath(options = {}) {
 }
 
 function samePath(left, right) {
-  return process.platform === "win32" ? left.toLowerCase() === right.toLowerCase() : left === right;
+  return RUNTIME_PLATFORM === "win32" ? left.toLowerCase() === right.toLowerCase() : left === right;
 }
 
 export function createPlatformOcrEnvironment(options = {}) {
   const modelRoot = requiredPath(options.modelRoot, "ocr.model_root_missing");
   const runtimeRoot = requiredPath(options.runtimeRoot, "ocr.runtime_root_missing");
-  const environment = { ...(options.baseEnvironment ?? process.env) };
+  const environment = { ...(options.baseEnvironment ?? RUNTIME_ENV) };
   const pathValue = Object.entries(environment)
     .find(([name]) => name.toLowerCase() === "path")?.[1] ?? "";
   for (const name of Object.keys(environment)) {
@@ -159,7 +162,7 @@ function pickOcrModelIdentity(response) {
 
 export class OcrSidecarClient {
   constructor(options = {}) {
-    this.node = options.node ?? { command: process.execPath, args: [], label: "node" };
+    this.node = options.node ?? { command: RUNTIME_EXECUTABLE, args: [], label: "node" };
     this.sidecarPath = options.sidecarPath ?? DEFAULT_SIDECAR_PATH;
     this.timeoutMs = options.timeoutMs ?? 15000;
   }
@@ -197,10 +200,10 @@ export class OcrSidecarClient {
 
 export class OcrSidecarSession {
   constructor(options = {}) {
-    this.node = options.node ?? { command: process.execPath, args: [], label: "node" };
+    this.node = options.node ?? { command: RUNTIME_EXECUTABLE, args: [], label: "node" };
     this.sidecarPath = options.sidecarPath ?? DEFAULT_SIDECAR_PATH;
     this.timeoutMs = options.timeoutMs ?? 30000;
-    this.environment = options.environment ?? process.env;
+    this.environment = options.environment ?? RUNTIME_ENV;
     this.child = null;
     this.nextId = 1;
     this.pending = new Map();

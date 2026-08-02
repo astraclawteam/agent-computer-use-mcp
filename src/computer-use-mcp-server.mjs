@@ -1173,6 +1173,12 @@ export async function projectComputerUseMediaResult(router, name, args, value) {
     ?? acquisitionObservation?.capture?.path
     ?? value?.artifact?.path
     ?? value?.capture?.path;
+  const observationCapture = acquisitionObservation?.capture ?? value?.capture;
+  const relatedArtifacts = (Array.isArray(observationCapture?.relatedSurfaces)
+    ? observationCapture.relatedSurfaces
+    : [])
+    .filter((surface) => typeof surface?.path === "string")
+    .slice(0, 8);
   const explicitVisualQuestion = typeof args?.visualQuestion === "string"
     && args.visualQuestion.trim() !== "";
   const visualUnderstandingEligible = value?.perceptionRouting?.visualUnderstandingEligible !== false;
@@ -1187,19 +1193,51 @@ export async function projectComputerUseMediaResult(router, name, args, value) {
   if (typeof router?.readOwnedArtifact !== "function") {
     throw new Error("artifact.bridge_unavailable: Computer Use cannot safely read its capture asset");
   }
-  const bytes = await router.readOwnedArtifact(artifactPath, { maxBytes: 20 * 1024 * 1024 });
-  if (!Buffer.isBuffer(bytes)
-    || bytes.byteLength < 8
-    || !bytes.subarray(0, 8).equals(Buffer.from("89504e470d0a1a0a", "hex"))) {
-    throw new Error("artifact.invalid: Computer Use capture is not a PNG image");
-  }
-  return {
-    structuredContent,
-    imageContent: [{
+  const artifacts = [{
+    path: artifactPath,
+    screenshotId: acquisitionObservation?.scene?.screenshotId ?? value?.scene?.screenshotId,
+    windowId: acquisitionObservation?.scene?.windowId ?? value?.scene?.windowId,
+    zIndex: 0,
+  }, ...relatedArtifacts.map((surface) => ({
+    path: surface.path,
+    screenshotId: surface.screenshotId,
+    windowId: String(surface.hwnd),
+    zIndex: surface.zIndex,
+    originX: surface.x,
+    originY: surface.y,
+    width: surface.width,
+    height: surface.height,
+  }))];
+  const imageContent = [];
+  for (const artifact of artifacts) {
+    const bytes = await router.readOwnedArtifact(artifact.path, { maxBytes: 20 * 1024 * 1024 });
+    if (!Buffer.isBuffer(bytes)
+      || bytes.byteLength < 8
+      || !bytes.subarray(0, 8).equals(Buffer.from("89504e470d0a1a0a", "hex"))) {
+      throw new Error("artifact.invalid: Computer Use capture is not a PNG image");
+    }
+    const hasScreenshotIdentity = artifact.screenshotId !== undefined
+      && artifact.windowId !== undefined;
+    imageContent.push({
       type: "image",
       data: bytes.toString("base64"),
       mimeType: "image/png",
-    }],
+      ...(hasScreenshotIdentity ? { _meta: {
+        "computerUse/screenshot": {
+          screenshotId: String(artifact.screenshotId),
+          windowId: String(artifact.windowId),
+          zIndex: Number.isFinite(artifact.zIndex) ? artifact.zIndex : 0,
+          ...(Number.isFinite(artifact.originX) ? { originX: artifact.originX } : {}),
+          ...(Number.isFinite(artifact.originY) ? { originY: artifact.originY } : {}),
+          ...(Number.isFinite(artifact.width) ? { width: artifact.width } : {}),
+          ...(Number.isFinite(artifact.height) ? { height: artifact.height } : {}),
+        },
+      } } : {}),
+    });
+  }
+  return {
+    structuredContent,
+    imageContent,
   };
 }
 
@@ -1439,7 +1477,14 @@ export async function observeComputer(router, args, requestContext) {
       ...(requestContext === undefined ? {} : { requestContext }),
     });
   }
-  if (mode === "capture-window") return router.captureWindow(options);
+  if (mode === "capture-window") {
+    return router.capture({
+      ...options,
+      mode: "screenshot",
+      requestedMode: "capture-window",
+      ...(requestContext === undefined ? {} : { requestContext }),
+    });
+  }
   if (mode === "diff") return router.observeDiff(options);
   throw new Error(`observe_mode_not_found: ${mode}`);
 }

@@ -613,8 +613,8 @@ const LEGACY_COMPUTER_USE_MCP_TOOLS = [
             },
             inputBehavior: {
               type: "string",
-              enum: ["incremental"],
-              description: "Required for type_text. Emits native per-edit events so custom controls react without a paste-only shortcut.",
+              enum: ["incremental", "commit"],
+              description: "Required for type_text. Use incremental when each edit event is part of the postcondition; use commit for one exact atomic value with read-back verification.",
             },
             key: {
               type: "string",

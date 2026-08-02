@@ -29,14 +29,14 @@ test("scene values and OCR tokens remain owned by their observed region", () => 
     screenshot,
     regions,
     evidence: [
-      { claimId: "query", source: "ocr", regionId: "search", text: "宋鹏", bounds: { x: 30, y: 18, width: 60, height: 22 } },
-      { claimId: "candidate", source: "ocr", regionId: "dropdown", text: "宋鹏", bounds: { x: 35, y: 75, width: 60, height: 22 } },
-      { claimId: "history-text", source: "ocr", regionId: "history", text: "宋鹏", bounds: { x: 35, y: 280, width: 60, height: 22 } },
-      { claimId: "chat-text", source: "ocr", regionId: "chat", text: "宋鹏", bounds: { x: 500, y: 300, width: 60, height: 22 } },
+      { claimId: "query", source: "ocr", regionId: "search", text: "张三", bounds: { x: 30, y: 18, width: 60, height: 22 } },
+      { claimId: "candidate", source: "ocr", regionId: "dropdown", text: "张三", bounds: { x: 35, y: 75, width: 60, height: 22 } },
+      { claimId: "history-text", source: "ocr", regionId: "history", text: "张三", bounds: { x: 35, y: 280, width: 60, height: 22 } },
+      { claimId: "chat-text", source: "ocr", regionId: "chat", text: "张三", bounds: { x: 500, y: 300, width: 60, height: 22 } },
     ],
   });
 
-  assert.equal(scene.regionValues.search, "宋鹏");
+  assert.equal(scene.regionValues.search, "张三");
   assert.equal(scene.elements.filter((element) => element.parentId === "search").length, 1);
   assert.equal(scene.elements.filter((element) => element.parentId === "dropdown").length, 1);
   assert.equal(scene.elements.filter((element) => element.parentId === "history").length, 1);
@@ -121,7 +121,7 @@ test("Host Scene is the single versioned ownership model for semantic and OCR ev
         elements: [{
           elementToken: "ocr-query",
           role: "text",
-          name: "宋鹏",
+          name: "张三",
           source: "ocr",
           bounds: { x: 30, y: 18, width: 60, height: 22 },
           actions: ["click"],
@@ -140,6 +140,9 @@ test("Host Scene is the single versioned ownership model for semantic and OCR ev
   assert.equal(scene.elements.every((element) => element.coordinate.screenshotId === "screenshot-11"), true);
   assert.equal(scene.elements.every((element) => element.coordinate.windowId === "window-1"), true);
   assert.equal(scene.elements.every((element) => element.coordinate.space === "window-local"), true);
+  assert.equal(scene.elements.every((element) => (
+    element.coordinate.cropOffset.x === 0 && element.coordinate.cropOffset.y === 0
+  )), true);
   assert.equal(scene.elements.every((element) => element.parentId !== undefined), true);
   assert.equal(scene.elements.every((element) => Array.isArray(element.invalidatesOn)), true);
 
@@ -250,6 +253,72 @@ test("Host Scene preserves structural ownership, semantic identity, and observab
   assert.equal(editor.parentId, conversation.id);
   assert.deepEqual(editor.state, { focused: true });
   assert.equal(editor.semanticKey, "editor:primary");
+});
+
+test("Host Scene merges an owned window with its own screenshot and controller transform", () => {
+  const scene = buildHostScene({
+    observationVersion: 12,
+    observation: {
+      observationId: "multi-window-observation",
+      coordinateSpace: "window-local",
+      coordinateBounds: { x: 0, y: 0, width: 954, height: 724 },
+      surfaceReceipt: { screenshotId: "screenshot-0", windowId: "42", generation: 12 },
+      window: { id: "42", title: "Main", bounds: { x: 452, y: 100, width: 954, height: 724 } },
+      elements: [{
+        hostType: "Window",
+        role: "owned-auxiliary-window",
+        elementToken: "owned-window:77",
+        parentSceneRoot: true,
+        bounds: { x: 0, y: 0, width: 368, height: 352 },
+        source: "semantic",
+        actions: [],
+        coordinate: {
+          screenshotId: "screenshot-1",
+          windowId: "77",
+          space: "window-local",
+          cropOffset: { x: 0, y: 0 },
+          scale: { x: 1, y: 1 },
+          actionWindowId: "42",
+          actionTransform: { scaleX: 1, scaleY: 1, offsetX: 49, offsetY: 63 },
+        },
+      }, {
+        hostType: "TransientSurface",
+        role: "search-results",
+        elementToken: "search-results:77",
+        parentElementToken: "owned-window:77",
+        bounds: { x: 0, y: 0, width: 368, height: 352 },
+        source: "semantic",
+        actions: [],
+        coordinate: {
+          screenshotId: "screenshot-1",
+          windowId: "77",
+          space: "window-local",
+          cropOffset: { x: 0, y: 0 },
+          scale: { x: 1, y: 1 },
+          actionWindowId: "42",
+          actionTransform: { scaleX: 1, scaleY: 1, offsetX: 49, offsetY: 63 },
+        },
+      }],
+    },
+  });
+
+  const main = scene.elements.find((element) => element.type === "Window" && element.role === "main-window");
+  const owned = resolveHostSceneElement(scene, { elementToken: "owned-window:77" });
+  const transient = resolveHostSceneElement(scene, { elementToken: "search-results:77" });
+  assert.equal(owned.type, "Window");
+  assert.equal(owned.parentId, main.id);
+  assert.equal(transient.type, "TransientSurface");
+  assert.equal(transient.parentId, owned.id);
+  assert.deepEqual(transient.coordinate, {
+    screenshotId: "screenshot-1",
+    windowId: "77",
+    space: "window-local",
+    cropOffset: { x: 0, y: 0 },
+    scale: { x: 1, y: 1 },
+    bounds: { x: 0, y: 0, width: 368, height: 352 },
+    actionWindowId: "42",
+    actionTransform: { scaleX: 1, scaleY: 1, offsetX: 49, offsetY: 63 },
+  });
 });
 
 test("consistent local fusion projects a search container and Editable without granting OCR authority", () => {

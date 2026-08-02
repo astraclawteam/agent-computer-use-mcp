@@ -68,6 +68,18 @@ test("SOM proposal provider returns observation.insufficient for blank or unsafe
   assert.equal(result.includeUserOverlay, false);
 });
 
+test("SOM proposal provider ignores transparent window padding and proposes an opaque row", async () => {
+  const { proposeSomFromImageFile } = await import("../src/som-proposal-provider.mjs");
+  const imagePath = await createTransparentWindowFixture();
+
+  const result = await proposeSomFromImageFile({ imagePath, minArea: 120, threshold: 8 });
+
+  assert.equal(result.status, "proposed");
+  assert.deepEqual(result.proposals.map((proposal) => proposal.bounds), [
+    { x: 10, y: 30, width: 100, height: 30 },
+  ]);
+});
+
 test("Phase 3.3 has an executable SOM proposal provider smoke script", async () => {
   const packageJson = JSON.parse(readFileSync("package.json", "utf8"));
   assert.equal(packageJson.scripts["phase:3.3"], "node src/phase-3-3-som-proposal-provider.mjs");
@@ -110,6 +122,20 @@ async function createBlankFixture() {
   const ctx = canvas.getContext("2d");
   ctx.fillStyle = "white";
   ctx.fillRect(0, 0, 96, 72);
+  await writeFile(imagePath, canvas.toBuffer("image/png"));
+  return imagePath;
+}
+
+async function createTransparentWindowFixture() {
+  const dir = await mkdtemp(join(tmpdir(), "agent-computer-use-som-transparent-"));
+  const imagePath = join(dir, "transparent-window.png");
+  const canvas = createCanvas(120, 100);
+  const ctx = canvas.getContext("2d");
+  ctx.clearRect(0, 0, 120, 100);
+  ctx.fillStyle = "white";
+  ctx.fillRect(10, 10, 100, 80);
+  ctx.fillStyle = "#eeeeee";
+  ctx.fillRect(10, 30, 100, 30);
   await writeFile(imagePath, canvas.toBuffer("image/png"));
   return imagePath;
 }

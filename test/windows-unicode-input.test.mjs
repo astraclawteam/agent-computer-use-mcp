@@ -21,6 +21,8 @@ test("sendWindowsUnicodeText keeps text off process arguments and delivers it th
   const result = await sendWindowsUnicodeText({
     windowId: 42,
     processId: 1234,
+    focusX: 12,
+    focusY: 16,
     text: "Hello",
     platform: "win32",
     powershellPath: "powershell.exe",
@@ -35,10 +37,13 @@ test("sendWindowsUnicodeText keeps text off process arguments and delivers it th
     focusVerified: true,
     deliveryPath: "windows_sendinput_unicode_ime_neutral",
   });
-  const payload = JSON.parse(stdinText);
+  const envelope = JSON.parse(stdinText);
+  const payload = envelope.payload;
   assert.deepEqual(payload, {
     windowId: "42",
     processId: 1234,
+    focusX: 12,
+    focusY: 16,
     textBase64: Buffer.from("Hello", "utf8").toString("base64"),
     replaceAll: false,
     inputBehavior: "incremental",
@@ -49,7 +54,7 @@ test("sendWindowsUnicodeText keeps text off process arguments and delivers it th
   assert.equal(spawnCalls[0].args.some((value) => value.includes("Hello")), false);
   assert.equal(spawnCalls[0].args.includes("-Sta"), true);
   assert.ok(spawnCalls[0].args.at(-1).length < 30_000, "encoded bridge must stay below Windows command-line limits");
-  const bridgeScript = Buffer.from(spawnCalls[0].args.at(-1), "base64").toString("utf16le");
+  const bridgeScript = Buffer.from(envelope.scriptBase64, "base64").toString("utf8");
   assert.equal(bridgeScript.split("[AgentComputerUseIncrementalInput]::Send(").length - 1, 1);
   assert.match(bridgeScript, /SendInput\(/);
   assert.match(bridgeScript, /private const uint KEYEVENTF_UNICODE = 0x0004;/);
@@ -63,10 +68,12 @@ test("sendWindowsUnicodeText keeps text off process arguments and delivers it th
 
 test("sendWindowsUnicodeText suspends active IME composition for non-ASCII incremental text", async () => {
   let encodedBridge = "";
+  let stdinText = "";
   const spawnProcess = (_command, args) => {
     encodedBridge = args.at(-1);
     return fakeChild({
-      onStdin(_value, child) {
+      onStdin(value, child) {
+        stdinText = value;
         child.stdout.end('{"status":"ok","utf16CodeUnits":1,"clipboardRestored":true,"changeSignalDelivered":true,"focusVerified":true,"deliveryPath":"windows_sendinput_unicode_ime_neutral"}');
         child.emit("close", 0, null);
       },
@@ -76,6 +83,8 @@ test("sendWindowsUnicodeText suspends active IME composition for non-ASCII incre
   const result = await sendWindowsUnicodeText({
     windowId: 42,
     processId: 1234,
+    focusX: 12,
+    focusY: 16,
     text: "\u5b8b",
     inputBehavior: "incremental",
     platform: "win32",
@@ -84,7 +93,8 @@ test("sendWindowsUnicodeText suspends active IME composition for non-ASCII incre
   });
 
   assert.equal(result.deliveryPath, "windows_sendinput_unicode_ime_neutral");
-  const bridgeScript = Buffer.from(encodedBridge, "base64").toString("utf16le");
+  assert.ok(encodedBridge.length < 30_000);
+  const bridgeScript = Buffer.from(JSON.parse(stdinText).scriptBase64, "base64").toString("utf8");
   assert.match(bridgeScript, /AgentComputerUseIncrementalInput/);
   assert.match(bridgeScript, /GetGUIThreadInfo\(/);
   assert.match(bridgeScript, /ImmAssociateContext\(/);
@@ -108,32 +118,39 @@ test("sendWindowsUnicodeText sends replace-all intent through the private stdin 
   const result = await sendWindowsUnicodeText({
     windowId: 42,
     processId: 1234,
-    text: "宋鹏",
+    text: "张三",
     replaceAll: true,
     inputBehavior: "commit",
+    focusX: 12,
+    focusY: 16,
     platform: "win32",
     powershellPath: "powershell.exe",
     spawnProcess,
   });
 
-  const payload = JSON.parse(stdinText);
+  const envelope = JSON.parse(stdinText);
+  const payload = envelope.payload;
   assert.equal(payload.replaceAll, true);
   assert.equal(payload.inputBehavior, "commit");
+  assert.equal(payload.focusX, 12);
+  assert.equal(payload.focusY, 16);
   assert.equal(result.exactValueVerified, true);
   assert.equal(result.readBackStatus, "available");
   assert.equal(result.readBackComparison, "exact");
   assert.equal(result.readBackUtf16CodeUnits, 2);
-  const bridgeScript = Buffer.from(encodedBridge, "base64").toString("utf16le");
-  assert.match(bridgeScript, /read-back selection/);
-  assert.match(bridgeScript, /readBack == expected/);
-  assert.match(bridgeScript, /read-back selection collapse/);
-  assert.equal(Buffer.from(payload.textBase64, "base64").toString("utf8"), "宋鹏");
+  assert.ok(encodedBridge.length < 30_000, "encoded bootstrap must stay below Windows command-line limits");
+  const bridgeScript = Buffer.from(envelope.scriptBase64, "base64").toString("utf8");
+  assert.doesNotMatch(bridgeScript, /read-back selection/);
+  assert.doesNotMatch(bridgeScript, /WM_COPY|EM_SETSEL|agent-computer-use-/);
+  assert.match(bridgeScript, /AutomationElement\]::FocusedElement/);
+  assert.match(bridgeScript, /containsApprovedPoint/);
+  assert.equal(Buffer.from(payload.textBase64, "base64").toString("utf8"), "张三");
 });
 
 test("sendWindowsUnicodeText redacts text from bridge failures", async () => {
   const spawnProcess = () => fakeChild({
     onStdin(_value, child) {
-      child.stderr.end("failed while handling 宋鹏");
+      child.stderr.end("failed while handling 张三");
       child.emit("close", 1, null);
     },
   });
@@ -142,14 +159,16 @@ test("sendWindowsUnicodeText redacts text from bridge failures", async () => {
     () => sendWindowsUnicodeText({
       windowId: 42,
       processId: 1234,
-      text: "宋鹏",
+      focusX: 12,
+      focusY: 16,
+      text: "张三",
       platform: "win32",
       powershellPath: "powershell.exe",
       spawnProcess,
     }),
     (error) => {
       assert.equal(error.code, "unicode_input.bridge_process_failed");
-      assert.doesNotMatch(error.message, /宋鹏/);
+      assert.doesNotMatch(error.message, /张三/);
       assert.equal(error.detail.stage, "bridge-execution");
       assert.equal(error.detail.effect, "indeterminate");
       assert.deepEqual(error.detail.sideEffects, {
@@ -176,6 +195,8 @@ test("sendWindowsUnicodeText reports cancellation stage and possible side effect
   const operation = sendWindowsUnicodeText({
     windowId: 42,
     processId: 1234,
+    focusX: 12,
+    focusY: 16,
     text: "正在输入的中文",
     platform: "win32",
     powershellPath: "powershell.exe",
@@ -206,6 +227,8 @@ test("sendWindowsUnicodeText reports stdin rejection as not applied", async () =
     () => sendWindowsUnicodeText({
       windowId: 42,
       processId: 1234,
+      focusX: 12,
+      focusY: 16,
       text: "中文",
       platform: "win32",
       powershellPath: "powershell.exe",
@@ -232,6 +255,8 @@ test("sendWindowsUnicodeText rejects unsupported platforms and oversized payload
     () => sendWindowsUnicodeText({
       windowId: 42,
       processId: 1234,
+      focusX: 12,
+      focusY: 16,
       text: "中文",
       platform: "linux",
       spawnProcess,
@@ -252,6 +277,8 @@ test("sendWindowsUnicodeText rejects unsupported platforms and oversized payload
     () => sendWindowsUnicodeText({
       windowId: 42,
       processId: 0,
+      focusX: 12,
+      focusY: 16,
       text: "",
       platform: "win32",
       spawnProcess,
@@ -262,6 +289,8 @@ test("sendWindowsUnicodeText rejects unsupported platforms and oversized payload
     () => sendWindowsUnicodeText({
       windowId: 42,
       processId: 1234,
+      focusX: 12,
+      focusY: 16,
       text: "",
       inputBehavior: "application-specific",
       platform: "win32",

@@ -4,6 +4,13 @@ import { join } from "node:path";
 const MAX_TEXT_CODE_UNITS = 32_768;
 const MAX_BRIDGE_OUTPUT_BYTES = 64 * 1024;
 const DEFAULT_TIMEOUT_MS = 5_000;
+const POWERSHELL_STDIN_BOOTSTRAP = String.raw`
+$ErrorActionPreference = "Stop"
+$envelope = [Console]::In.ReadToEnd() | ConvertFrom-Json
+$global:AgentComputerUsePayload = $envelope.payload
+$script = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String([string]$envelope.scriptBase64))
+Invoke-Expression $script
+`;
 
 const WINDOWS_INCREMENTAL_INPUT_SCRIPT = String.raw`
 $ErrorActionPreference = "Stop"
@@ -154,7 +161,7 @@ public static class AgentComputerUseIncrementalInput
 }
 '@
 
-$payload = [Console]::In.ReadToEnd() | ConvertFrom-Json
+$payload = $global:AgentComputerUsePayload
 $text = [System.Text.Encoding]::UTF8.GetString(
     [System.Convert]::FromBase64String([string]$payload.textBase64)
 )
@@ -178,6 +185,8 @@ const WINDOWS_UNICODE_INPUT_SCRIPT = String.raw`
 $ErrorActionPreference = "Stop"
 
 Add-Type -AssemblyName System.Windows.Forms
+Add-Type -AssemblyName UIAutomationClient
+Add-Type -AssemblyName UIAutomationTypes
 Add-Type -TypeDefinition @'
 using System;
 using System.Runtime.InteropServices;
@@ -192,10 +201,7 @@ public static class AgentComputerUseUnicodeInput
     private const ushort VK_CONTROL = 0x11;
     private const ushort VK_A = 0x41;
     private const ushort VK_BACK = 0x08;
-    private const ushort VK_RIGHT = 0x27;
     private const ushort VK_SPACE = 0x20;
-    private const uint WM_CHAR = 0x0102;
-    private const uint SMTO_ABORTIFHUNG = 0x0002;
 
     [StructLayout(LayoutKind.Sequential)]
     private struct INPUT
@@ -347,15 +353,8 @@ public static class AgentComputerUseUnicodeInput
             Clipboard.SetDataObject(replacement, true);
             SendChord(VK_CONTROL, 0x56, inputSize, "clipboard paste");
             pasted = true;
-            Thread.Sleep(50);
+            Thread.Sleep(100);
             EmitChangeBoundary(inputSize);
-            exactValueVerified = TryVerifyFocusedValue(
-                text,
-                inputSize,
-                out readBackAvailable,
-                out readBackComparison,
-                out readBackUtf16CodeUnits
-            );
         }
         finally
         {
@@ -388,64 +387,6 @@ public static class AgentComputerUseUnicodeInput
             ReadBackComparison = readBackComparison,
             ReadBackUtf16CodeUnits = readBackUtf16CodeUnits
         };
-    }
-
-    private static bool TryVerifyFocusedValue(
-        string expected,
-        int inputSize,
-        out bool readBackAvailable,
-        out string comparison,
-        out int readBackUtf16CodeUnits
-    )
-    {
-        readBackAvailable = false;
-        comparison = "unavailable";
-        readBackUtf16CodeUnits = 0;
-        string sentinel = "agent-computer-use-" + Guid.NewGuid().ToString("N");
-        try
-        {
-            DataObject marker = new DataObject();
-            marker.SetData(DataFormats.UnicodeText, true, sentinel);
-            Clipboard.SetDataObject(marker, true);
-            SendChord(VK_CONTROL, VK_A, inputSize, "read-back selection");
-            SendChord(VK_CONTROL, 0x43, inputSize, "read-back copy");
-            for (int attempt = 0; attempt < 10; attempt++)
-            {
-                try
-                {
-                    string readBack = Clipboard.GetText(TextDataFormat.UnicodeText);
-                    if (readBack != sentinel && (readBack.Length > 0 || expected.Length == 0))
-                    {
-                        readBackAvailable = true;
-                        readBackUtf16CodeUnits = readBack.Length;
-                        if (readBack == expected)
-                        {
-                            comparison = "exact";
-                            return true;
-                        }
-                        if (readBack.Trim() == expected)
-                            comparison = "whitespace-only-difference";
-                        else if (readBack.Normalize() == expected.Normalize())
-                            comparison = "unicode-normalization-only-difference";
-                        else
-                            comparison = "different";
-                        return false;
-                    }
-                }
-                catch (System.Runtime.InteropServices.ExternalException) {}
-                Thread.Sleep(25);
-            }
-            return false;
-        }
-        catch
-        {
-            return false;
-        }
-        finally
-        {
-            try { SendKey(VK_RIGHT, inputSize, "read-back selection collapse"); }
-            catch {}
-        }
     }
 
     private static void SendKey(ushort key, int inputSize, string label)
@@ -497,7 +438,7 @@ public static class AgentComputerUseUnicodeInput
 }
 '@ -ReferencedAssemblies System.Windows.Forms
 
-$payload = [Console]::In.ReadToEnd() | ConvertFrom-Json
+$payload = $global:AgentComputerUsePayload
 $text = [System.Text.Encoding]::UTF8.GetString(
     [System.Convert]::FromBase64String([string]$payload.textBase64)
 )
@@ -507,6 +448,77 @@ $result = [AgentComputerUseUnicodeInput]::PasteUnicode(
     [uint32]$payload.processId,
     [bool]$payload.replaceAll
 )
+if (-not $result.ExactValueVerified) {
+    try {
+        $focused = [System.Windows.Automation.AutomationElement]::FocusedElement
+        if ($null -ne $focused -and $focused.Current.ProcessId -eq [int]$payload.processId) {
+            $main = [System.Windows.Automation.AutomationElement]::FromHandle(
+                [System.IntPtr]::new([long]$payload.windowId)
+            )
+            $mainBounds = $main.Current.BoundingRectangle
+            $focusedBounds = $focused.Current.BoundingRectangle
+            $screenX = $mainBounds.Left + [double]$payload.focusX
+            $screenY = $mainBounds.Top + [double]$payload.focusY
+            $containsApprovedPoint = (
+                $focusedBounds.Width -gt 0 -and
+                $focusedBounds.Height -gt 0 -and
+                $screenX -ge ($focusedBounds.Left - 2) -and
+                $screenX -le ($focusedBounds.Right + 2) -and
+                $screenY -ge ($focusedBounds.Top - 2) -and
+                $screenY -le ($focusedBounds.Bottom + 2)
+            )
+            if ($containsApprovedPoint -and -not $focused.Current.IsPassword) {
+                $pattern = $null
+                $value = $null
+                $source = $null
+                if ($focused.TryGetCurrentPattern(
+                    [System.Windows.Automation.ValuePattern]::Pattern,
+                    [ref]$pattern
+                )) {
+                    $value = ([System.Windows.Automation.ValuePattern]$pattern).Current.Value
+                    $source = "uia-value"
+                }
+                elseif ($focused.TryGetCurrentPattern(
+                    [System.Windows.Automation.LegacyIAccessiblePattern]::Pattern,
+                    [ref]$pattern
+                )) {
+                    $value = ([System.Windows.Automation.LegacyIAccessiblePattern]$pattern).Current.Value
+                    $source = "uia-legacy-value"
+                }
+                elseif ($focused.TryGetCurrentPattern(
+                    [System.Windows.Automation.TextPattern]::Pattern,
+                    [ref]$pattern
+                )) {
+                    $value = ([System.Windows.Automation.TextPattern]$pattern).DocumentRange.GetText(-1)
+                    $source = "uia-text"
+                }
+                if ($null -ne $value) {
+                    $result.ReadBackStatus = "available"
+                    $result.ReadBackUtf16CodeUnits = $value.Length
+                    $result.ExactValueVerified = [string]::Equals(
+                        $value,
+                        $text,
+                        [System.StringComparison]::Ordinal
+                    )
+                    if ($result.ExactValueVerified) {
+                        $result.ReadBackComparison = "exact"
+                    }
+                    elseif ($value.Trim() -eq $text) {
+                        $result.ReadBackComparison = "whitespace-only-difference"
+                    }
+                    elseif ($value.Normalize() -eq $text.Normalize()) {
+                        $result.ReadBackComparison = "unicode-normalization-only-difference"
+                    }
+                    else {
+                        $result.ReadBackComparison = "different"
+                    }
+                    $readBackSource = $source
+                }
+            }
+        }
+    }
+    catch {}
+}
 @{
     status = "ok"
     utf16CodeUnits = $result.Utf16CodeUnits
@@ -517,6 +529,7 @@ $result = [AgentComputerUseUnicodeInput]::PasteUnicode(
     readBackStatus = $result.ReadBackStatus
     readBackComparison = $result.ReadBackComparison
     readBackUtf16CodeUnits = $result.ReadBackUtf16CodeUnits
+    readBackSource = if ($readBackSource) { $readBackSource } else { "unavailable" }
     deliveryPath = "windows_clipboard_transaction"
 } | ConvertTo-Json -Compress
 `;
@@ -531,6 +544,8 @@ export async function sendWindowsUnicodeText(options = {}) {
   const {
     windowId,
     processId,
+    focusX,
+    focusY,
     text,
     replaceAll = false,
     inputBehavior = "incremental",
@@ -589,6 +604,13 @@ export async function sendWindowsUnicodeText(options = {}) {
       validationFailureDetail({ inputBehavior, replaceAll }),
     );
   }
+  if (!Number.isFinite(focusX) || !Number.isFinite(focusY)) {
+    throw unicodeInputError(
+      "unicode_input.invalid_focus_point",
+      "Unicode input requires the approved editable focus point.",
+      validationFailureDetail({ inputBehavior, replaceAll }),
+    );
+  }
 
   // Incremental text must produce real per-character edit events for search,
   // filter, and autocomplete controls. Temporarily detach only the verified
@@ -598,7 +620,7 @@ export async function sendWindowsUnicodeText(options = {}) {
   const bridgeScript = inputBehavior === "incremental"
     ? WINDOWS_INCREMENTAL_INPUT_SCRIPT
     : WINDOWS_UNICODE_INPUT_SCRIPT;
-  const encodedScript = Buffer.from(bridgeScript, "utf16le").toString("base64");
+  const encodedBootstrap = Buffer.from(POWERSHELL_STDIN_BOOTSTRAP, "utf16le").toString("base64");
   const child = spawnProcess(
     powershellPath,
     [
@@ -609,7 +631,7 @@ export async function sendWindowsUnicodeText(options = {}) {
       "-ExecutionPolicy",
       "Bypass",
       "-EncodedCommand",
-      encodedScript,
+      encodedBootstrap,
     ],
     {
       windowsHide: true,
@@ -704,6 +726,9 @@ export async function sendWindowsUnicodeText(options = {}) {
           ...(Number.isInteger(result.readBackUtf16CodeUnits)
             ? { readBackUtf16CodeUnits: result.readBackUtf16CodeUnits }
             : {}),
+          ...(typeof result.readBackSource === "string"
+            ? { readBackSource: result.readBackSource }
+            : {}),
           deliveryPath: result.deliveryPath,
         });
       } catch {
@@ -730,11 +755,16 @@ export async function sendWindowsUnicodeText(options = {}) {
       ));
     });
     child.stdin.end(JSON.stringify({
-      windowId: String(windowId),
-      processId: Number(processId),
-      textBase64: Buffer.from(text, "utf8").toString("base64"),
-      replaceAll: replaceAll === true,
-      inputBehavior,
+      scriptBase64: Buffer.from(bridgeScript, "utf8").toString("base64"),
+      payload: {
+        windowId: String(windowId),
+        processId: Number(processId),
+        focusX,
+        focusY,
+        textBase64: Buffer.from(text, "utf8").toString("base64"),
+        replaceAll: replaceAll === true,
+        inputBehavior,
+      },
     }));
 
     function finish(settle, value) {

@@ -4,6 +4,8 @@ import test from "node:test";
 import {
   composeMessagingSceneElements,
   deduplicateVisualProposals,
+  inferConversationVisualStructure,
+  inferSearchVisualStructure,
   stableCompositionOcrElements,
 } from "../src/messaging-scene-composition.mjs";
 import { detectControlSurfaceFromPixels } from "../src/control-surface-detection.mjs";
@@ -178,6 +180,122 @@ test("one independent visual surface plus owned OCR creates a search parent and 
   }]);
 });
 
+test("one unique top-toolbar surface and its SOM child create a search editable when placeholder OCR is absent", () => {
+  const image = solidImage(960, 720, 230);
+  const surface = { x: 76, y: 42, width: 176, height: 28 };
+  const label = {
+    proposalId: "som-placeholder-shape",
+    role: "region",
+    bounds: { x: 101, y: 50, width: 24, height: 12 },
+    confidence: 0.82,
+    source: "som-proposal",
+  };
+  fillRect(image, surface, 255);
+  fillRect(image, label.bounds, 40);
+
+  const structures = inferSearchVisualStructure({ pixels: image, proposals: [label] });
+  const result = composeMessagingSceneElements({
+    coordinateBounds: bounds,
+    ocrElements: [],
+    visualProposals: [label, ...structures],
+  });
+  const search = result.elements.find((element) => element.role === "search");
+
+  assert.equal(structures.length, 1);
+  assert.deepEqual(structures[0].bounds, surface);
+  assert.equal(search.value, "");
+  assert.deepEqual(search.actions, ["click", "type_text"]);
+  assert.deepEqual(search.support.map(({ provider }) => provider).sort(), [
+    "som-proposal",
+    "visual-structure",
+  ]);
+});
+
+test("multiple structural search surfaces remain non-actionable without an owner tie-break", () => {
+  const visualProposals = [
+    {
+      proposalId: "visual-search-surface:first",
+      role: "search-surface",
+      bounds: { x: 76, y: 42, width: 176, height: 28 },
+      confidence: 0.97,
+      source: "visual-structure",
+      supportProposalId: "som-first",
+    },
+    {
+      proposalId: "visual-search-surface:second",
+      role: "search-surface",
+      bounds: { x: 76, y: 82, width: 176, height: 28 },
+      confidence: 0.97,
+      source: "visual-structure",
+      supportProposalId: "som-second",
+    },
+    { proposalId: "som-first", source: "som-proposal", bounds: { x: 101, y: 50, width: 24, height: 12 } },
+    { proposalId: "som-second", source: "som-proposal", bounds: { x: 101, y: 90, width: 24, height: 12 } },
+  ];
+
+  const result = composeMessagingSceneElements({
+    coordinateBounds: bounds,
+    ocrElements: [],
+    visualProposals,
+  });
+
+  assert.equal(result.elements.some((element) => element.actions.length > 0), false);
+  assert.deepEqual(result.knownControls, []);
+});
+
+test("owned layout separators plus header OCR and editor SOM compose one conversation Scene", () => {
+  const image = solidImage(960, 720, 230);
+  fillRect(image, { x: 301, y: 0, width: 659, height: 720 }, 250);
+  fillRect(image, { x: 301, y: 32, width: 659, height: 1 }, 170);
+  fillRect(image, { x: 301, y: 80, width: 659, height: 1 }, 170);
+  fillRect(image, { x: 301, y: 580, width: 659, height: 1 }, 170);
+  const editorSom = {
+    proposalId: "som-editor-toolbar",
+    role: "region",
+    bounds: { x: 330, y: 675, width: 20, height: 20 },
+    confidence: 0.86,
+    source: "som-proposal",
+  };
+  const titleOcr = {
+    elementToken: "ocr-conversation-title",
+    role: "text",
+    name: "联系人甲",
+    value: "联系人甲",
+    bounds: { x: 320, y: 45, width: 70, height: 20 },
+    confidence: 0.99,
+    source: "ocr",
+    proposalId: "ocr-conversation-title",
+  };
+  const structures = inferConversationVisualStructure({ pixels: image });
+  const result = composeMessagingSceneElements({
+    coordinateBounds: bounds,
+    ocrElements: [titleOcr],
+    visualProposals: [editorSom, ...structures],
+  });
+  const conversation = result.elements.find((element) => element.role === "conversation");
+  const header = result.elements.find((element) => element.role === "conversation-header");
+  const transcript = result.elements.find((element) => element.role === "transcript");
+  const title = result.elements.find((element) => element.role === "conversation-title");
+  const editor = result.elements.find((element) => element.role === "message-editor");
+
+  assert.deepEqual(structures.map(({ role }) => role), [
+    "conversation-pane",
+    "conversation-header",
+    "conversation-transcript",
+    "message-editor",
+  ]);
+  assert.equal(header.parentElementToken, conversation.elementToken);
+  assert.equal(transcript.parentElementToken, conversation.elementToken);
+  assert.equal(title.parentElementToken, header.elementToken);
+  assert.equal(title.name, "联系人甲");
+  assert.equal(editor.parentElementToken, conversation.elementToken);
+  assert.deepEqual(editor.actions, ["click", "type_text"]);
+  assert.deepEqual(editor.support.map(({ provider }) => provider).sort(), [
+    "som-proposal",
+    "visual-structure",
+  ]);
+});
+
 test("a remembered search control cannot fabricate OCR support", () => {
   const result = composeMessagingSceneElements({
     coordinateBounds: bounds,
@@ -246,6 +364,73 @@ test("a remembered search control separates a merged leading OCR icon from its v
   assert.equal(search.value, "Example-用户");
 });
 
+test("a remembered search control accepts decorated OCR whose icon extends beyond a compact visual owner", () => {
+  const compactOwner = {
+    ...searchSurface,
+    bounds: { x: 88, y: 43, width: 146, height: 24 },
+  };
+  const result = composeMessagingSceneElements({
+    coordinateBounds: bounds,
+    ocrElements: [{
+      ...searchOcr,
+      elementToken: "ocr-compact-owner-query",
+      proposalId: "ocr-compact-owner-query",
+      name: "Q Example-用户",
+      value: "Q Example-用户",
+      bounds: { x: 66.5, y: 40.5, width: 112, height: 29 },
+    }],
+    visualProposals: [compactOwner],
+    knownControls: [{
+      role: "search",
+      bounds: compactOwner.bounds,
+      semanticKey: "control:search",
+    }],
+  });
+
+  const search = result.elements.find((element) => element.role === "search");
+  assert.equal(search.value, "Example-用户");
+  assert.deepEqual(search.actions, ["click", "type_text"]);
+});
+
+test("a remembered search control prefers the complete semantic surface over a smaller clear-button owner", () => {
+  const remembered = { x: 77, y: 42, width: 170, height: 26 };
+  const complete = {
+    ...searchSurface,
+    proposalId: "semantic-surface-complete-search",
+    bounds: { x: 78, y: 40, width: 168, height: 29 },
+  };
+  const clearButtonOwner = {
+    ...searchSurface,
+    proposalId: "som-clear-button-owner",
+    bounds: { x: 139, y: 43, width: 111, height: 24 },
+  };
+  const result = composeMessagingSceneElements({
+    coordinateBounds: bounds,
+    ocrElements: [{
+      ...searchOcr,
+      elementToken: "ocr-complete-query",
+      proposalId: "ocr-complete-query",
+      name: "Q Example-用户",
+      value: "Q Example-用户",
+      bounds: { x: 66.5, y: 41, width: 98, height: 27.5 },
+    }, {
+      ...searchOcr,
+      elementToken: "ocr-clear-button",
+      proposalId: "ocr-clear-button",
+      name: "回",
+      value: "回",
+      bounds: { x: 222.5, y: 43.5, width: 30, height: 23 },
+    }],
+    visualProposals: [clearButtonOwner, complete],
+    knownControls: [{ role: "search", bounds: remembered, semanticKey: "control:search" }],
+  });
+
+  const searches = result.elements.filter((element) => element.role === "search");
+  assert.equal(searches.length, 1);
+  assert.equal(searches[0].value, "Example-用户");
+  assert.deepEqual(searches[0].bounds, complete.bounds);
+});
+
 test("a merged leading OCR icon does not turn a search placeholder into its value", () => {
   const mergedPlaceholder = {
     ...searchOcr,
@@ -269,6 +454,30 @@ test("a merged leading OCR icon does not turn a search placeholder into its valu
   const search = result.elements.find((element) => element.role === "search");
   assert.equal(search.value, "");
   assert.equal(search.support.find((entry) => entry.provider === "ocr").proposalId, "ocr-merged-placeholder");
+});
+
+test("a separated OCR icon and punctuation do not become the search value", () => {
+  const result = composeMessagingSceneElements({
+    coordinateBounds: bounds,
+    ocrElements: [{
+      ...searchOcr,
+      elementToken: "ocr-separated-placeholder",
+      proposalId: "ocr-separated-placeholder",
+      name: `Q. ${searchOcr.name}`,
+      value: `Q. ${searchOcr.value}`,
+      bounds: { x: 72.5, y: 45, width: 58, height: 20.5 },
+    }],
+    visualProposals: [{
+      ...searchSurface,
+      proposalId: "semantic-surface-separated-placeholder",
+      bounds: { x: 77, y: 42, width: 170, height: 26 },
+    }],
+  });
+
+  const search = result.elements.find((element) => element.role === "search");
+  assert.ok(search);
+  assert.equal(search.value, "");
+  assert.deepEqual(search.actions, ["click", "type_text"]);
 });
 
 test("a punctuation-shaped OCR search icon leaves the placeholder value empty", () => {
@@ -418,6 +627,45 @@ test("a remembered search role survives replacement text only with matching fres
   assert.equal(search.semanticKey, "control:search");
 });
 
+test("a verified search value remains authoritative only while fresh owned OCR agrees", () => {
+  const verifiedControl = {
+    role: "search",
+    bounds: searchSurface.bounds,
+    semanticKey: "control:search",
+    verifiedValue: "Exact query",
+    verifiedAtObservationId: "verified-observation",
+  };
+  const exact = composeMessagingSceneElements({
+    coordinateBounds: bounds,
+    ocrElements: [{
+      ...searchOcr,
+      name: "Exact query",
+      value: "Exact query",
+      bounds: { x: 95, y: 44, width: 82, height: 22 },
+    }],
+    visualProposals: [searchSurface],
+    knownControls: [verifiedControl],
+  });
+  const conflicting = composeMessagingSceneElements({
+    coordinateBounds: bounds,
+    ocrElements: [{
+      ...searchOcr,
+      name: "Other query",
+      value: "Other query",
+      bounds: { x: 95, y: 44, width: 82, height: 22 },
+    }],
+    visualProposals: [searchSurface],
+    knownControls: [verifiedControl],
+  });
+
+  assert.equal(exact.elements.find((element) => element.role === "search").value, "Exact query");
+  assert.equal(exact.knownControls[0].verifiedValue, "Exact query");
+  const conflictedSearch = conflicting.elements.find((element) => element.role === "search");
+  assert.deepEqual(conflictedSearch.actions, []);
+  assert.deepEqual(conflictedSearch.conflicts, ["value"]);
+  assert.deepEqual(conflicting.knownControls, []);
+});
+
 test("a remembered control selects the closest fresh visual-owner cluster", () => {
   const result = composeMessagingSceneElements({
     coordinateBounds: bounds,
@@ -546,7 +794,7 @@ test("matching OCR below search does not invent a result container or actionable
   assert.equal(result.elements.some((element) => element.role === "search-result"), false);
 });
 
-test("the production screenshot composition adds only the fused search control to Host Scene", async (t) => {
+test("a full-window OCR baseline composes the fused search control without an LLM visual question", async (t) => {
   const router = new ComputerUseProviderRouter({
     messagingVisualProposalOperation: async () => [searchSurface],
   });
@@ -574,9 +822,7 @@ test("the production screenshot composition adds only the fused search control t
       coordinateBounds: bounds,
       window: { id: "window-1", bounds },
       includeUserOverlay: false,
-    }, {
-      visualQuestion: "Identify the search editable from Host-owned candidates.",
-    }, ticket)
+    }, {}, ticket)
   ));
   const actionObservation = router.createActionObservation(observation);
   const search = actionObservation.scene.elements.find((element) => element.role === "search");
@@ -588,6 +834,109 @@ test("the production screenshot composition adds only the fused search control t
   assert.deepEqual(search.actions, ["click", "type_text"]);
   assert.equal(ocr.evidenceConsistency, "insufficient");
   assert.deepEqual(ocr.actions, []);
+});
+
+test("the production screenshot path merges a proven related search surface into one Host Scene", async (t) => {
+  const relatedPath = "C:\\owned\\shot.related-1.png";
+  const router = new ComputerUseProviderRouter({
+    ocrSession: {
+      async start() {},
+      async close() {},
+      async recognize({ imagePath }) {
+        assert.equal(imagePath, relatedPath);
+        return {
+          status: "ok",
+          items: [{
+            text: "联系人甲",
+            confidence: 0.99,
+            bounds: { x: 58, y: 63, width: 72, height: 22 },
+          }],
+        };
+      },
+    },
+    messagingVisualProposalOperation: async ({ imagePath }) => (
+      imagePath === relatedPath
+        ? [{
+            proposalId: "direct-contact-row",
+            confidence: 0.94,
+            bounds: { x: 48, y: 52, width: 112, height: 44 },
+          }]
+        : [searchSurface]
+    ),
+  });
+  t.after(() => router.close());
+  router.activeController = {
+    controllerId: "controller-1",
+    tier: "full",
+    window: { id: "42", windowId: "42", title: "Fixture", bounds: { ...bounds, x: 452, y: 100 } },
+    expiresAtMs: Date.now() + 60_000,
+  };
+  router.activeFocusReceipt = {
+    target: { bounds: searchSurface.bounds },
+  };
+  router.readOwnedArtifact = async () => Buffer.from("fixture-pixels");
+  router.ocrRegionOperation = async () => ({
+    observation: { source: "ocr", elements: [searchOcr] },
+  });
+
+  const observation = await router.runOperation((ticket) => (
+    router.prioritizeLocalScreenshotPerception({
+      observationId: "shot-related",
+      artifact: { path: "C:\\owned\\shot.png" },
+      capture: {
+        hwnd: "42",
+        x: 452,
+        y: 100,
+        width: bounds.width,
+        height: bounds.height,
+        relatedSurfaces: [{
+          status: "ok",
+          hwnd: "77",
+          ownerWindowId: "42",
+          title: "",
+          screenshotId: "screenshot-1",
+          x: 501,
+          y: 163,
+          width: 368,
+          height: 352,
+          path: relatedPath,
+          window: { id: "77", pid: 1234, bounds: { x: 501, y: 163, width: 368, height: 352 } },
+          surfaceProvenance: {
+            relationshipVerified: true,
+            relationship: "owned-window",
+            requestedWindowId: "42",
+            relatedWindowId: "77",
+            requestedProcessId: 1234,
+            relatedProcessId: 1234,
+            ownerWindowId: "42",
+          },
+          coordinateScale: {
+            actionTransform: { scaleX: 1, scaleY: 1, offsetX: 49, offsetY: 63 },
+            nativeToObservation: { scaleX: 1, scaleY: 1 },
+          },
+        }],
+      },
+      coordinateSpace: "window-local",
+      coordinateBounds: bounds,
+      window: { id: "42", bounds: { ...bounds, x: 452, y: 100 } },
+      includeUserOverlay: false,
+    }, {}, ticket)
+  ));
+  const actionObservation = router.createActionObservation(observation);
+  const main = actionObservation.scene.elements.find((element) => (
+    element.type === "Window" && element.role === "main-window"
+  ));
+  const owned = actionObservation.scene.elements.find((element) => element.role === "owned-auxiliary-window");
+  const surfaceElement = actionObservation.scene.elements.find((element) => element.role === "search-results");
+  const result = actionObservation.scene.elements.find((element) => element.role === "search-result");
+
+  assert.equal(owned.parentId, main.id);
+  assert.equal(surfaceElement.parentId, owned.id);
+  assert.equal(result.parentId, surfaceElement.id);
+  assert.equal(result.name, "联系人甲");
+  assert.deepEqual(result.actions, ["click"]);
+  assert.equal(result.coordinate.screenshotId, "screenshot-1");
+  assert.equal(result.coordinate.windowId, "77");
 });
 
 function solidImage(width, height, value) {

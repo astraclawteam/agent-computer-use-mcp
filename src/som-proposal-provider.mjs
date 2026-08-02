@@ -98,6 +98,7 @@ function buildForegroundMask(image, threshold) {
   for (let y = 0; y < image.height; y += 1) {
     for (let x = 0; x < image.width; x += 1) {
       const offset = (y * image.width + x) * 4;
+      if ((image.data[offset + 3] ?? 255) < 128) continue;
       const delta = Math.max(
         Math.abs((image.data[offset] ?? 0) - background.r),
         Math.abs((image.data[offset + 1] ?? 0) - background.g),
@@ -170,11 +171,31 @@ function scoreComponent(component) {
 }
 
 function sampleBackground(image) {
-  return {
-    r: image.data[0] ?? 255,
-    g: image.data[1] ?? 255,
-    b: image.data[2] ?? 255,
-  };
+  const buckets = new Map();
+  for (let y = 0; y < image.height; y += 4) {
+    for (let x = 0; x < image.width; x += 4) {
+      const offset = (y * image.width + x) * 4;
+      if ((image.data[offset + 3] ?? 255) < 128) continue;
+      const r = image.data[offset] ?? 255;
+      const g = image.data[offset + 1] ?? 255;
+      const b = image.data[offset + 2] ?? 255;
+      const key = `${r >> 4}:${g >> 4}:${b >> 4}`;
+      const bucket = buckets.get(key) ?? { count: 0, r: 0, g: 0, b: 0 };
+      bucket.count += 1;
+      bucket.r += r;
+      bucket.g += g;
+      bucket.b += b;
+      buckets.set(key, bucket);
+    }
+  }
+  const dominant = [...buckets.values()].sort((left, right) => right.count - left.count)[0];
+  return dominant
+    ? {
+        r: Math.round(dominant.r / dominant.count),
+        g: Math.round(dominant.g / dominant.count),
+        b: Math.round(dominant.b / dominant.count),
+      }
+    : { r: 255, g: 255, b: 255 };
 }
 
 async function readPixels(path) {

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -40,6 +40,145 @@ test("CuaDriverMcpDriver forwards cancellation into the admitted native MCP acti
   await assert.rejects(action, (error) => error?.name === "AbortError");
   assert.equal(clickOptions.signal, controller.signal);
   await driver.close();
+});
+
+test("CuaDriverMcpDriver delivers related-surface clicks to the exact HWND in screen coordinates", async (t) => {
+  const calls = [];
+  const driver = new CuaDriverMcpDriver({
+    foregroundWindowProbe: async () => "42",
+    foregroundWindowActivator: async () => ({ status: "ok" }),
+    relatedSurfaceClick: async (input) => {
+      calls.push({ method: "relatedSurfaceClick", input });
+      return { status: "ok", effect: "applied", verified: false };
+    },
+    client: {
+      async start() {},
+      async callTool(name, args) {
+        calls.push({ method: "callTool", name, args });
+        return { status: "ok" };
+      },
+      async close() {},
+    },
+  });
+  t.after(() => driver.close());
+
+  const result = await driver.click({
+    window: {
+      pid: 1234,
+      windowId: "42",
+      bounds: { x: 452, y: 100, width: 954, height: 724 },
+    },
+    relatedWindowId: "77",
+    x: 132,
+    y: 135,
+    deliveryMode: "foreground",
+  });
+
+  assert.equal(result.verified, false);
+  const nativeClick = calls.find(({ method }) => method === "relatedSurfaceClick");
+  assert.deepEqual(nativeClick.input, {
+    controllerWindowId: "42",
+    relatedWindowId: "77",
+    processId: 1234,
+    screenX: 584,
+    screenY: 235,
+    signal: nativeClick.input.signal,
+  });
+  assert.equal(calls.some(({ name }) => name === "click"), false);
+});
+
+test("CuaDriverMcpDriver suspends its agent cursor while physically clicking an owned surface", async (t) => {
+  const enabled = [];
+  const sessions = [];
+  let nativeClickCalled = false;
+  const driver = new CuaDriverMcpDriver({
+    foregroundWindowProbe: async () => "42",
+    relatedSurfaceClick: async () => {
+      nativeClickCalled = true;
+      assert.equal(enabled.at(-1), false);
+      return { status: "ok", effect: "applied", verified: false };
+    },
+    client: {
+      async start() {},
+      async callTool(name, args) {
+        if (name === "set_agent_cursor_enabled") enabled.push(args.enabled);
+        if (name === "start_session" || name === "end_session") sessions.push(name);
+        return { status: "ok" };
+      },
+      async close() {},
+    },
+  });
+  t.after(() => driver.close());
+  await driver.startCursor();
+
+  await driver.click({
+    window: {
+      pid: 1234,
+      windowId: "42",
+      bounds: { x: 452, y: 100, width: 954, height: 724 },
+    },
+    relatedWindowId: "77",
+    x: 132,
+    y: 135,
+    deliveryMode: "foreground",
+  });
+
+  assert.equal(nativeClickCalled, true);
+  assert.deepEqual(enabled, [true, false, true]);
+  assert.deepEqual(sessions, ["start_session", "end_session", "start_session"]);
+});
+
+test("CuaDriverMcpDriver replaces the inner driver process before an owned-surface click", async (t) => {
+  const calls = [];
+  let clientGeneration = 0;
+  const driver = new CuaDriverMcpDriver({
+    foregroundWindowProbe: async () => "42",
+    clientFactory() {
+      const generation = ++clientGeneration;
+      return {
+        async start() {
+          calls.push(`start:${generation}`);
+        },
+        async callTool(name) {
+          calls.push(`${name}:${generation}`);
+          return { status: "ok" };
+        },
+        async close() {
+          calls.push(`close:${generation}`);
+        },
+      };
+    },
+    relatedSurfaceClick: async () => {
+      calls.push("native-click");
+      assert.equal(calls.includes("close:1"), true);
+      assert.equal(calls.includes("start:2"), false);
+      return { status: "ok", effect: "applied", verified: false };
+    },
+  });
+  t.after(() => driver.close());
+  await driver.ensureStarted();
+
+  await driver.click({
+    window: {
+      pid: 1234,
+      windowId: "42",
+      bounds: { x: 452, y: 100, width: 954, height: 724 },
+    },
+    relatedWindowId: "77",
+    x: 132,
+    y: 135,
+    deliveryMode: "foreground",
+  });
+
+  assert.deepEqual(calls, [
+    "start:1",
+    "start_session:1",
+    "end_session:1",
+    "close:1",
+    "native-click",
+    "start:2",
+    "start_session:2",
+  ]);
 });
 
 test("CuaDriverMcpDriver maps request/capture/action to cua-driver MCP tools", async () => {
@@ -258,7 +397,7 @@ test("CuaDriverMcpDriver maps request/capture/action to cua-driver MCP tools", a
   ]);
 });
 
-test("CuaDriverMcpDriver keeps coordinate Unicode text on the native driver path", async () => {
+test("CuaDriverMcpDriver fails closed when coordinate replace-all lacks the native text primitive", async () => {
   const calls = [];
   const driver = new CuaDriverMcpDriver({
     session: "unicode-session",
@@ -275,14 +414,14 @@ test("CuaDriverMcpDriver keeps coordinate Unicode text on the native driver path
   });
   const window = { windowId: 42, pid: 1234 };
 
-  const result = await driver.typeText({
+  await assert.rejects(driver.typeText({
     window,
     x: 160,
     y: 55,
-    value: "宋鹏",
+    value: "张三",
     textMode: "replace-all",
     deliveryMode: "foreground",
-  });
+  }), (error) => error.code === "unicode_input.unavailable");
 
   assert.deepEqual(calls, [
     { method: "start" },
@@ -299,42 +438,7 @@ test("CuaDriverMcpDriver keeps coordinate Unicode text on the native driver path
         session: "unicode-session",
       },
     },
-    {
-      method: "callTool",
-      name: "press_key",
-      args: {
-        pid: 1234,
-        window_id: 42,
-        key: "a",
-        modifiers: ["ctrl"],
-        delivery_mode: "foreground",
-        session: "unicode-session",
-      },
-    },
-    {
-      method: "callTool",
-      name: "press_key",
-      args: {
-        pid: 1234,
-        window_id: 42,
-        key: "backspace",
-        delivery_mode: "foreground",
-        session: "unicode-session",
-      },
-    },
-    {
-      method: "callTool",
-      name: "type_text",
-      args: {
-        pid: 1234,
-        window_id: 42,
-        text: "宋鹏",
-        delivery_mode: "foreground",
-        session: "unicode-session",
-      },
-    },
   ]);
-  assert.deepEqual(result, { status: "ok", focusVerified: true });
 });
 
 test("CuaDriverMcpDriver activates a window and verifies the foreground result", async () => {
@@ -483,7 +587,7 @@ test("CuaDriverMcpDriver keeps semantic Unicode text on the cua-driver path", as
     window,
     elementToken: "semantic-edit",
     elementIndex: 7,
-    value: "宋鹏",
+    value: "张三",
     deliveryMode: "background",
   });
 
@@ -496,7 +600,7 @@ test("CuaDriverMcpDriver keeps semantic Unicode text on the cua-driver path", as
       window_id: 42,
       element_index: 7,
       element_token: "semantic-edit",
-      text: "宋鹏",
+      text: "张三",
       delivery_mode: "background",
       session: "semantic-unicode-session",
     },
@@ -537,7 +641,7 @@ test("CuaDriverMcpDriver commits coordinate Unicode text after exact native read
     window: { windowId: 42, pid: 1234 },
     x: 102,
     y: 56,
-    value: "宋鹏",
+    value: "张三",
     textMode: "replace-all",
     inputBehavior: "commit",
     deliveryMode: "foreground",
@@ -576,7 +680,7 @@ test("CuaDriverMcpDriver uses foreground cua-driver typing for coordinate Unicod
     window: { windowId: 42, pid: 1234 },
     x: 102,
     y: 56,
-    value: "宋鹏",
+    value: "张三",
     textMode: "insert",
     inputBehavior: "incremental",
     deliveryMode: "foreground",
@@ -588,7 +692,7 @@ test("CuaDriverMcpDriver uses foreground cua-driver typing for coordinate Unicod
     args: {
       pid: 1234,
       window_id: 42,
-      text: "宋鹏",
+      text: "张三",
       delivery_mode: "foreground",
       session: "coordinate-unicode-insert-session",
     },
@@ -629,12 +733,14 @@ test("CuaDriverMcpDriver uses the native clipboard transaction for coordinate AS
     textMode: "replace-all",
     inputBehavior: "incremental",
     deliveryMode: "foreground",
+    focusVerified: true,
   });
 
   assert.equal(nativeInputCalls.length, 1);
   assert.equal(nativeInputCalls[0].text, "message-123");
   assert.equal(nativeInputCalls[0].replaceAll, true);
   assert.equal(result.providerPath, "windows_sendinput_unicode_ime_neutral");
+  assert.deepEqual(calls.filter((call) => call.name === "click"), []);
   assert.deepEqual(calls.filter((call) => call.name === "press_key"), []);
   assert.deepEqual(calls.filter((call) => call.name === "type_text"), []);
 });
@@ -903,6 +1009,321 @@ test("CuaDriverMcpDriver reports the PNG pixel bounds rather than the outer wind
   assert.equal(Object.keys(capture).includes("artifactBytes"), false);
 });
 
+test("CuaDriverMcpDriver rejects stale driver geometry in favor of the same-capture native HWND bounds", async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), "cua-driver-native-main-bounds-"));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const outputPath = join(directory, "window.png");
+  const driver = new CuaDriverMcpDriver({
+    session: "native-main-bounds-session",
+    windowRelationshipProbe: async () => [{
+      windowId: "42",
+      ownerWindowId: null,
+      visible: true,
+      enabled: true,
+      processId: 1234,
+      sameRequestedProcess: true,
+      ownedByRequestedWindow: false,
+      bounds: { x: 452, y: 100, width: 954, height: 724 },
+    }],
+    client: {
+      async start() {},
+      async callTool(name, args) {
+        if (name === "get_window_state") {
+          const header = Buffer.alloc(24);
+          Buffer.from("89504e470d0a1a0a", "hex").copy(header, 0);
+          header.write("IHDR", 12, "ascii");
+          header.writeUInt32BE(952, 16);
+          header.writeUInt32BE(722, 20);
+          await writeFile(args.screenshot_out_file, header);
+          return {
+            screenshot_file_path: args.screenshot_out_file,
+            window: {
+              id: 42,
+              title: "Fixture",
+              pid: 1234,
+              bounds: { x: 0, y: 0, width: 1920, height: 1032 },
+            },
+          };
+        }
+        return { status: "ok" };
+      },
+    },
+  });
+
+  const capture = await driver.captureScreenshot({
+    window: {
+      windowId: 42,
+      title: "Fixture",
+      pid: 1234,
+      bounds: { x: 0, y: 0, width: 1920, height: 1032 },
+    },
+    outputPath,
+  });
+
+  assert.deepEqual(capture.nativeWindowBounds, { x: 452, y: 100, width: 954, height: 724 });
+  assert.deepEqual(capture.driverReportedWindowBounds, { x: 0, y: 0, width: 1920, height: 1032 });
+  assert.equal(capture.surfaceProvenance.boundsAuthority, "windows-window-relationship-probe");
+  assert.deepEqual(capture.window.bounds, { x: 452, y: 100, width: 952, height: 722 });
+  assert.deepEqual(capture.coordinateScale.actionTransform, {
+    scaleX: 954 / 952,
+    scaleY: 724 / 722,
+    offsetX: 0,
+    offsetY: 0,
+  });
+});
+
+test("CuaDriverMcpDriver preserves only relationship-proven related screenshots", async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), "cua-driver-related-png-"));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const outputPath = join(directory, "window.png");
+  const png = (width, height) => {
+    const header = Buffer.alloc(24);
+    Buffer.from("89504e470d0a1a0a", "hex").copy(header, 0);
+    header.write("IHDR", 12, "ascii");
+    header.writeUInt32BE(width, 16);
+    header.writeUInt32BE(height, 20);
+    return header;
+  };
+  const primary = png(954, 704);
+  const related = png(368, 352);
+  let relationshipRequest;
+  const driver = new CuaDriverMcpDriver({
+    session: "related-screenshot-session",
+    windowRelationshipProbe: async (request) => {
+      relationshipRequest = request;
+      return [{
+        windowId: "77",
+        ownerWindowId: "42",
+        enabled: true,
+        visible: true,
+        processId: 1234,
+        title: "",
+        ownedByRequestedWindow: true,
+        sameRequestedProcess: true,
+        bounds: { x: 501, y: 163, width: 368, height: 554 },
+      }];
+    },
+    client: {
+      async start() {},
+      async callTool(name, args) {
+        if (name !== "get_window_state") return { status: "ok" };
+        await writeFile(args.screenshot_out_file, primary);
+        return {
+          window: {
+            id: 42,
+            title: "微信",
+            pid: 1234,
+            bounds: { x: 452, y: 100, width: 954, height: 704 },
+          },
+          screenshots: [
+            { id: "screenshot-0", originX: 452, originY: 100, width: 954, height: 704, zIndex: 0 },
+            { id: "screenshot-1", originX: 501, originY: 163, width: 368, height: 352, zIndex: 1 },
+          ],
+          screenshotImages: [
+            { data: primary.toString("base64"), mimeType: "image/png", metadata: {} },
+            { data: related.toString("base64"), mimeType: "image/png", metadata: {} },
+          ],
+        };
+      },
+    },
+  });
+
+  const capture = await driver.captureScreenshot({
+    window: {
+      windowId: 42,
+      title: "微信",
+      pid: 1234,
+      bounds: { x: 452, y: 100, width: 954, height: 704 },
+    },
+    outputPath,
+  });
+
+  assert.deepEqual(relationshipRequest, {
+    windowIds: [42],
+    includeOwnedWindows: true,
+    processIds: [1234],
+  });
+  assert.equal(capture.relatedSurfaces.length, 1);
+  const [surface] = capture.relatedSurfaces;
+  assert.equal(surface.screenshotId, "screenshot-1");
+  assert.equal(surface.hwnd, "77");
+  assert.equal(surface.ownerWindowId, "42");
+  assert.equal(surface.relationship, "owned-window");
+  assert.deepEqual(surface.coordinateScale.actionTransform, {
+    scaleX: 1,
+    scaleY: 1,
+    offsetX: 49,
+    offsetY: 63,
+  });
+  assert.deepEqual(await readFile(surface.path), related);
+  assert.equal(Buffer.isBuffer(surface.artifactBytes), true);
+  assert.equal(Object.keys(surface).includes("artifactBytes"), false);
+});
+
+test("CuaDriverMcpDriver captures proven owned windows when the pinned driver returns only the main PNG", async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), "cua-driver-native-related-png-"));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const outputPath = join(directory, "window.png");
+  const png = (width, height) => {
+    const header = Buffer.alloc(24);
+    Buffer.from("89504e470d0a1a0a", "hex").copy(header, 0);
+    header.write("IHDR", 12, "ascii");
+    header.writeUInt32BE(width, 16);
+    header.writeUInt32BE(height, 20);
+    return header;
+  };
+  const primary = png(954, 704);
+  const related = png(368, 554);
+  let captureRequest;
+  const driver = new CuaDriverMcpDriver({
+    session: "native-related-screenshot-session",
+    windowRelationshipProbe: async () => [{
+      windowId: "77",
+      ownerWindowId: "42",
+      enabled: true,
+      visible: true,
+      processId: 1234,
+      ownedByRequestedWindow: true,
+      sameRequestedProcess: true,
+      bounds: { x: 501, y: 163, width: 368, height: 554 },
+    }],
+    relatedWindowCapture: async (windowId, path, options) => {
+      captureRequest = { windowId, path, options };
+      await writeFile(path, related);
+      return {
+        status: "ok",
+        method: "PrintWindow",
+        hwnd: 77,
+        processId: 1234,
+        x: 501,
+        y: 163,
+        width: 368,
+        height: 554,
+      };
+    },
+    client: {
+      async start() {},
+      async callTool(name, args) {
+        if (name !== "get_window_state") return { status: "ok" };
+        await writeFile(args.screenshot_out_file, primary);
+        return {
+          window: {
+            id: 42,
+            title: "Window",
+            pid: 1234,
+            bounds: { x: 452, y: 100, width: 954, height: 704 },
+          },
+        };
+      },
+    },
+  });
+
+  const capture = await driver.captureScreenshot({
+    window: {
+      windowId: 42,
+      title: "Window",
+      pid: 1234,
+      bounds: { x: 452, y: 100, width: 954, height: 704 },
+    },
+    outputPath,
+    timeoutMs: 4_000,
+  });
+
+  assert.deepEqual(captureRequest, {
+    windowId: "77",
+    path: join(directory, "window.related-1.png"),
+    options: { expectedProcessId: 1234, timeoutMs: 4_000 },
+  });
+  assert.equal(capture.relatedSurfaces.length, 1);
+  assert.equal(capture.relatedSurfaces[0].source, "windows-owned-window-capture");
+  assert.equal(capture.relatedSurfaces[0].method, "PrintWindow");
+  assert.deepEqual(capture.relatedSurfaces[0].coordinateScale.actionTransform, {
+    scaleX: 1,
+    scaleY: 1,
+    offsetX: 49,
+    offsetY: 63,
+  });
+  assert.deepEqual(await readFile(capture.relatedSurfaces[0].path), related);
+});
+
+test("CuaDriverMcpClient keeps MCP ImageContent only for the bounded screenshot selector", async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), "cua-driver-image-content-"));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const outputPath = join(directory, "window.png");
+  const png = (width, height) => {
+    const header = Buffer.alloc(24);
+    Buffer.from("89504e470d0a1a0a", "hex").copy(header, 0);
+    header.write("IHDR", 12, "ascii");
+    header.writeUInt32BE(width, 16);
+    header.writeUInt32BE(height, 20);
+    return header;
+  };
+  const primary = png(954, 704);
+  const related = png(368, 352);
+  const sdkClient = {
+    async connect() {},
+    async close() {},
+    async callTool(request) {
+      if (request.name !== "get_window_state") {
+        return { structuredContent: { status: "ok" }, content: [] };
+      }
+      await writeFile(request.arguments.screenshot_out_file, primary);
+      return {
+        structuredContent: {
+          window: {
+            id: 42,
+            title: "微信",
+            pid: 1234,
+            bounds: { x: 452, y: 100, width: 954, height: 704 },
+          },
+          screenshots: [
+            { id: "screenshot-0", originX: 452, originY: 100, width: 954, height: 704, zIndex: 0 },
+            { id: "screenshot-1", originX: 501, originY: 163, width: 368, height: 352, zIndex: 1 },
+          ],
+        },
+        content: [
+          { type: "image", mimeType: "image/png", data: primary.toString("base64") },
+          { type: "image", mimeType: "image/png", data: related.toString("base64") },
+        ],
+      };
+    },
+  };
+  const transport = { async close() {} };
+  const client = new CuaDriverMcpClient({
+    client: sdkClient,
+    transportFactory: () => transport,
+  });
+  const driver = new CuaDriverMcpDriver({
+    client,
+    windowRelationshipProbe: async () => [{
+      windowId: "77",
+      ownerWindowId: "42",
+      enabled: true,
+      visible: true,
+      processId: 1234,
+      title: "",
+      ownedByRequestedWindow: true,
+      sameRequestedProcess: true,
+      bounds: { x: 501, y: 163, width: 368, height: 352 },
+    }],
+  });
+  t.after(() => driver.close());
+
+  const capture = await driver.captureScreenshot({
+    window: {
+      windowId: 42,
+      title: "微信",
+      pid: 1234,
+      bounds: { x: 452, y: 100, width: 954, height: 704 },
+    },
+    outputPath,
+  });
+
+  assert.equal(capture.relatedSurfaces.length, 1);
+  assert.equal(capture.relatedSurfaces[0].screenshotId, "screenshot-1");
+  assert.deepEqual(await readFile(capture.relatedSurfaces[0].path), related);
+});
+
 test("CuaDriverMcpDriver rejects semantic and screenshot surfaces reported for an auxiliary window", async (t) => {
   const directory = await mkdtemp(join(tmpdir(), "cua-driver-window-identity-"));
   t.after(() => rm(directory, { recursive: true, force: true }));
@@ -1058,11 +1479,122 @@ test("CuaDriverMcpDriver retries once when the driver omits the screenshot artif
   assert.equal(Buffer.isBuffer(capture.artifactBytes), true);
 });
 
+test("CuaDriverMcpDriver materializes an identity-bound main image when file handoff is missing", async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), "cua-driver-image-handoff-"));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const outputPath = join(directory, "window.png");
+  const png = Buffer.alloc(24);
+  Buffer.from("89504e470d0a1a0a", "hex").copy(png, 0);
+  png.write("IHDR", 12, "ascii");
+  png.writeUInt32BE(640, 16);
+  png.writeUInt32BE(480, 20);
+  let screenshotCalls = 0;
+  const driver = new CuaDriverMcpDriver({
+    session: "screenshot-image-handoff-session",
+    client: {
+      async start() {},
+      async callTool(name) {
+        if (name !== "get_window_state") return { status: "ok" };
+        screenshotCalls += 1;
+        return {
+          window: {
+            id: 42,
+            title: "Image handoff",
+            pid: 1234,
+            bounds: { x: 10, y: 20, width: 642, height: 482 },
+          },
+          screenshots: [{ windowId: "42", x: 10, y: 20, width: 640, height: 480 }],
+          screenshotImages: [{ data: png.toString("base64"), mimeType: "image/png" }],
+        };
+      },
+    },
+  });
+
+  const capture = await driver.captureScreenshot({
+    window: {
+      windowId: 42,
+      title: "Image handoff",
+      pid: 1234,
+      bounds: { x: 10, y: 20, width: 642, height: 482 },
+    },
+    outputPath,
+  });
+
+  assert.equal(screenshotCalls, 1);
+  assert.deepEqual(await readFile(outputPath), png);
+  assert.equal(capture.width, 640);
+  assert.equal(capture.height, 480);
+});
+
+test("CuaDriverMcpDriver falls back to exact-HWND PrintWindow capture after bounded driver handoff failure", async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), "cua-driver-native-main-fallback-"));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const outputPath = join(directory, "window.png");
+  const png = Buffer.alloc(24);
+  Buffer.from("89504e470d0a1a0a", "hex").copy(png, 0);
+  png.write("IHDR", 12, "ascii");
+  png.writeUInt32BE(642, 16);
+  png.writeUInt32BE(482, 20);
+  let screenshotCalls = 0;
+  let nativeCalls = 0;
+  const driver = new CuaDriverMcpDriver({
+    session: "screenshot-native-main-fallback-session",
+    client: {
+      async start() {},
+      async callTool(name) {
+        if (name !== "get_window_state") return { status: "ok" };
+        screenshotCalls += 1;
+        return {
+          window: {
+            id: 42,
+            title: "Native fallback",
+            pid: 1234,
+            bounds: { x: 10, y: 20, width: 642, height: 482 },
+          },
+        };
+      },
+    },
+    async mainWindowCapture(windowId, path, options) {
+      nativeCalls += 1;
+      assert.equal(String(windowId), "42");
+      assert.equal(options.expectedProcessId, 1234);
+      await writeFile(path, png);
+      return {
+        status: "ok",
+        hwnd: 42,
+        processId: 1234,
+        method: "PrintWindow",
+        x: 10,
+        y: 20,
+        width: 642,
+        height: 482,
+      };
+    },
+  });
+
+  const capture = await driver.captureScreenshot({
+    window: {
+      windowId: 42,
+      title: "Native fallback",
+      pid: 1234,
+      bounds: { x: 10, y: 20, width: 642, height: 482 },
+    },
+    outputPath,
+  });
+
+  assert.equal(screenshotCalls, 2);
+  assert.equal(nativeCalls, 1);
+  assert.equal(capture.method, "PrintWindow");
+  assert.equal(capture.source, "windows-window-capture");
+  assert.deepEqual(await readFile(outputPath), png);
+});
+
 test("CuaDriverMcpDriver reports a capture error instead of exposing a missing path", async (t) => {
   const directory = await mkdtemp(join(tmpdir(), "cua-driver-missing-png-"));
   t.after(() => rm(directory, { recursive: true, force: true }));
   let screenshotCalls = 0;
   const driver = new CuaDriverMcpDriver({
+    mainWindowCapture: false,
     session: "screenshot-missing-session",
     client: {
       async start() {},

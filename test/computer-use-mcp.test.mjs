@@ -564,13 +564,13 @@ test("OCR row summaries never fabricate cross-column actionable geometry", () =>
 test("OCR row anchors prefer descriptive text over a larger single-glyph avatar", () => {
   const compressed = compactModelPerceptionElements([
     { name: "中", source: "ocr", bounds: { x: 61, y: 153, width: 59, height: 46 } },
-    { name: "惠州中科-宋鹏", source: "ocr", bounds: { x: 113, y: 157, width: 102, height: 19 } },
+    { name: "示例企业-张三", source: "ocr", bounds: { x: 113, y: 157, width: 102, height: 19 } },
     { name: "昨天 15:23", source: "ocr", bounds: { x: 239, y: 157, width: 56, height: 18 } },
   ]);
 
   assert.equal(compressed.length, 1);
   assert.deepEqual(compressed[0].representativeTextAnchor, {
-    name: "惠州中科-宋鹏",
+    name: "示例企业-张三",
     bounds: { x: 113, y: 157, width: 102, height: 19 },
   });
 });
@@ -1217,6 +1217,29 @@ test("screenshot remains OCR-first even when a caller supplies a visual question
   assert.deepEqual(calls, [{ mode: "screenshot" }]);
 });
 
+test("capture-window uses the unified screenshot perception and Scene composition path", async () => {
+  const calls = [];
+  await observeComputer({
+    async capture(args) {
+      calls.push(args);
+      return { status: "ok" };
+    },
+    async captureWindow() {
+      throw new Error("raw capture must remain an internal perception primitive");
+    },
+  }, {
+    mode: "capture-window",
+    noCache: true,
+  }, { sessionId: "session-capture-window" });
+
+  assert.deepEqual(calls, [{
+    mode: "screenshot",
+    requestedMode: "capture-window",
+    noCache: true,
+    requestContext: { sessionId: "session-capture-window" },
+  }]);
+});
+
 test("visual observation is an explicit escalation with one required question", async () => {
   const calls = [];
   await assert.rejects(
@@ -1509,6 +1532,51 @@ test("screenshot ImageContent survives deletion of the private handoff file", as
   } finally {
     await rm(artifactRoot, { recursive: true, force: true });
   }
+});
+
+test("visual projection returns related screenshots with Scene identity metadata", async () => {
+  const png = Buffer.from(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Y9ZQmcAAAAASUVORK5CYII=",
+    "base64",
+  );
+  const projected = await projectComputerUseMediaResult({
+    async readOwnedArtifact(path) {
+      assert.equal(["C:\\private\\main.png", "C:\\private\\related.png"].includes(path), true);
+      return png;
+    },
+  }, "computer.observe", {
+    mode: "visual",
+    visualQuestion: "Resolve the current owned-surface ambiguity.",
+  }, {
+    scene: { screenshotId: "screenshot-0", windowId: "42" },
+    artifact: { path: "C:\\private\\main.png" },
+    capture: {
+      path: "C:\\private\\main.png",
+      relatedSurfaces: [{
+        path: "C:\\private\\related.png",
+        screenshotId: "screenshot-1",
+        hwnd: "77",
+        zIndex: 1,
+        x: 501,
+        y: 163,
+        width: 368,
+        height: 352,
+      }],
+    },
+    perceptionRouting: { visualUnderstandingEligible: true },
+  });
+
+  assert.equal(projected.imageContent.length, 2);
+  assert.deepEqual(projected.imageContent[1]._meta["computerUse/screenshot"], {
+    screenshotId: "screenshot-1",
+    windowId: "77",
+    zIndex: 1,
+    originX: 501,
+    originY: 163,
+    width: 368,
+    height: 352,
+  });
+  assert.equal(projected.structuredContent.capture.relatedSurfaces[0].path, undefined);
 });
 
 test("unchanged screenshot digest suppresses repeated Host vision after local OCR", async () => {
@@ -2425,7 +2493,7 @@ test("agent-computer-use-mcp freezes the local MCP tool contract", () => {
   assert.deepEqual(act.inputSchema.properties.action.properties.coordinateSpace.enum, ["window-local", "screen"]);
   assert.deepEqual(
     act.inputSchema.properties.action.properties.inputBehavior.enum,
-    ["incremental"],
+    ["incremental", "commit"],
   );
   assert.deepEqual(
     act.inputSchema.properties.action.allOf[2].then.required,

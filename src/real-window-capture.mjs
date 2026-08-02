@@ -1,11 +1,34 @@
 import { spawn } from "node:child_process";
 
 export async function captureWindowPngByTitle(titlePart, outputPath, options = {}) {
-  if (process.platform !== "win32") {
+  return captureWindowPng({ titlePart, outputPath, allowScreenFallback: true }, options);
+}
+
+export async function captureWindowPngById(windowId, outputPath, options = {}) {
+  let normalizedWindowId;
+  try {
+    normalizedWindowId = BigInt(windowId).toString();
+  } catch {
+    throw new Error("window_capture.invalid_window_id");
+  }
+  if (normalizedWindowId === "0" || normalizedWindowId.startsWith("-")) {
+    throw new Error("window_capture.invalid_window_id");
+  }
+  return captureWindowPng({
+    windowId: normalizedWindowId,
+    expectedProcessId: normalizeProcessId(options.expectedProcessId),
+    outputPath,
+    allowScreenFallback: false,
+  }, options);
+}
+
+async function captureWindowPng(request, options) {
+  const platform = options.platform ?? globalThis.process?.platform;
+  if (platform !== "win32") {
     throw new Error("window_capture.unsupported_platform");
   }
 
-  const script = buildCaptureScript(titlePart, outputPath);
+  const script = buildCaptureRequestScript(request);
   const encoded = Buffer.from(script, "utf16le").toString("base64");
   const result = await runJson("powershell.exe", [
     "-NoProfile",
@@ -22,10 +45,14 @@ export async function captureWindowPngByTitle(titlePart, outputPath, options = {
 }
 
 export function buildCaptureScript(titlePart, outputPath) {
+  return buildCaptureRequestScript({ titlePart, outputPath, allowScreenFallback: true });
+}
+
+export function buildCaptureRequestScript(request) {
   return `
 $ErrorActionPreference = "Stop"
 $request = @'
-${JSON.stringify({ titlePart, outputPath })}
+${JSON.stringify(request)}
 '@ | ConvertFrom-Json
 Add-Type -ReferencedAssemblies System.Drawing -TypeDefinition @'
 using System;
@@ -44,6 +71,7 @@ public sealed class CaptureWindowResult {
     public int y { get; set; }
     public int width { get; set; }
     public int height { get; set; }
+    public long processId { get; set; }
 }
 
 public static class CaptureWindowPngByTitle {
@@ -67,6 +95,12 @@ public static class CaptureWindowPngByTitle {
     private static extern bool IsWindowVisible(IntPtr hWnd);
 
     [DllImport("user32.dll")]
+    private static extern bool IsWindow(IntPtr hWnd);
+
+    [DllImport("user32.dll")]
+    private static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint processId);
+
+    [DllImport("user32.dll")]
     private static extern IntPtr GetForegroundWindow();
 
     [DllImport("user32.dll")]
@@ -75,11 +109,22 @@ public static class CaptureWindowPngByTitle {
     [DllImport("user32.dll")]
     private static extern bool PrintWindow(IntPtr hwnd, IntPtr hdcBlt, uint flags);
 
-    public static CaptureWindowResult Capture(string titlePart, string outputPath) {
+    public static CaptureWindowResult Capture(
+        string titlePart,
+        long requestedWindowId,
+        long expectedProcessId,
+        string outputPath,
+        bool allowScreenFallback
+    ) {
         IntPtr found = IntPtr.Zero;
         string foundTitle = "";
 
-        if (String.Equals(titlePart == null ? "" : titlePart.Trim(), "*", StringComparison.Ordinal)) {
+        if (requestedWindowId > 0) {
+            found = new IntPtr(requestedWindowId);
+            if (!IsWindow(found)) {
+                throw new InvalidOperationException("window_not_found");
+            }
+        } else if (String.Equals(titlePart == null ? "" : titlePart.Trim(), "*", StringComparison.Ordinal)) {
             found = GetForegroundWindow();
             if (found != IntPtr.Zero) {
                 var text = new StringBuilder(512);
@@ -105,6 +150,11 @@ public static class CaptureWindowPngByTitle {
         if (!IsWindowVisible(found)) {
             throw new InvalidOperationException("window_not_visible: " + titlePart);
         }
+        uint processId;
+        GetWindowThreadProcessId(found, out processId);
+        if (expectedProcessId > 0 && processId != expectedProcessId) {
+            throw new InvalidOperationException("window_process_mismatch");
+        }
         RECT rect;
         if (!GetWindowRect(found, out rect)) {
             throw new InvalidOperationException("get_window_rect_failed");
@@ -118,6 +168,9 @@ public static class CaptureWindowPngByTitle {
             bool printed = PrintWindow(found, hdc, 2);
             graphics.ReleaseHdc(hdc);
             if (!printed) {
+                if (!allowScreenFallback) {
+                    throw new InvalidOperationException("print_window_failed");
+                }
                 graphics.CopyFromScreen(rect.Left, rect.Top, 0, 0, new Size(width, height));
             }
             bitmap.Save(outputPath, ImageFormat.Png);
@@ -132,13 +185,25 @@ public static class CaptureWindowPngByTitle {
             x = rect.Left,
             y = rect.Top,
             width = width,
-            height = height
+            height = height,
+            processId = processId
         };
     }
 }
 '@
-[CaptureWindowPngByTitle]::Capture([string]$request.titlePart, [string]$request.outputPath) | ConvertTo-Json -Compress
+[CaptureWindowPngByTitle]::Capture(
+  [string]$request.titlePart,
+  [long]$request.windowId,
+  [long]$request.expectedProcessId,
+  [string]$request.outputPath,
+  [bool]$request.allowScreenFallback
+) | ConvertTo-Json -Compress
 `;
+}
+
+function normalizeProcessId(value) {
+  const processId = Number(value);
+  return Number.isSafeInteger(processId) && processId > 0 ? processId : 0;
 }
 
 function runJson(command, args, timeoutMs) {

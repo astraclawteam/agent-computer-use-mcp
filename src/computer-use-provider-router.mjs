@@ -30,6 +30,7 @@ import {
   detectMessagingVisualProposals,
   stableCompositionOcrElements,
 } from "./messaging-scene-composition.mjs";
+import { composeOwnedTransientSceneElements } from "./owned-transient-scene-composition.mjs";
 
 function sameRequestContext(left, right) {
   if (!left || !right) return !left && !right;
@@ -119,6 +120,8 @@ export class ComputerUseProviderRouter {
     this.messagingSceneComposition = options.messagingSceneComposition ?? composeMessagingSceneElements;
     this.messagingVisualProposalOperation = options.messagingVisualProposalOperation
       ?? detectMessagingVisualProposals;
+    this.ownedTransientSceneComposition = options.ownedTransientSceneComposition
+      ?? composeOwnedTransientSceneElements;
     this.actionPolicy = this.policy.describe();
   }
 
@@ -1212,8 +1215,45 @@ export class ComputerUseProviderRouter {
         };
       }
     }
-    if (localObservation
-      && (explicitVisualQuestion || this.messagingSceneControls.length > 0)) {
+    const verifiedSearchControl = this.messagingSceneControls.find((control) => (
+      control?.role === "search"
+      && typeof control.verifiedValue === "string"
+      && isCoordinateBox(control.bounds)
+    ));
+    if (localObservation && verifiedSearchControl) {
+      const verifiedValueRegion = isCoordinateBox(verifiedSearchControl.verifiedValueBounds)
+        ? verifiedSearchControl.verifiedValueBounds
+        : searchValueContentCrop(verifiedSearchControl.bounds, visualBounds);
+      if (verifiedValueRegion) {
+        try {
+          const verificationOcr = await this.awaitExternal(ticket, () => this.ocrRegionOperation({
+            imagePath,
+            crop: verifiedValueRegion,
+            timeoutMs: Math.min(
+              positiveTimeout(args.timeoutMs, LOCAL_OCR_LATENCY_BUDGET_MS),
+              LOCAL_OCR_LATENCY_BUDGET_MS,
+            ),
+          }, ticket));
+          const verificationElements = Array.isArray(verificationOcr.observation?.elements)
+            ? verificationOcr.observation.elements
+            : [];
+          const retainedElements = (Array.isArray(localObservation.elements)
+            ? localObservation.elements
+            : []).filter((element) => !boxesIntersect(element?.bounds, verifiedValueRegion));
+          localObservation = {
+            ...localObservation,
+            elements: [...retainedElements, ...verificationElements],
+            verifiedValueRegion,
+          };
+        } catch (error) {
+          this.assertOperationTicket(ticket);
+          this.recordAudit("computer.scene.verified_value_ocr_failed", {
+            errorCode: safeAuditErrorCode(error, "scene.verified_value_ocr_failed"),
+          });
+        }
+      }
+    }
+    if (localObservation) {
       try {
         const compositionOcrElements = stableCompositionOcrElements({
           currentElements: Array.isArray(localObservation.elements) ? localObservation.elements : [],
@@ -1248,6 +1288,66 @@ export class ComputerUseProviderRouter {
         this.recordAudit("computer.scene.composition_failed", {
           errorCode: safeAuditErrorCode(error, "scene.composition_failed"),
         });
+      }
+    }
+    if (localObservation && Array.isArray(screenshot.capture?.relatedSurfaces)) {
+      const searchControl = (Array.isArray(localObservation.elements) ? localObservation.elements : [])
+        .find((element) => element?.role === "search"
+          && Array.isArray(element?.actions)
+          && element.actions.includes("type_text")
+          && isCoordinateBox(element.bounds));
+      if (searchControl) {
+        const ownedSurfaces = [];
+        for (const surface of screenshot.capture.relatedSurfaces) {
+          if (typeof surface?.path !== "string") continue;
+          try {
+            await this.ensureOcrResources(ticket);
+            const response = await this.awaitExternal(ticket, () => this.ocr.recognize({
+              imagePath: surface.path,
+              languages: ["zh", "en"],
+              timeoutMs: Math.min(
+                positiveTimeout(args.timeoutMs, LOCAL_OCR_LATENCY_BUDGET_MS),
+                LOCAL_OCR_LATENCY_BUDGET_MS,
+              ),
+            }));
+            const relatedOcr = normalizeOcrSidecarResponse(response, {
+              observationId: `${screenshot.observationId}:related:${surface.screenshotId}`,
+              window: surface.window,
+              languageClass: "mixed",
+            });
+            const ocrElements = Array.isArray(relatedOcr.elements) ? relatedOcr.elements : [];
+            const visualProposals = await this.awaitExternal(
+              ticket,
+              () => this.messagingVisualProposalOperation({
+                imagePath: surface.path,
+                ocrElements,
+              }),
+            );
+            ownedSurfaces.push({ ...surface, ocrElements, visualProposals });
+          } catch (error) {
+            this.assertOperationTicket(ticket);
+            this.recordAudit("computer.scene.related_surface_failed", {
+              errorCode: safeAuditErrorCode(error, "scene.related_surface_failed"),
+            });
+          }
+        }
+        const ownedElements = this.ownedTransientSceneComposition({
+          mainCapture: {
+            ...screenshot.capture,
+            windowId: controllerWindowId(this.activeController?.window),
+          },
+          searchControl,
+          surfaces: ownedSurfaces,
+        });
+        if (ownedElements.length > 0) {
+          localObservation = {
+            ...localObservation,
+            elements: [
+              ...(Array.isArray(localObservation.elements) ? localObservation.elements : []),
+              ...ownedElements,
+            ],
+          };
+        }
       }
     }
     const localElements = Array.isArray(localObservation?.elements)
@@ -1473,7 +1573,7 @@ export class ComputerUseProviderRouter {
         },
       );
     }
-    const { admission, driverTarget, element, focusReceipt } = this.validateAction(action);
+    const { admission, driverTarget, element, sceneElement, focusReceipt } = this.validateAction(action);
     // A newly admitted action starts a distinct perception step. Permit one
     // fresh layout escalation for its resulting scene and bound the number of
     // observations made before the next action.
@@ -1548,6 +1648,7 @@ export class ComputerUseProviderRouter {
           textMode: action.textMode,
           inputBehavior: action.inputBehavior ?? "incremental",
           deliveryMode: effectiveDeliveryMode,
+          ...(focusReceipt?.status === "verified" ? { focusVerified: true } : {}),
         }, signal)));
         if (isCoordinateBox(action.targetBounds)) {
           this.recentEditableTarget = {
@@ -1587,6 +1688,12 @@ export class ComputerUseProviderRouter {
           deliveryMode: effectiveDeliveryMode,
           ...(action.interactionIntent === "focus-editable"
             ? { interactionIntent: action.interactionIntent }
+            : {}),
+          ...(sceneElement?.coordinate?.windowId
+            && String(sceneElement.coordinate.windowId) !== String(
+              this.activeController.window.windowId ?? this.activeController.window.id,
+            )
+            ? { relatedWindowId: sceneElement.coordinate.windowId }
             : {}),
         }, signal)));
         if (hasVerifiedFocus(result)) {
@@ -1682,7 +1789,9 @@ export class ComputerUseProviderRouter {
         driverChangeBoundaryVerified: action.kind === "type_text"
           && (result?.focusVerified === true || focusReceipt?.status === "verified")
           && (result?.changeSignalDelivered === true || result?.path === "key_events"),
-        target: describeActionTarget(action, element, driverTarget),
+        target: focusReceipt?.target
+          ? { ...focusReceipt.target, kind: action.kind }
+          : describeActionTarget(action, element, driverTarget),
       };
     } else {
       this.unconfirmedMutationHistory = [];
@@ -1717,11 +1826,23 @@ export class ComputerUseProviderRouter {
       && (action.kind === "click" || action.kind === "type_text")
       && typeof this.driver?.captureScreenshot === "function"
       && this.ocr;
+    const continuationBounds = isCoordinateBox(focusReceipt?.target?.bounds)
+      ? focusReceipt.target.bounds
+      : driverTarget?.bounds;
+    const postActionTarget = !isCoordinateBox(action.targetBounds)
+      && isCoordinateBox(continuationBounds)
+      ? {
+          ...action,
+          targetBounds: { ...continuationBounds },
+          ...(Number.isFinite(driverTarget.x) ? { x: driverTarget.x } : {}),
+          ...(Number.isFinite(driverTarget.y) ? { y: driverTarget.y } : {}),
+        }
+      : action;
     const postActionVerificationCrop = automaticLocalPostActionObservation
-      ? planPostActionObservationCrop(action, actionObservation)
+      ? planPostActionObservationCrop(postActionTarget, actionObservation)
       : null;
     const postActionEffectHintRegion = automaticLocalPostActionObservation
-      ? planPostActionEffectRegion(action, actionObservation)
+      ? planPostActionEffectRegion(postActionTarget, actionObservation)
       : null;
     if (postActionVerificationCrop) {
       this.lastActionVisualCrop = {
@@ -1759,6 +1880,40 @@ export class ComputerUseProviderRouter {
       );
       if (automaticLocalPostActionObservation
         && action.kind === "type_text"
+        && actionResult.capture?.mutationVerification?.status === "not-confirmed"
+        && this.pendingUnverifiedMutation?.driverChangeBoundaryVerified === true) {
+        const exactValueCrop = planExactTextValueObservationCrop(postActionTarget, actionObservation);
+        if (exactValueCrop) {
+          actionResult.capture = await this.awaitExternal(
+            ticket,
+            () => this.captureOperation({
+              ...postActionCaptureArgs,
+              crop: exactValueCrop,
+              includeChangedRegionAlongsideCrop: false,
+            }, ticket),
+          );
+        }
+        if (actionResult.capture?.mutationVerification?.status === "not-confirmed") {
+          const alternateValueCrop = planAlternateExactTextValueObservationCrop(
+            postActionTarget,
+            actionObservation,
+          );
+          if (alternateValueCrop
+            && JSON.stringify(alternateValueCrop) !== JSON.stringify(exactValueCrop)) {
+            actionResult.capture = await this.awaitExternal(
+              ticket,
+              () => this.captureOperation({
+                ...postActionCaptureArgs,
+                crop: alternateValueCrop,
+                includeChangedRegionAlongsideCrop: false,
+              }, ticket),
+            );
+          }
+        }
+      }
+      if (automaticLocalPostActionObservation
+        && action.kind === "type_text"
+        && action.textMode !== "replace-all"
         && actionResult.capture?.mutationVerification?.status === "not-confirmed"
         && this.pendingUnverifiedMutation?.driverChangeBoundaryVerified === true) {
         await this.awaitExternal(
@@ -1814,7 +1969,29 @@ export class ComputerUseProviderRouter {
           verificationRequired: "satisfied_by_post_action_capture",
           nextAction: actionResult.postActionObservation.nextAction,
         };
-        if (action.kind === "type_text"
+        const selectionVerification = action.kind === "click"
+          && action.interactionIntent === "select-item"
+          ? verifySelectedConversationSceneTransition({
+              beforeScene: actionObservation.scene,
+              afterScene: actionResult.capture?.scene,
+              selectedElement: sceneElement,
+            })
+          : null;
+        if (selectionVerification?.verified) {
+          outcome = "committed";
+          actionResult.status = outcome;
+          actionResult.outcome = outcome;
+          actionResult.result = {
+            ...actionResult.result,
+            effect: "verified",
+            verified: true,
+            verification: selectionVerification,
+            nextAction: "The selected conversation title is verified in this fresh Scene. Continue with the next distinct workflow step; do not replay the selection.",
+          };
+          actionResult.postActionObservation.nextAction = actionResult.result.nextAction;
+          this.pendingUnverifiedMutation = null;
+          this.unconfirmedMutationHistory = [];
+        } else if (action.kind === "type_text"
           && actionResult.capture?.mutationVerification?.status === "confirmed") {
           outcome = "committed";
           actionResult.status = outcome;
@@ -2147,6 +2324,13 @@ export class ComputerUseProviderRouter {
         capture.path,
         capture.artifactBytes,
       ));
+      for (const surface of Array.isArray(capture.relatedSurfaces) ? capture.relatedSurfaces : []) {
+        if (typeof surface?.path !== "string") continue;
+        await this.awaitExternal(ticket, () => this.pinOwnedArtifact(
+          surface.path,
+          surface.artifactBytes,
+        ));
+      }
     }
     const result = {
       status: "ok",
@@ -2727,25 +2911,43 @@ export class ComputerUseProviderRouter {
       ? resolveProviderElementBinding(this.lastCapture, sceneElement)
       : null;
     const focusReceipt = this.validateFocusReceipt(action);
+    const focusGroundedAction = action.kind === "type_text"
+      && isCoordinateBox(focusReceipt?.target?.bounds)
+      ? {
+          ...action,
+          observationId: action.observationId ?? this.lastCapture?.observationId,
+          coordinateSpace: this.lastCapture?.coordinateSpace ?? "window-local",
+          targetBounds: { ...focusReceipt.target.bounds },
+          x: focusReceipt.target.bounds.x + (focusReceipt.target.bounds.width / 2),
+          y: focusReceipt.target.bounds.y + (focusReceipt.target.bounds.height / 2),
+        }
+      : action;
     const admission = admitPerceptionAction({
       observation: this.lastCapture,
       element,
       recentEditableTarget: this.recentEditableTarget,
       action: {
-        ...action,
+        ...focusGroundedAction,
         windowId: controllerWindowId(this.activeController.window),
         controllerId: this.activeController.controllerId,
       },
       now: this.clock.now(),
     });
     if (!admission.allowed) fail(admission.code, perceptionAdmissionMessage(admission), admission);
+    const resolvedDriverTarget = resolveDriverActionTarget(
+      action,
+      element,
+      admission.pixelLimitedAction,
+      sceneElement?.coordinate?.actionTransform
+        ? { actionTransform: sceneElement.coordinate.actionTransform }
+        : this.lastCapture?.coordinateScale,
+    );
     return {
       admission,
-      driverTarget: resolveDriverActionTarget(
+      driverTarget: resolveFocusContinuationTarget(
         action,
-        element,
-        admission.pixelLimitedAction,
-        this.lastCapture?.coordinateScale,
+        resolvedDriverTarget,
+        focusReceipt,
       ),
       element,
       sceneElement,
@@ -2760,14 +2962,33 @@ export class ComputerUseProviderRouter {
     const providerElement = sceneElement
       ? resolveProviderElementBinding(this.lastCapture, sceneElement)
       : null;
-    if (providerElement?.pixelLimitedAction === true
+    const pixelLimitedSceneElement = sceneElement?.binding?.pixelLimitedAction === true
+      || providerElement?.pixelLimitedAction === true;
+    if (pixelLimitedSceneElement
       && isCoordinateBox(sceneElement?.coordinate?.bounds)
       && typeof sceneElement.coordinate.screenshotId === "string") {
+      const targetBounds = normalized.targetBounds ?? { ...sceneElement.coordinate.bounds };
+      const mainScreenshotId = this.lastCapture?.scene?.screenshotId
+        ?? this.lastCapture?.observationId;
+      const mainWindowPixelTarget = sceneElement.coordinate.screenshotId === mainScreenshotId;
       normalized = {
         ...normalized,
         observationId: normalized.observationId ?? sceneElement.coordinate.screenshotId,
         coordinateSpace: normalized.coordinateSpace ?? sceneElement.coordinate.space,
-        targetBounds: normalized.targetBounds ?? { ...sceneElement.coordinate.bounds },
+        targetBounds,
+        ...(normalized.targetRole === undefined
+          ? { targetRole: sceneElement.type === "Editable" ? "editable" : sceneElement.role }
+          : {}),
+        ...(mainWindowPixelTarget
+          && normalized.kind === "click"
+          && !Number.isFinite(normalized.x)
+          && !Number.isFinite(normalized.y)
+          ? {
+              x: targetBounds.x + (targetBounds.width / 2),
+              y: targetBounds.y + (targetBounds.height / 2),
+              derivedInteractionPoint: "target-bounds-center",
+            }
+          : {}),
       };
     }
     const surfaceReceipt = this.lastCapture?.surfaceReceipt;
@@ -2877,7 +3098,10 @@ export class ComputerUseProviderRouter {
       pending.value,
       pending.target,
       pending.preexistingTextOccurrences,
-      { exactOnly: pending.textMode === "replace-all" },
+      {
+        exactOnly: pending.textMode === "replace-all",
+        windowId: pending.windowId,
+      },
     );
     const dependentEvidence = matchingElement ? null : findDependentTextEntryEvidence(
       observation,
@@ -2906,6 +3130,23 @@ export class ComputerUseProviderRouter {
     }
 
     this.unconfirmedMutationHistory = [];
+    if (pending.textMode === "replace-all" && isCoordinateBox(pending.target?.bounds)) {
+      const verifiedValueBounds = matchingElement
+        ? observedElementBounds(matchingElement)
+        : null;
+      this.messagingSceneControls = this.messagingSceneControls.map((control) => (
+        control?.role === "search" && boxesIntersect(control.bounds, pending.target.bounds)
+          ? {
+              ...control,
+              verifiedValue: pending.value,
+              verifiedAtObservationId: observation.observationId,
+              ...(isCoordinateBox(verifiedValueBounds)
+                ? { verifiedValueBounds: { ...verifiedValueBounds } }
+                : {}),
+            }
+          : control
+      ));
+    }
     this.activeFocusReceipt = this.createFocusReceipt({
       action: { kind: "type_text" },
       element: dependentEvidence ? null : matchingElement,
@@ -3509,6 +3750,53 @@ export class ComputerUseProviderRouter {
   }
 }
 
+export function verifySelectedConversationSceneTransition({
+  beforeScene,
+  afterScene,
+  selectedElement,
+} = {}) {
+  const selectedText = normalizeRecognizedUiText(
+    selectedElement?.name ?? selectedElement?.value ?? "",
+    { languageClass: "mixed" },
+  );
+  if (selectedText.length === 0
+    || !Number.isInteger(beforeScene?.observationVersion)
+    || !Number.isInteger(afterScene?.observationVersion)
+    || afterScene.observationVersion <= beforeScene.observationVersion) {
+    return { status: "unavailable", verified: false, method: "host-scene-conversation-title" };
+  }
+  const beforeOwnedResults = beforeScene.elements?.some((element) => (
+    element.type === "TransientSurface" && element.role === "search-results"
+  )) === true;
+  const afterOwnedResults = afterScene.elements?.some((element) => (
+    element.type === "TransientSurface" && element.role === "search-results"
+  )) === true;
+  const conversation = afterScene.elements?.find((element) => (
+    element.type === "Container" && element.role === "conversation"
+  ));
+  const header = afterScene.elements?.find((element) => (
+    element.type === "Container"
+    && element.role === "conversation-header"
+    && element.parentId === conversation?.id
+  ));
+  const title = afterScene.elements?.find((element) => (
+    element.role === "conversation-title"
+    && element.parentId === header?.id
+    && normalizeRecognizedUiText(element.name ?? element.value ?? "", {
+      languageClass: "mixed",
+    }) === selectedText
+  ));
+  const verified = beforeOwnedResults
+    && !afterOwnedResults
+    && Boolean(conversation && header && title);
+  return {
+    status: verified ? "confirmed" : "not-confirmed",
+    verified,
+    method: "host-scene-conversation-title",
+    ...(verified ? { observationId: afterScene.observationId } : {}),
+  };
+}
+
 function pickOcrIdentity(response) {
   const identity = {};
   for (const key of ["provider", "model", "modelPack", "modelFormat", "runtime", "executionProvider"]) {
@@ -3973,6 +4261,96 @@ export function planPostActionObservationCrop(action, observation) {
   return { x, y, width, height };
 }
 
+export function planExactTextValueObservationCrop(action, observation) {
+  if (action?.kind !== "type_text" || action.textMode !== "replace-all") return null;
+  const target = isCoordinateBox(action.targetBounds) ? action.targetBounds : null;
+  const bounds = isCoordinateBox(observation?.coordinateBounds)
+    ? observation.coordinateBounds
+    : null;
+  if (!target || !bounds) return null;
+  const search = observation?.scene?.elements?.find((element) => (
+    element?.type === "Editable"
+    && element?.role === "search"
+    && isCoordinateBox(element?.coordinate?.bounds)
+    && boxesIntersect(element.coordinate.bounds, target)
+  ));
+  if (!search) return null;
+  const sceneValueBounds = search.state?.valueBounds;
+  if (isCoordinateBox(sceneValueBounds)) {
+    return sceneValueBounds.x >= bounds.x
+      && sceneValueBounds.y >= bounds.y
+      && sceneValueBounds.x + sceneValueBounds.width <= bounds.x + bounds.width
+      && sceneValueBounds.y + sceneValueBounds.height <= bounds.y + bounds.height
+      ? { ...sceneValueBounds }
+      : null;
+  }
+  return searchValueContentCrop(target, bounds);
+}
+
+export function planAlternateExactTextValueObservationCrop(action, observation) {
+  if (action?.kind !== "type_text" || action.textMode !== "replace-all") return null;
+  const target = isCoordinateBox(action.targetBounds) ? action.targetBounds : null;
+  const bounds = isCoordinateBox(observation?.coordinateBounds)
+    ? observation.coordinateBounds
+    : null;
+  const search = observation?.scene?.elements?.find((element) => (
+    element?.type === "Editable"
+    && element?.role === "search"
+    && isCoordinateBox(element?.coordinate?.bounds)
+    && target
+    && boxesIntersect(element.coordinate.bounds, target)
+  ));
+  if (!search || !bounds) return null;
+  return searchCompactValueContentCrop(target, bounds);
+}
+
+function searchValueContentCrop(target, bounds) {
+  if (!isCoordinateBox(target) || !isCoordinateBox(bounds)) return null;
+  const leftInset = Math.max(6, Math.min(
+    Math.round(target.height * 0.75),
+    Math.floor(target.width * 0.16),
+  ));
+  const rightInset = Math.max(12, Math.min(
+    Math.round(target.height * 1.1),
+    Math.floor(target.width * 0.25),
+  ));
+  const width = target.width - leftInset - rightInset;
+  if (width <= 0) return null;
+  const crop = {
+    x: target.x + leftInset,
+    y: target.y,
+    width,
+    height: target.height,
+  };
+  return crop.x >= bounds.x
+    && crop.y >= bounds.y
+    && crop.x + crop.width <= bounds.x + bounds.width
+    && crop.y + crop.height <= bounds.y + bounds.height
+    ? crop
+    : null;
+}
+
+function searchCompactValueContentCrop(target, bounds) {
+  if (!isCoordinateBox(target) || !isCoordinateBox(bounds)) return null;
+  const leftInset = Math.max(6, Math.min(
+    Math.round(target.height * 0.3),
+    Math.floor(target.width * 0.12),
+  ));
+  const rightInset = Math.max(12, Math.min(
+    Math.round(target.height * 1.1),
+    Math.floor(target.width * 0.25),
+  ));
+  const width = target.width - leftInset - rightInset;
+  const crop = { x: target.x + leftInset, y: target.y, width, height: target.height };
+  return width > 0
+    && crop.x >= bounds.x
+    && crop.y >= bounds.y
+    && crop.x + crop.width <= bounds.x + bounds.width
+    && crop.y + crop.height <= bounds.y + bounds.height
+    ? crop
+    : null;
+}
+
 /**
  * A selection often updates a sibling pane rather than the pixels that were
  * clicked. When no dirty region exists because the item was already selected,
@@ -4154,6 +4532,21 @@ function resolveDriverActionTarget(action, element, pixelLimitedAction, coordina
   }, coordinateScale?.actionTransform);
 }
 
+function resolveFocusContinuationTarget(action, driverTarget, focusReceipt) {
+  if (action.kind !== "type_text"
+    || !focusReceipt
+    || (Number.isFinite(driverTarget?.x) && Number.isFinite(driverTarget?.y))) {
+    return driverTarget;
+  }
+  const target = focusReceipt.target;
+  if (!Number.isFinite(target?.x) || !Number.isFinite(target?.y)) return driverTarget;
+  return {
+    ...driverTarget,
+    x: target.x,
+    y: target.y,
+  };
+}
+
 function shouldUseTargetBoundsCenter(action) {
   return isCoordinateBox(action.targetBounds)
     && (
@@ -4246,7 +4639,7 @@ function findObservedTextAtTarget(
   intendedValue,
   target,
   preexistingOccurrences = [],
-  { exactOnly = false } = {},
+  { exactOnly = false, windowId = null } = {},
 ) {
   const intendedText = normalizeRecognizedUiText(intendedValue, { languageClass: "mixed" });
   if (!intendedText || !Number.isFinite(target?.x) || !Number.isFinite(target?.y)) return null;
@@ -4265,7 +4658,11 @@ function findObservedTextAtTarget(
   return [...collectObservedTextElements(observation, intendedText), ...compositeTargetMatches]
     .filter((element) => {
       const bounds = observedElementBounds(element);
-      return (!isCoordinateBox(target?.bounds) || boxesIntersect(bounds, target.bounds))
+      const elementWindowId = element?.coordinate?.windowId;
+      return (elementWindowId === undefined
+          || elementWindowId === null
+          || String(elementWindowId) === String(windowId))
+        && (!isCoordinateBox(target?.bounds) || boxesIntersect(bounds, target.bounds))
         && !preexistingOccurrences.some((occurrence) => (
         sameObservedTextOccurrence(bounds, occurrence)
       ));
@@ -4312,20 +4709,6 @@ function findDependentTextEntryEvidence(
   if (!intendedText || !targetBounds || !isCoordinateBox(dependentRegion)
     || !boxesConnected(targetBounds, dependentRegion)) {
     return null;
-  }
-  const exactEvidence = collectObservedTextElements(observation, intendedText)
-    .filter((element) => {
-      const bounds = observedElementBounds(element);
-      return bounds
-        && boxesIntersect(bounds, dependentRegion)
-        && !boxesIntersect(bounds, targetBounds)
-        && !preexistingOccurrences.some((occurrence) => sameObservedTextOccurrence(bounds, occurrence));
-    })[0] ?? null;
-  if (exactEvidence) {
-    return {
-      method: "bounded-dependent-ui-exact-text-after-entry",
-      element: exactEvidence,
-    };
   }
   if (textMode !== "insert" || driverChangeBoundaryVerified !== true) return null;
   const currentElements = selectOcrEvidenceForRegion(

@@ -61,14 +61,14 @@ export function buildHostScene({ observation, observationVersion } = {}) {
     "scene.invalid_coordinate_bounds",
   );
   const transform = observation.coordinateScale?.actionTransform ?? {};
-  const crop = observation.capture ?? observation.crop ?? {};
+  const crop = observation.crop ?? {};
   const coordinate = Object.freeze({
     screenshotId,
     windowId,
     space: coordinateSpace,
     cropOffset: Object.freeze({
-      x: finiteOr(crop.x, transform.offsetX, 0),
-      y: finiteOr(crop.y, transform.offsetY, 0),
+      x: finiteOr(crop.x, 0),
+      y: finiteOr(crop.y, 0),
     }),
     scale: Object.freeze({
       x: positiveOr(transform.scaleX, 1),
@@ -128,7 +128,9 @@ export function buildHostScene({ observation, observationVersion } = {}) {
     if (!raw || typeof raw !== "object" || Array.isArray(raw)) continue;
     const source = evidenceSource(raw.source ?? observation.source);
     const bounds = providerElementBounds(raw, observation, coordinateBounds);
-    const parentId = structuralParentId(raw, rawElementIds, rawElementIdByToken)
+    const parentId = structuralParentId(raw, rawElementIds, rawElementIdByToken, {
+      windowElementId,
+    })
       ?? regionParents.parentFor(bounds)
       ?? viewportElementId;
     const evidence = evidenceForRawElement(raw, source, parentId, bounds);
@@ -149,7 +151,7 @@ export function buildHostScene({ observation, observationVersion } = {}) {
       role: typeof raw.role === "string" && raw.role.trim() ? raw.role : "observed-item",
       parentId,
       observationVersion: version,
-      coordinate: coordinateWithBounds(coordinate, bounds ?? coordinateBounds),
+      coordinate: providerElementCoordinate(raw, coordinate, bounds ?? coordinateBounds),
       evidence,
       evidenceConsistency,
       conflicts,
@@ -489,7 +491,8 @@ function hostElement({
   });
 }
 
-function structuralParentId(raw, rawElementIds, rawElementIdByToken) {
+function structuralParentId(raw, rawElementIds, rawElementIdByToken, { windowElementId }) {
+  if (raw.parentSceneRoot === true) return windowElementId;
   const parentToken = raw.parentElementToken ?? raw.parentToken
     ?? raw.parent_element_token ?? raw.parent_token;
   if (parentToken !== undefined && parentToken !== null) {
@@ -561,6 +564,7 @@ function providerEvidenceSufficient(raw, source) {
 }
 
 function hostTypeFor(raw, source) {
+  if (HOST_ELEMENT_TYPES.has(raw.hostType)) return raw.hostType;
   const role = String(raw.role ?? "").trim().toLowerCase();
   if (EDITABLE_ROLES.has(role)) return "Editable";
   if (TRANSIENT_ROLES.has(role)) return "TransientSurface";
@@ -568,6 +572,45 @@ function hostTypeFor(raw, source) {
     return "Container";
   }
   return "ActionableItem";
+}
+
+function providerElementCoordinate(raw, fallback, bounds) {
+  const declared = raw.coordinate;
+  if (!declared || typeof declared !== "object" || Array.isArray(declared)) {
+    return coordinateWithBounds(fallback, bounds);
+  }
+  const screenshotId = requiredString(declared.screenshotId, "scene.invalid_element_coordinate");
+  const windowId = requiredString(declared.windowId, "scene.invalid_element_coordinate");
+  const space = requiredString(declared.space, "scene.invalid_element_coordinate");
+  const cropOffset = declared.cropOffset ?? {};
+  const scale = declared.scale ?? {};
+  const coordinate = {
+    screenshotId,
+    windowId,
+    space,
+    cropOffset: Object.freeze({
+      x: finiteOr(cropOffset.x, 0),
+      y: finiteOr(cropOffset.y, 0),
+    }),
+    scale: Object.freeze({
+      x: positiveOr(scale.x, 1),
+      y: positiveOr(scale.y, 1),
+    }),
+    bounds: Object.freeze({ ...bounds }),
+  };
+  if (typeof declared.actionWindowId === "string" && declared.actionWindowId.trim() !== "") {
+    coordinate.actionWindowId = declared.actionWindowId;
+  }
+  const actionTransform = declared.actionTransform;
+  if (actionTransform && typeof actionTransform === "object" && !Array.isArray(actionTransform)) {
+    coordinate.actionTransform = Object.freeze({
+      scaleX: positiveOr(actionTransform.scaleX, 1),
+      scaleY: positiveOr(actionTransform.scaleY, 1),
+      offsetX: finiteOr(actionTransform.offsetX, 0),
+      offsetY: finiteOr(actionTransform.offsetY, 0),
+    });
+  }
+  return Object.freeze(coordinate);
 }
 
 function sceneElementId(sceneId, index) {

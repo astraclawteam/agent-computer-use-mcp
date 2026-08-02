@@ -5,8 +5,11 @@ import {
   ComputerUseProviderRouter,
   observedCompositeTextElementAtTarget,
   observedExactDecoratedEditableTextAtTarget,
+  planAlternateExactTextValueObservationCrop,
+  planExactTextValueObservationCrop,
   planPostActionEffectRegion,
   planPostActionObservationCrop,
+  verifySelectedConversationSceneTransition,
 } from "../src/computer-use-provider-router.mjs";
 import { admitPerceptionAction } from "../src/perception-action-admission.mjs";
 
@@ -40,6 +43,38 @@ test("post-action verification stays around the action target instead of unrelat
     }, observation),
     { x: 283, y: 135, width: 384, height: 360 },
   );
+});
+
+test("exact search verification crops out role-owned leading and trailing adornments", () => {
+  const targetBounds = { x: 77, y: 42, width: 170, height: 26 };
+  const observation = {
+    coordinateBounds: { x: 0, y: 0, width: 952, height: 722 },
+    scene: {
+      elements: [{
+        id: "search",
+        type: "Editable",
+        role: "search",
+        coordinate: { bounds: targetBounds },
+        state: { valueBounds: { x: 97, y: 42, width: 121, height: 26 } },
+      }],
+    },
+  };
+
+  assert.deepEqual(planExactTextValueObservationCrop({
+    kind: "type_text",
+    textMode: "replace-all",
+    targetBounds,
+  }, observation), { x: 97, y: 42, width: 121, height: 26 });
+  assert.equal(planExactTextValueObservationCrop({
+    kind: "type_text",
+    textMode: "insert",
+    targetBounds,
+  }, observation), null);
+  assert.deepEqual(planAlternateExactTextValueObservationCrop({
+    kind: "type_text",
+    textMode: "replace-all",
+    targetBounds,
+  }, observation), { x: 85, y: 42, width: 133, height: 26 });
 });
 
 test("selection verification also observes the largest complementary pane", () => {
@@ -88,14 +123,14 @@ test("text entry observes a bounded dependent region below the editable without 
 
 test("post-write verification accepts compact OCR adornments only inside the grounded editable", () => {
   const element = {
-    name: "Q 宋鹏",
+    name: "Q 张三",
     source: "ocr",
     bounds: { x: 62, y: 39, width: 82, height: 24 },
   };
   assert.equal(
     observedCompositeTextElementAtTarget(
       element,
-      "宋鹏",
+      "张三",
       { x: 54, y: 32, width: 256, height: 37 },
     ),
     true,
@@ -103,7 +138,7 @@ test("post-write verification accepts compact OCR adornments only inside the gro
   assert.equal(
     observedCompositeTextElementAtTarget(
       { ...element, bounds: { x: 62, y: 84, width: 82, height: 24 } },
-      "宋鹏",
+      "张三",
       { x: 54, y: 32, width: 256, height: 37 },
     ),
     false,
@@ -690,6 +725,188 @@ test("Host binds a pixel Scene elementId to its private screenshot geometry befo
   assert.equal(bound.observationId, "pixel-scene-action-1");
   assert.equal(bound.coordinateSpace, "window-local");
   assert.deepEqual(bound.targetBounds, { x: 76, y: 38, width: 178, height: 36 });
+});
+
+test("Host derives a main-window editable focus click from its pixel Scene elementId", async (t) => {
+  const router = new ComputerUseProviderRouter();
+  t.after(() => router.close());
+  router.activeController = {
+    controllerId: "controller-1",
+    tier: "full",
+    window: { id: "window-1", windowId: "window-1", title: "Fixture", bounds: { width: 960, height: 720 } },
+    expiresAtMs: Date.now() + 10_000,
+  };
+  router.lastCapture = router.createActionObservation({
+    observationId: "pixel-editor-action-1",
+    source: "window-capture",
+    coordinateSpace: "window-local",
+    coordinateBounds: { x: 0, y: 0, width: 960, height: 720 },
+    capture: { width: 960, height: 720 },
+    window: { id: "window-1", bounds: { width: 960, height: 720 } },
+    elements: [fusedElement({
+      hostType: "Editable",
+      elementToken: "private-editor",
+      role: "message-editor",
+      bounds: { x: 300, y: 580, width: 650, height: 140 },
+      sourceRegion: { x: 300, y: 580, width: 650, height: 140 },
+      actions: ["click", "type_text"],
+    })],
+  });
+  const target = router.lastCapture.scene.elements.find((element) => element.role === "message-editor");
+
+  const bound = router.bindCurrentActionReceipts({
+    kind: "click",
+    elementId: target.id,
+    interactionIntent: "focus-editable",
+  });
+
+  assert.equal(bound.observationId, "pixel-editor-action-1");
+  assert.equal(bound.coordinateSpace, "window-local");
+  assert.equal(bound.targetRole, "editable");
+  assert.deepEqual(bound.targetBounds, { x: 300, y: 580, width: 650, height: 140 });
+  assert.equal(bound.x, 625);
+  assert.equal(bound.y, 650);
+  assert.equal(bound.derivedInteractionPoint, "target-bounds-center");
+});
+
+test("owned transient Scene actions translate related-screenshot geometry into the controller window", async (t) => {
+  const clicks = [];
+  const router = new ComputerUseProviderRouter({
+    driver: {
+      async click(input) {
+        clicks.push(input);
+        return { status: "ok", verified: true };
+      },
+    },
+  });
+  t.after(() => router.close());
+  router.activeController = {
+    controllerId: "controller-1",
+    tier: "full",
+    window: {
+      id: "42",
+      windowId: "42",
+      title: "Fixture",
+      pid: 1234,
+      bounds: { x: 452, y: 100, width: 954, height: 724 },
+    },
+    expiresAtMs: Date.now() + 10_000,
+  };
+  const relatedCoordinate = {
+    screenshotId: "screenshot-1",
+    windowId: "77",
+    space: "window-local",
+    cropOffset: { x: 0, y: 0 },
+    scale: { x: 1, y: 1 },
+    actionWindowId: "42",
+    actionTransform: { scaleX: 1, scaleY: 1, offsetX: 49, offsetY: 63 },
+  };
+  router.lastCapture = router.createActionObservation({
+    observationId: "owned-transient-action",
+    source: "window-capture",
+    coordinateSpace: "window-local",
+    coordinateBounds: { x: 0, y: 0, width: 954, height: 724 },
+    capture: { x: 452, y: 100, width: 954, height: 724 },
+    window: { id: "42", bounds: { x: 452, y: 100, width: 954, height: 724 } },
+    elements: [{
+      hostType: "Window",
+      role: "owned-auxiliary-window",
+      elementToken: "owned-window:77",
+      parentSceneRoot: true,
+      bounds: { x: 0, y: 0, width: 368, height: 352 },
+      source: "semantic",
+      actions: [],
+      coordinate: relatedCoordinate,
+    }, {
+      hostType: "TransientSurface",
+      role: "search-results",
+      elementToken: "search-results:77",
+      parentElementToken: "owned-window:77",
+      bounds: { x: 0, y: 0, width: 368, height: 352 },
+      source: "semantic",
+      actions: [],
+      coordinate: relatedCoordinate,
+    }, {
+      hostType: "ActionableItem",
+      role: "search-result",
+      name: "联系人甲",
+      elementToken: "search-result:77:direct",
+      parentElementToken: "search-results:77",
+      bounds: { x: 48, y: 52, width: 112, height: 44 },
+      sourceRegion: { x: 48, y: 52, width: 112, height: 44 },
+      source: "local-proposal-fusion",
+      modelIdentity: { provider: "local-proposal-fusion", model: "owned-surface-som-ocr-v1" },
+      actions: ["click"],
+      confidence: 0.994,
+      proposalId: "direct-contact-row",
+      pixelLimitedAction: true,
+      guessedAction: false,
+      support: [
+        { provider: "som-proposal", confidence: 0.94 },
+        { provider: "ocr", confidence: 0.99 },
+      ],
+      coordinate: relatedCoordinate,
+    }],
+  });
+  const target = router.lastCapture.scene.elements.find((element) => element.role === "search-result");
+
+  const result = await router.act({
+    action: { kind: "click", elementId: target.id, interactionIntent: "select-item" },
+  });
+
+  assert.equal(result.outcome, "committed");
+  assert.equal(clicks.length, 1);
+  assert.equal(clicks[0].window, router.activeController.window);
+  assert.deepEqual({ x: clicks[0].x, y: clicks[0].y }, { x: 153, y: 137 });
+  assert.equal(clicks[0].relatedWindowId, "77");
+});
+
+test("owned result selection is verified only by a newer matching header-owned conversation title", () => {
+  const beforeScene = {
+    observationVersion: 10,
+    elements: [{ id: "results", type: "TransientSurface", role: "search-results" }],
+  };
+  const afterScene = {
+    observationId: "conversation-observation",
+    observationVersion: 11,
+    elements: [{
+      id: "conversation",
+      type: "Container",
+      role: "conversation",
+      parentId: "main-window",
+    }, {
+      id: "header",
+      type: "Container",
+      role: "conversation-header",
+      parentId: "conversation",
+    }, {
+      id: "title",
+      type: "ActionableItem",
+      role: "conversation-title",
+      parentId: "header",
+      name: "联系人甲",
+    }],
+  };
+
+  assert.deepEqual(verifySelectedConversationSceneTransition({
+    beforeScene,
+    afterScene,
+    selectedElement: { name: "联系人甲" },
+  }), {
+    status: "confirmed",
+    verified: true,
+    method: "host-scene-conversation-title",
+    observationId: "conversation-observation",
+  });
+  afterScene.elements[2] = {
+    ...afterScene.elements[2],
+    parentId: "transcript",
+  };
+  assert.equal(verifySelectedConversationSceneTransition({
+    beforeScene,
+    afterScene,
+    selectedElement: { name: "联系人甲" },
+  }).verified, false);
 });
 
 test("explicitly unverified pixel clicks are indeterminate and require observation", async (t) => {
@@ -1441,7 +1658,7 @@ test("a surface receipt authorizes exactly one action before a fresh observation
   });
   const surfaceReceiptId = router.lastCapture.surfaceReceipt.id;
 
-  await router.act({
+  const typed = await router.act({
     action: {
       kind: "click",
       observationId: "single-use-observation",
@@ -1846,6 +2063,7 @@ test("provider router issues and consumes a short-lived verified focus receipt",
         textMode: "insert",
         inputBehavior: "incremental",
         deliveryMode: "foreground",
+        focusVerified: true,
       },
     },
   ]);
@@ -1904,7 +2122,7 @@ test("provider router permits one screenshot focus continuation and derives targ
   });
   assert.equal(clicked.focusReceipt.status, "verified");
 
-  await router.act({
+  const typed = await router.act({
     action: {
       kind: "type_text",
       value: "宋",
@@ -1914,8 +2132,12 @@ test("provider router permits one screenshot focus continuation and derives targ
     },
   });
 
+  assert.equal(typed.pixelLimitedAction, true);
   assert.deepEqual(calls.map((entry) => entry.method), ["click", "typeText"]);
   assert.equal(calls[1].args.value, "宋");
+  assert.equal(calls[1].args.x, 200);
+  assert.equal(calls[1].args.y, 60);
+  assert.equal(calls[1].args.focusVerified, true);
   assert.equal(calls[1].args.deliveryMode, "foreground");
 });
 
@@ -2023,6 +2245,7 @@ test("provider router safely derives the coordinate text target from a matching 
   assert.deepEqual(calls.map((entry) => entry.method), ["click", "typeText"]);
   assert.equal(calls[1].args.x, 200);
   assert.equal(calls[1].args.y, 60);
+  assert.equal(calls[1].args.focusVerified, true);
   assert.equal(calls[1].args.deliveryMode, "foreground");
 });
 
@@ -2890,16 +3113,16 @@ test("bounded local UI transition confirms verified entry when the custom editor
           {
             elementToken: "dependent-result-term-1",
             role: "text",
-            name: "宋鹏宋鹏",
-            value: "宋鹏宋鹏",
+            name: "张三张三",
+            value: "张三张三",
             source: "ocr",
             bounds: { x: 110, y: 118, width: 88, height: 24 },
           },
           {
             elementToken: "dependent-result-term-2",
             role: "text",
-            name: "宋鹏律师",
-            value: "宋鹏律师",
+            name: "张三律师",
+            value: "张三律师",
             source: "ocr",
             bounds: { x: 110, y: 158, width: 88, height: 24 },
           },
@@ -2916,7 +3139,7 @@ test("bounded local UI transition confirms verified entry when the custom editor
       observationId: router.lastCapture.observationId,
       coordinateSpace: "window-local",
       targetBounds: { x: 62, y: 34, width: 223, height: 37 },
-      value: "宋鹏",
+      value: "张三",
       textMode: "insert",
     },
   });
@@ -3094,8 +3317,8 @@ test("fresh OCR confirmation restores a limited focus continuation after coordin
           elements: [{
             elementToken: "ocr-written-value",
             role: "text",
-            name: "宋鹏",
-            value: "宋鹏",
+            name: "张三",
+            value: "张三",
             actions: ["click"],
             source: "ocr",
             bounds: { x: 160, y: 82, width: 42, height: 24 },
@@ -3139,7 +3362,7 @@ test("fresh OCR confirmation restores a limited focus continuation after coordin
       coordinateSpace: "window-local",
       x: 200,
       y: 100,
-      value: "宋鹏",
+      value: "张三",
       targetBounds: { x: 150, y: 70, width: 100, height: 60 },
       textMode: "replace-all",
     },
@@ -3209,6 +3432,10 @@ test("post-write focus verification accepts the exact representative anchor of a
     coordinateBounds: { x: 0, y: 0, width: 952, height: 722 },
     elements: [],
   });
+  router.messagingSceneControls = [{
+    role: "search",
+    bounds: { x: 61, y: 37, width: 216, height: 46 },
+  }];
   router.captureOperation = async (args) => {
     calls.push({ method: "capture", args });
     const observed = router.createActionObservation({
@@ -3221,14 +3448,15 @@ test("post-write focus verification accepts the exact representative anchor of a
       }),
       coordinateBounds: { x: 0, y: 0, width: 952, height: 722 },
       surfaceReceipt: { id: "compact-row-receipt" },
+      perceptionRouting: { ocrRegion: { x: 0, y: 0, width: 384, height: 128 } },
       elements: [{
         elementToken: "compact-search-row",
-        name: "宋鹏 Q",
+        name: "张三 Q",
         source: "ocr",
         observationOnly: true,
         bounds: { x: 80, y: 40, width: 70, height: 24 },
         representativeTextAnchor: {
-          name: "宋鹏",
+          name: "张三",
           bounds: { x: 89, y: 44, width: 42, height: 23 },
         },
       }],
@@ -3243,7 +3471,7 @@ test("post-write focus verification accepts the exact representative anchor of a
       observationId: router.lastCapture.observationId,
       coordinateSpace: "window-local",
       targetBounds: { x: 61, y: 37, width: 216, height: 46 },
-      value: "宋鹏",
+      value: "张三",
       textMode: "replace-all",
     },
   });
@@ -3252,6 +3480,62 @@ test("post-write focus verification accepts the exact representative anchor of a
   assert.equal(typed.capture.mutationVerification.matchedElementToken, "compact-search-row");
   assert.equal(typed.focusReceipt.status, "verified");
   assert.equal(typed.result.verified, true);
+  assert.deepEqual(router.messagingSceneControls[0].verifiedValueBounds, {
+    x: 89,
+    y: 44,
+    width: 42,
+    height: 23,
+  });
+});
+
+test("replace-all verification rejects exact text owned by a related transient window", async (t) => {
+  const router = new ComputerUseProviderRouter({ driver: {} });
+  t.after(() => router.close());
+  router.activeController = {
+    controllerId: "controller-1",
+    tier: "full",
+    window: { id: "window-1", windowId: "window-1", title: "Fixture", pid: 100 },
+    expiresAt: new Date(Date.now() + 10_000).toISOString(),
+    expiresAtMs: Date.now() + 10_000,
+  };
+  router.pendingUnverifiedMutation = {
+    actionKind: "type_text",
+    controllerId: "controller-1",
+    windowId: "window-1",
+    value: "Exact query",
+    textMode: "replace-all",
+    preexistingTextOccurrences: [],
+    preActionOcrElements: [],
+    driverChangeBoundaryVerified: true,
+    target: {
+      x: 160,
+      y: 55,
+      bounds: { x: 78, y: 40, width: 168, height: 29 },
+    },
+  };
+  const observed = {
+    ...observation({
+      observationId: "related-window-result",
+      source: "window-capture",
+      expiresAt: Date.now() + 5_000,
+      capture: { width: 952, height: 722 },
+    }),
+    elements: [{
+      elementToken: "related-search-result",
+      role: "search-result",
+      name: "Exact query",
+      value: "Exact query",
+      source: "local-proposal-fusion",
+      bounds: { x: 78, y: 54, width: 95, height: 36 },
+      coordinate: { windowId: "owned-window-2" },
+    }],
+  };
+
+  router.reconcilePendingTextFocus(observed);
+
+  assert.equal(observed.mutationVerification.status, "not-confirmed");
+  assert.equal(observed.mutationVerification.focusReceiptIssued, false);
+  assert.equal(router.activeFocusReceipt, null);
 });
 
 function observation(overrides = {}) {

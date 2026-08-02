@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
-import { readFile } from "node:fs/promises";
+import { readFile, writeFile } from "node:fs/promises";
+import { join, parse } from "node:path";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { normalizeCuaObservation } from "./computer-observation.mjs";
@@ -11,22 +12,33 @@ import { queryWindowsProcessApplications } from "./windows-process-application-p
 import { activateWindowsTrayApplication } from "./windows-tray-application-activation.mjs";
 import { queryWindowsDesktopSession } from "./windows-desktop-session-probe.mjs";
 import { queryWindowsWindowRelationships } from "./windows-window-relationship-probe.mjs";
+import { captureWindowPngById } from "./real-window-capture.mjs";
+import { clickWindowsRelatedSurface } from "./windows-related-surface-click.mjs";
 
-const DEFAULT_DRIVER_PATH = `${process.env.LOCALAPPDATA}\\Programs\\Cua\\cua-driver\\bin\\cua-driver.exe`;
+const RUNTIME_ENV = globalThis.process?.env ?? {};
+const DEFAULT_DRIVER_PATH = `${RUNTIME_ENV.LOCALAPPDATA}\\Programs\\Cua\\cua-driver\\bin\\cua-driver.exe`;
 const DEFAULT_SCREENSHOT_TIMEOUT_MS = 8_000;
+const RELATED_SURFACE_RELEASE_SETTLE_MS = 200;
 
 export class CuaDriverMcpDriver {
   constructor(options = {}) {
     this.session = options.session ?? `agent-computer-use-${randomUUID()}`;
-    this.client = options.client ?? new CuaDriverMcpClient({
-      driverPath: options.driverPath,
-    });
+    this.clientFactory = options.clientFactory
+      ?? (options.client ? null : (() => new CuaDriverMcpClient({
+        driverPath: options.driverPath,
+      })));
+    this.client = options.client ?? this.clientFactory();
     this.foregroundWindowActivator = options.foregroundWindowActivator ?? activateWindowsForeground;
     this.foregroundWindowProbe = options.foregroundWindowProbe ?? queryWindowsForegroundWindowId;
     this.processApplicationProbe = options.processApplicationProbe ?? queryWindowsProcessApplications;
     this.trayApplicationActivator = options.trayApplicationActivator ?? activateWindowsTrayApplication;
     this.windowRelationshipProbe = options.windowRelationshipProbe
       ?? queryWindowsWindowRelationships;
+    this.mainWindowCapture = options.mainWindowCapture === false
+      ? null
+      : options.mainWindowCapture ?? captureWindowPngById;
+    this.relatedWindowCapture = options.relatedWindowCapture ?? captureWindowPngById;
+    this.relatedSurfaceClick = options.relatedSurfaceClick ?? clickWindowsRelatedSurface;
     this.desktopSessionProbe = options.desktopSessionProbe ?? queryWindowsDesktopSession;
     this.unicodeInput = options.unicodeInput ?? null;
     this.focusVerifier = options.focusVerifier ?? null;
@@ -298,10 +310,14 @@ export class CuaDriverMcpDriver {
     });
   }
 
-  async awaitWindowRelationships(ticket, windows) {
+  async awaitWindowRelationships(ticket, windows, options = {}) {
     try {
       const relationships = await this.windowRelationshipProbe({
         windowIds: windows.map((window) => window.windowId),
+        ...(options.includeOwnedWindows === true ? {
+          includeOwnedWindows: true,
+          processIds: options.processIds,
+        } : {}),
       });
       this.assertWorkTicket(ticket);
       return Array.isArray(relationships) ? relationships : [];
@@ -454,15 +470,33 @@ export class CuaDriverMcpDriver {
       };
       let result;
       let screenshot;
+      let primaryCaptureMethod = "cua-driver-get_window_state";
       for (let attempt = 0; attempt < 2; attempt += 1) {
-        result = await this.client.callTool("get_window_state", request, { timeoutMs });
+        result = await this.client.callTool("get_window_state", request, {
+          timeoutMs,
+          selectResult: selectWindowStateWithScreenshots,
+        });
         this.assertWorkTicket(ticket);
         verifyCaptureWindowIdentity(window, result.window ?? {});
-        screenshot = await readPngArtifact(outputPath, {
+        screenshot = await materializePrimaryScreenshotFromResult(result, outputPath, {
+          mainWindowId: window.windowId,
+          mainBounds: result.window?.bounds ?? window.bounds,
+        }) ?? await readPngArtifact(outputPath, {
           attempts: attempt === 0 ? 20 : 40,
         });
         this.assertWorkTicket(ticket);
         if (screenshot) break;
+      }
+      if (!screenshot && this.mainWindowCapture) {
+        const nativeCapture = await this.mainWindowCapture(window.windowId, outputPath, {
+          expectedProcessId: window.pid,
+          timeoutMs,
+        });
+        if (sameNativeWindowId(nativeCapture?.hwnd, window.windowId)
+          && Number(nativeCapture?.processId) === Number(window.pid)) {
+          screenshot = await readPngArtifact(outputPath, { attempts: 2 });
+          if (screenshot) primaryCaptureMethod = nativeCapture.method ?? "PrintWindow";
+        }
       }
       if (!screenshot) {
         const error = new Error("The screenshot driver did not produce a readable PNG artifact after one bounded retry.");
@@ -489,10 +523,12 @@ export class CuaDriverMcpDriver {
       const capture = {
         status: "ok",
         provider: "cua-driver",
-        source: "cua-driver-window-state",
+        source: primaryCaptureMethod === "cua-driver-get_window_state"
+          ? "cua-driver-window-state"
+          : "windows-window-capture",
         title: reconciledWindow.title,
         path: outputPath,
-        method: "cua-driver-get_window_state",
+        method: primaryCaptureMethod,
         hwnd: reconciledWindow.id,
         x: bounds?.x,
         y: bounds?.y,
@@ -511,6 +547,66 @@ export class CuaDriverMcpDriver {
           bounds,
         },
       };
+      const relatedWindowRelationships = await this.awaitWindowRelationships(ticket, [{
+        ...window,
+        windowId: reconciledWindow.id,
+      }], {
+        includeOwnedWindows: true,
+        processIds: [reconciledWindow.pid],
+      });
+      const nativeMainBounds = relationshipBoundsForWindow(
+        relatedWindowRelationships,
+        reconciledWindow.id,
+      ) ?? reportedBounds;
+      const observedBounds = nativeMainBounds && screenshot
+        ? {
+            ...nativeMainBounds,
+            width: screenshot.width,
+            height: screenshot.height,
+          }
+        : nativeMainBounds;
+      capture.x = observedBounds?.x;
+      capture.y = observedBounds?.y;
+      capture.width = observedBounds?.width;
+      capture.height = observedBounds?.height;
+      capture.nativeWindowBounds = nativeMainBounds;
+      capture.coordinateScale = createCoordinateScaleMetadata({
+        screenshot,
+        nativeWindowBounds: nativeMainBounds,
+      });
+      capture.window.bounds = observedBounds;
+      if (nativeMainBounds && reportedBounds && !nearBounds(nativeMainBounds, reportedBounds, 8)) {
+        capture.driverReportedWindowBounds = reportedBounds;
+        capture.surfaceProvenance = {
+          ...capture.surfaceProvenance,
+          boundsAuthority: "windows-window-relationship-probe",
+        };
+      }
+      const reconciledNativeWindow = {
+        ...reconciledWindow,
+        bounds: nativeMainBounds,
+      };
+      const driverRelatedSurfaces = await buildRelatedScreenshotCaptures({
+        result,
+        primaryScreenshot: screenshot,
+        requestedWindow: window,
+        reconciledWindow: reconciledNativeWindow,
+        outputPath,
+        windowRelationships: relatedWindowRelationships,
+      });
+      const nativeRelatedSurfaces = await captureMissingRelatedWindows({
+        relationships: relatedWindowRelationships,
+        existingCaptures: driverRelatedSurfaces,
+        mainBounds: nativeMainBounds ?? window?.bounds,
+        mainWindowId: String(reconciledWindow.id),
+        processId: reconciledWindow.pid,
+        outputPath,
+        captureWindow: this.relatedWindowCapture,
+        timeoutMs,
+      });
+      this.assertWorkTicket(ticket);
+      const relatedSurfaces = [...driverRelatedSurfaces, ...nativeRelatedSurfaces];
+      if (relatedSurfaces.length > 0) capture.relatedSurfaces = relatedSurfaces;
       if (screenshot?.bytes) {
         Object.defineProperty(capture, "artifactBytes", {
           configurable: false,
@@ -651,31 +747,37 @@ export class CuaDriverMcpDriver {
     textMode = "insert",
     inputBehavior = "incremental",
     deliveryMode = "background",
+    focusVerified = false,
     signal,
   }) {
     return this.runWork(async (ticket) => {
       await this.ensureStartedResources(ticket);
       const coordinateGrounded = Number.isFinite(x) && Number.isFinite(y);
-      let coordinateFocusVerified = false;
+      let coordinateFocusVerified = focusVerified === true;
       if (deliveryMode === "foreground" && coordinateGrounded) {
         const activation = await this.ensureForegroundActionResources(ticket, window);
         if (!activation) return foregroundActionNotApplied("type_text");
-        const focusClick = await this.client.callTool("click", {
-          pid: window.pid,
-          window_id: window.windowId,
-          x,
-          y,
-          delivery_mode: "foreground",
-          session: this.session,
-        }, { signal: ticket.signal });
-        this.assertWorkTicket(ticket);
-        coordinateFocusVerified = focusClick?.status !== "error"
-          && focusClick?.effect !== "not-applied";
+        if (!coordinateFocusVerified) {
+          const focusClick = await this.client.callTool("click", {
+            pid: window.pid,
+            window_id: window.windowId,
+            x,
+            y,
+            delivery_mode: "foreground",
+            session: this.session,
+          }, { signal: ticket.signal });
+          this.assertWorkTicket(ticket);
+          coordinateFocusVerified = focusClick?.status !== "error"
+            && focusClick?.effect !== "not-applied";
+        }
       }
-      if (coordinateGrounded && this.unicodeInput && textMode === "replace-all") {
+      if (coordinateGrounded && textMode === "replace-all") {
+        if (!this.unicodeInput) throw unicodeInputUnavailableError();
         const result = await this.unicodeInput({
           windowId: window.windowId,
           processId: window.pid,
+          focusX: x,
+          focusY: y,
           text: value,
           replaceAll: textMode === "replace-all",
           inputBehavior,
@@ -750,6 +852,7 @@ export class CuaDriverMcpDriver {
     y,
     deliveryMode = "background",
     interactionIntent,
+    relatedWindowId,
     signal,
   }) {
     return this.runWork(async (ticket) => {
@@ -758,6 +861,46 @@ export class CuaDriverMcpDriver {
       if (coordinateGrounded && deliveryMode === "foreground") {
         const activation = await this.ensureForegroundActionResources(ticket, window);
         if (!activation) return foregroundActionNotApplied("click");
+      }
+      if (coordinateGrounded
+        && deliveryMode === "foreground"
+        && relatedWindowId !== undefined
+        && String(relatedWindowId) !== String(window.windowId)) {
+        const restoreAgentCursor = this.cursorEnabled;
+        const restoreDriverSession = this.sessionStarted;
+        if (restoreAgentCursor) await this.stopCursorResources(ticket);
+        if (restoreDriverSession) {
+          await this.client.callTool("end_session", { session: this.session });
+          this.assertWorkTicket(ticket);
+          this.sessionStarted = false;
+          this.sessionStartAttempted = false;
+        }
+        if (this.clientFactory) {
+          await this.client.close();
+          this.assertWorkTicket(ticket);
+          this.client = this.clientFactory();
+          this.clientStarted = false;
+          this.clientStartAttempted = false;
+          await waitForDriverInputRelease(ticket.signal);
+          this.assertWorkTicket(ticket);
+        }
+        try {
+          const result = await this.relatedSurfaceClick({
+            controllerWindowId: window.windowId,
+            relatedWindowId,
+            processId: window.pid,
+            screenX: window.bounds.x + x,
+            screenY: window.bounds.y + y,
+            signal: ticket.signal,
+          });
+          this.assertWorkTicket(ticket);
+          return result;
+        } finally {
+          if (ticket.signal?.aborted !== true) {
+            if (restoreDriverSession) await this.ensureStartedResources(ticket);
+            if (restoreAgentCursor) await this.startCursorResources(ticket);
+          }
+        }
       }
       const result = await this.client.callTool("click", {
         pid: window.pid,
@@ -929,11 +1072,36 @@ function sameNativeWindowId(left, right) {
   }
 }
 
+function unicodeInputUnavailableError() {
+  const error = new Error("unicode_input.unavailable");
+  error.code = "unicode_input.unavailable";
+  return error;
+}
+
+function waitForDriverInputRelease(signal) {
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    const finish = (error) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      signal?.removeEventListener("abort", onAbort);
+      if (error) reject(error);
+      else resolve();
+    };
+    const onAbort = () => finish(operationCancelledError(signal?.reason));
+    const timer = setTimeout(() => finish(), RELATED_SURFACE_RELEASE_SETTLE_MS);
+    timer.unref?.();
+    if (signal?.aborted) onAbort();
+    else signal?.addEventListener("abort", onAbort, { once: true });
+  });
+}
+
 export class CuaDriverMcpClient {
   constructor(options = {}) {
     this.driverPath = options.driverPath
-      ?? resolveCuaDriverCandidate(process.env)
-      ?? (process.env.LOCALAPPDATA ? DEFAULT_DRIVER_PATH : "cua-driver");
+      ?? resolveCuaDriverCandidate(RUNTIME_ENV)
+      ?? (RUNTIME_ENV.LOCALAPPDATA ? DEFAULT_DRIVER_PATH : "cua-driver");
     this.client = options.client ?? new Client({
       name: "agent-computer-use-mcp",
       version: "0.0.1",
@@ -991,7 +1159,9 @@ export class CuaDriverMcpClient {
     return Promise.resolve(operation).then(
       (result) => {
         this.assertCallTicket(ticket);
-        return result.structuredContent ?? result;
+        return typeof options.selectResult === "function"
+          ? options.selectResult(result)
+          : (result.structuredContent ?? result);
       },
       (error) => {
         if (!this.isCallTicketCurrent(ticket)) throw lifecycleClosedError();
@@ -1216,6 +1386,430 @@ function positiveRatio(numerator, denominator) {
     && Number.isFinite(denominator) && denominator > 0
     ? numerator / denominator
     : 1;
+}
+
+function selectWindowStateWithScreenshots(result) {
+  const structured = result?.structuredContent ?? result ?? {};
+  const selected = structured && typeof structured === "object" && !Array.isArray(structured)
+    ? { ...structured }
+    : {};
+  const screenshotImages = (Array.isArray(result?.content) ? result.content : [])
+    .filter((block) => block?.type === "image" && typeof block.data === "string")
+    .map((block, index) => ({
+      index,
+      data: block.data,
+      mimeType: block.mimeType,
+      metadata: screenshotBlockMetadata(block),
+    }));
+  if (screenshotImages.length > 0) {
+    Object.defineProperty(selected, "screenshotImages", {
+      configurable: false,
+      enumerable: false,
+      value: screenshotImages,
+      writable: false,
+    });
+  }
+  return selected;
+}
+
+function screenshotBlockMetadata(block) {
+  const metadata = block?._meta;
+  if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) return {};
+  for (const key of ["screenshot", "cua/screenshot", "computerUse/screenshot"]) {
+    const nested = metadata[key];
+    if (nested && typeof nested === "object" && !Array.isArray(nested)) return nested;
+  }
+  return metadata;
+}
+
+async function buildRelatedScreenshotCaptures({
+  result,
+  primaryScreenshot,
+  requestedWindow,
+  reconciledWindow,
+  outputPath,
+  windowRelationships,
+}) {
+  const images = normalizeScreenshotImages(result);
+  if (images.length === 0) return [];
+  const mainBounds = reconciledWindow.bounds ?? requestedWindow?.bounds;
+  const mainWindowId = String(reconciledWindow.id);
+  const relationships = eligibleRelatedRelationships(
+    windowRelationships,
+    mainWindowId,
+    reconciledWindow.pid,
+  );
+  if (relationships.length === 0) return [];
+
+  const output = [];
+  const usedWindowIds = new Set();
+  for (const image of images) {
+    const png = pngFromImageContent(image);
+    if (!png) continue;
+    const descriptorBounds = screenshotDescriptorBounds(image.descriptor, png);
+    if (isPrimaryScreenshotImage({
+      descriptor: image.descriptor,
+      descriptorBounds,
+      mainBounds,
+      mainWindowId,
+      png,
+      primaryScreenshot,
+      imageIndex: image.index,
+      imageCount: images.length,
+    })) continue;
+    const relationship = selectScreenshotRelationship({
+      descriptor: image.descriptor,
+      descriptorBounds,
+      png,
+      relationships,
+      usedWindowIds,
+    });
+    if (!relationship) continue;
+    usedWindowIds.add(String(relationship.windowId));
+    const surfaceIndex = output.length + 1;
+    const path = relatedScreenshotPath(outputPath, surfaceIndex);
+    await writeFile(path, png.bytes);
+    const nativeBounds = relationship.bounds;
+    const screenBounds = descriptorBounds ?? nativeBounds;
+    const screenshotId = screenshotDescriptorId(image.descriptor)
+      ?? `related-screenshot-${surfaceIndex}`;
+    output.push(createRelatedCapture({
+      relationship,
+      mainBounds,
+      mainWindowId,
+      processId: reconciledWindow.pid,
+      path,
+      png,
+      screenBounds,
+      screenshotId,
+      zIndex: finiteNumber(image.descriptor?.zIndex, image.descriptor?.z_index, surfaceIndex),
+      source: "cua-driver-related-window-state",
+      method: "cua-driver-get_window_state-related-screenshot",
+    }));
+  }
+  return output;
+}
+
+async function captureMissingRelatedWindows({
+  relationships,
+  existingCaptures,
+  mainBounds,
+  mainWindowId,
+  processId,
+  outputPath,
+  captureWindow,
+  timeoutMs,
+}) {
+  if (typeof captureWindow !== "function") return [];
+  const usedWindowIds = new Set(existingCaptures.map((capture) => String(capture.hwnd)));
+  const candidates = eligibleRelatedRelationships(relationships, mainWindowId, processId)
+    .filter((relationship) => !usedWindowIds.has(String(relationship.windowId)))
+    .slice(0, Math.max(0, 8 - existingCaptures.length));
+  const output = [];
+  for (const relationship of candidates) {
+    const surfaceIndex = existingCaptures.length + output.length + 1;
+    const path = relatedScreenshotPath(outputPath, surfaceIndex);
+    let captured;
+    try {
+      captured = await captureWindow(relationship.windowId, path, {
+        expectedProcessId: processId,
+        timeoutMs,
+      });
+    } catch {
+      continue;
+    }
+    if (String(captured?.hwnd) !== String(relationship.windowId)
+      || captured?.processId !== processId) continue;
+    const capturedBounds = {
+      x: captured.x,
+      y: captured.y,
+      width: captured.width,
+      height: captured.height,
+    };
+    if (!isPositiveBounds(capturedBounds)
+      || !nearBounds(capturedBounds, relationship.bounds, 8)) continue;
+    const png = await readPngArtifact(path, { attempts: 2 });
+    if (!png || png.width !== capturedBounds.width || png.height !== capturedBounds.height) continue;
+    output.push(createRelatedCapture({
+      relationship,
+      mainBounds,
+      mainWindowId,
+      processId,
+      path,
+      png,
+      screenBounds: capturedBounds,
+      screenshotId: `owned-window-${relationship.windowId}`,
+      zIndex: surfaceIndex,
+      source: "windows-owned-window-capture",
+      method: captured.method ?? "PrintWindow",
+    }));
+  }
+  return output;
+}
+
+function eligibleRelatedRelationships(relationships, mainWindowId, processId) {
+  return (Array.isArray(relationships) ? relationships : [])
+    .filter((relationship) => String(relationship.windowId) !== mainWindowId)
+    .filter((relationship) => relationship.visible === true)
+    .filter((relationship) => relationship.processId === processId)
+    .filter((relationship) => relationship.ownedByRequestedWindow === true
+      || relationship.sameRequestedProcess === true)
+    .filter((relationship) => isPositiveBounds(relationship.bounds));
+}
+
+function createRelatedCapture({
+  relationship,
+  mainBounds,
+  mainWindowId,
+  processId,
+  path,
+  png,
+  screenBounds,
+  screenshotId,
+  zIndex,
+  source,
+  method,
+}) {
+  const nativeBounds = relationship.bounds;
+  const relationshipKind = relationship.ownedByRequestedWindow === true
+    ? "owned-window"
+    : "same-process-auxiliary";
+  const scaleX = positiveRatio(screenBounds.width, png.width);
+  const scaleY = positiveRatio(screenBounds.height, png.height);
+  const actionOffsetX = Number.isFinite(mainBounds?.x) ? screenBounds.x - mainBounds.x : 0;
+  const actionOffsetY = Number.isFinite(mainBounds?.y) ? screenBounds.y - mainBounds.y : 0;
+  const capture = {
+    status: "ok",
+    provider: "cua-driver",
+    source,
+    title: "",
+    path,
+    method,
+    screenshotId,
+    zIndex,
+    hwnd: relationship.windowId,
+    ownerWindowId: relationship.ownerWindowId,
+    relationship: relationshipKind,
+    x: screenBounds.x,
+    y: screenBounds.y,
+    width: png.width,
+    height: png.height,
+    nativeWindowBounds: nativeBounds,
+    surfaceProvenance: {
+      schemaVersion: 1,
+      requestedWindowId: mainWindowId,
+      relatedWindowId: String(relationship.windowId),
+      requestedProcessId: processId,
+      relatedProcessId: relationship.processId,
+      ownerWindowId: relationship.ownerWindowId,
+      relationshipVerified: true,
+      relationship: relationshipKind,
+    },
+    coordinateScale: {
+      schemaVersion: 1,
+      sourceSpace: "screenshot-pixel",
+      actionSpace: "controller-window-local",
+      actionWindowId: mainWindowId,
+      actionTransform: {
+        scaleX,
+        scaleY,
+        offsetX: actionOffsetX,
+        offsetY: actionOffsetY,
+      },
+      observationPixels: { width: png.width, height: png.height },
+      nativeWindowUnits: { width: screenBounds.width, height: screenBounds.height },
+      nativeToObservation: {
+        scaleX: positiveRatio(png.width, screenBounds.width),
+        scaleY: positiveRatio(png.height, screenBounds.height),
+      },
+    },
+    window: {
+      id: relationship.windowId,
+      title: "",
+      pid: relationship.processId,
+      ownerWindowId: relationship.ownerWindowId,
+      bounds: {
+        x: screenBounds.x,
+        y: screenBounds.y,
+        width: png.width,
+        height: png.height,
+      },
+    },
+  };
+  Object.defineProperty(capture, "artifactBytes", {
+    configurable: false,
+    enumerable: false,
+    value: png.bytes,
+    writable: false,
+  });
+  return capture;
+}
+
+function normalizeScreenshotImages(result) {
+  const images = Array.isArray(result?.screenshotImages) ? result.screenshotImages : [];
+  const descriptors = Array.isArray(result?.screenshots) ? result.screenshots : [];
+  const descriptorOffset = descriptors.length === images.length + 1 ? 1 : 0;
+  return images.map((image, index) => ({
+    ...image,
+    index,
+    descriptor: mergeScreenshotDescriptor(
+      descriptors[index + descriptorOffset] ?? descriptors[index],
+      image.metadata,
+    ),
+  }));
+}
+
+async function materializePrimaryScreenshotFromResult(result, outputPath, {
+  mainWindowId,
+  mainBounds,
+} = {}) {
+  const images = normalizeScreenshotImages(result);
+  for (const image of images) {
+    const png = pngFromImageContent(image);
+    if (!png) continue;
+    const descriptorBounds = screenshotDescriptorBounds(image.descriptor, png);
+    const descriptorWindowId = image.descriptor?.windowId ?? image.descriptor?.window_id;
+    const identityMatch = descriptorWindowId !== undefined
+      && sameNativeWindowId(descriptorWindowId, mainWindowId);
+    const boundsMatch = isPositiveBounds(descriptorBounds)
+      && isPositiveBounds(mainBounds)
+      && nearBounds(descriptorBounds, mainBounds, 8);
+    const dimensionMatch = isPositiveBounds(mainBounds)
+      && Math.abs(png.width - mainBounds.width) <= 8
+      && Math.abs(png.height - mainBounds.height) <= 8;
+    if (!identityMatch && !boundsMatch && !(image.index === 0 && dimensionMatch)) continue;
+    await writeFile(outputPath, png.bytes);
+    return png;
+  }
+  return null;
+}
+
+function mergeScreenshotDescriptor(primary, secondary) {
+  const left = primary && typeof primary === "object" && !Array.isArray(primary) ? primary : {};
+  const right = secondary && typeof secondary === "object" && !Array.isArray(secondary) ? secondary : {};
+  return { ...left, ...right };
+}
+
+function pngFromImageContent(image) {
+  if (image?.mimeType !== undefined && image.mimeType !== "image/png") return null;
+  let bytes;
+  try {
+    bytes = Buffer.from(image?.data ?? "", "base64");
+  } catch {
+    return null;
+  }
+  if (bytes.byteLength < 24
+    || bytes.toString("hex", 0, 8) !== "89504e470d0a1a0a"
+    || bytes.toString("ascii", 12, 16) !== "IHDR") return null;
+  const width = bytes.readUInt32BE(16);
+  const height = bytes.readUInt32BE(20);
+  return Number.isSafeInteger(width) && width > 0
+    && Number.isSafeInteger(height) && height > 0
+    ? { bytes, width, height }
+    : null;
+}
+
+function screenshotDescriptorBounds(descriptor, png) {
+  const x = finiteNumber(descriptor?.originX, descriptor?.origin_x, descriptor?.x);
+  const y = finiteNumber(descriptor?.originY, descriptor?.origin_y, descriptor?.y);
+  const width = finiteNumber(descriptor?.width, png.width);
+  const height = finiteNumber(descriptor?.height, png.height);
+  return [x, y, width, height].every(Number.isFinite) && width > 0 && height > 0
+    ? { x, y, width, height }
+    : null;
+}
+
+function screenshotDescriptorId(descriptor) {
+  const value = descriptor?.id ?? descriptor?.screenshotId ?? descriptor?.screenshot_id;
+  return value === undefined || value === null || String(value).trim() === ""
+    ? null
+    : String(value);
+}
+
+function isPrimaryScreenshotImage({
+  descriptor,
+  descriptorBounds,
+  mainBounds,
+  mainWindowId,
+  png,
+  primaryScreenshot,
+  imageIndex,
+  imageCount,
+}) {
+  const descriptorWindowId = descriptor?.windowId ?? descriptor?.window_id;
+  if (descriptorWindowId !== undefined && sameNativeWindowId(descriptorWindowId, mainWindowId)) return true;
+  if (isPositiveBounds(descriptorBounds) && isPositiveBounds(mainBounds)
+    && nearBounds(descriptorBounds, mainBounds, 8)) return true;
+  return imageIndex === 0 && imageCount > 1
+    && png.width === primaryScreenshot?.width
+    && png.height === primaryScreenshot?.height;
+}
+
+function selectScreenshotRelationship({
+  descriptor,
+  descriptorBounds,
+  png,
+  relationships,
+  usedWindowIds,
+}) {
+  const descriptorWindowId = descriptor?.windowId ?? descriptor?.window_id;
+  if (descriptorWindowId !== undefined) {
+    const exact = relationships.find((relationship) => (
+      !usedWindowIds.has(String(relationship.windowId))
+      && sameNativeWindowId(relationship.windowId, descriptorWindowId)
+    ));
+    if (exact) return exact;
+  }
+  if (isPositiveBounds(descriptorBounds)) {
+    const exactBounds = relationships.filter((relationship) => (
+      !usedWindowIds.has(String(relationship.windowId))
+      && relatedSurfaceBoundsMatch(relationship.bounds, descriptorBounds, 8)
+    ));
+    if (exactBounds.length === 1) return exactBounds[0];
+  }
+  const sizeMatches = relationships.filter((relationship) => (
+    !usedWindowIds.has(String(relationship.windowId))
+    && Math.abs(relationship.bounds.width - png.width) <= 8
+    && Math.abs(relationship.bounds.height - png.height) <= 8
+  ));
+  return sizeMatches.length === 1 ? sizeMatches[0] : null;
+}
+
+function relatedSurfaceBoundsMatch(windowBounds, screenshotBounds, tolerance) {
+  return Math.abs(windowBounds.x - screenshotBounds.x) <= tolerance
+    && Math.abs(windowBounds.y - screenshotBounds.y) <= tolerance
+    && Math.abs(windowBounds.width - screenshotBounds.width) <= tolerance
+    && screenshotBounds.height <= windowBounds.height + tolerance;
+}
+
+function relatedScreenshotPath(outputPath, index) {
+  const parsed = parse(outputPath);
+  return join(parsed.dir, `${parsed.name}.related-${index}${parsed.ext || ".png"}`);
+}
+
+function relationshipBoundsForWindow(relationships, windowId) {
+  const match = relationships.find((relationship) => (
+    sameNativeWindowId(relationship?.windowId, windowId)
+    && relationship?.visible !== false
+    && isPositiveBounds(relationship?.bounds)
+  ));
+  return match?.bounds ? { ...match.bounds } : null;
+}
+
+function nearBounds(left, right, tolerance) {
+  return Math.abs(left.x - right.x) <= tolerance
+    && Math.abs(left.y - right.y) <= tolerance
+    && Math.abs(left.width - right.width) <= tolerance
+    && Math.abs(left.height - right.height) <= tolerance;
+}
+
+function isPositiveBounds(bounds) {
+  return bounds && [bounds.x, bounds.y, bounds.width, bounds.height].every(Number.isFinite)
+    && bounds.width > 0 && bounds.height > 0;
+}
+
+function finiteNumber(...values) {
+  return values.find(Number.isFinite);
 }
 
 async function readPngArtifact(filePath, options = {}) {
