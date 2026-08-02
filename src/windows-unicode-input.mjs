@@ -192,6 +192,7 @@ public static class AgentComputerUseUnicodeInput
     private const ushort VK_CONTROL = 0x11;
     private const ushort VK_A = 0x41;
     private const ushort VK_BACK = 0x08;
+    private const ushort VK_RIGHT = 0x27;
     private const ushort VK_SPACE = 0x20;
     private const uint WM_CHAR = 0x0102;
     private const uint SMTO_ABORTIFHUNG = 0x0002;
@@ -288,6 +289,10 @@ public static class AgentComputerUseUnicodeInput
         public bool ClipboardRestored { get; set; }
         public bool ChangeSignalDelivered { get; set; }
         public bool FocusVerified { get; set; }
+        public bool ExactValueVerified { get; set; }
+        public string ReadBackStatus { get; set; }
+        public string ReadBackComparison { get; set; }
+        public int ReadBackUtf16CodeUnits { get; set; }
     }
 
     public static PasteResult PasteUnicode(
@@ -327,6 +332,10 @@ public static class AgentComputerUseUnicodeInput
 
         bool pasted = false;
         bool clipboardRestored = false;
+        bool exactValueVerified = false;
+        bool readBackAvailable = false;
+        string readBackComparison = "unavailable";
+        int readBackUtf16CodeUnits = 0;
         try
         {
             if (replaceAll)
@@ -340,6 +349,13 @@ public static class AgentComputerUseUnicodeInput
             pasted = true;
             Thread.Sleep(50);
             EmitChangeBoundary(inputSize);
+            exactValueVerified = TryVerifyFocusedValue(
+                text,
+                inputSize,
+                out readBackAvailable,
+                out readBackComparison,
+                out readBackUtf16CodeUnits
+            );
         }
         finally
         {
@@ -366,8 +382,70 @@ public static class AgentComputerUseUnicodeInput
             Utf16CodeUnits = text.Length,
             ClipboardRestored = clipboardRestored,
             ChangeSignalDelivered = true,
-            FocusVerified = true
+            FocusVerified = true,
+            ExactValueVerified = exactValueVerified,
+            ReadBackStatus = readBackAvailable ? "available" : "unavailable",
+            ReadBackComparison = readBackComparison,
+            ReadBackUtf16CodeUnits = readBackUtf16CodeUnits
         };
+    }
+
+    private static bool TryVerifyFocusedValue(
+        string expected,
+        int inputSize,
+        out bool readBackAvailable,
+        out string comparison,
+        out int readBackUtf16CodeUnits
+    )
+    {
+        readBackAvailable = false;
+        comparison = "unavailable";
+        readBackUtf16CodeUnits = 0;
+        string sentinel = "agent-computer-use-" + Guid.NewGuid().ToString("N");
+        try
+        {
+            DataObject marker = new DataObject();
+            marker.SetData(DataFormats.UnicodeText, true, sentinel);
+            Clipboard.SetDataObject(marker, true);
+            SendChord(VK_CONTROL, VK_A, inputSize, "read-back selection");
+            SendChord(VK_CONTROL, 0x43, inputSize, "read-back copy");
+            for (int attempt = 0; attempt < 10; attempt++)
+            {
+                try
+                {
+                    string readBack = Clipboard.GetText(TextDataFormat.UnicodeText);
+                    if (readBack != sentinel && (readBack.Length > 0 || expected.Length == 0))
+                    {
+                        readBackAvailable = true;
+                        readBackUtf16CodeUnits = readBack.Length;
+                        if (readBack == expected)
+                        {
+                            comparison = "exact";
+                            return true;
+                        }
+                        if (readBack.Trim() == expected)
+                            comparison = "whitespace-only-difference";
+                        else if (readBack.Normalize() == expected.Normalize())
+                            comparison = "unicode-normalization-only-difference";
+                        else
+                            comparison = "different";
+                        return false;
+                    }
+                }
+                catch (System.Runtime.InteropServices.ExternalException) {}
+                Thread.Sleep(25);
+            }
+            return false;
+        }
+        catch
+        {
+            return false;
+        }
+        finally
+        {
+            try { SendKey(VK_RIGHT, inputSize, "read-back selection collapse"); }
+            catch {}
+        }
     }
 
     private static void SendKey(ushort key, int inputSize, string label)
@@ -435,6 +513,10 @@ $result = [AgentComputerUseUnicodeInput]::PasteUnicode(
     clipboardRestored = $result.ClipboardRestored
     changeSignalDelivered = $result.ChangeSignalDelivered
     focusVerified = $result.FocusVerified
+    exactValueVerified = $result.ExactValueVerified
+    readBackStatus = $result.ReadBackStatus
+    readBackComparison = $result.ReadBackComparison
+    readBackUtf16CodeUnits = $result.ReadBackUtf16CodeUnits
     deliveryPath = "windows_clipboard_transaction"
 } | ConvertTo-Json -Compress
 `;
@@ -459,39 +541,52 @@ export async function sendWindowsUnicodeText(options = {}) {
     signal,
   } = options;
 
-  if (signal?.aborted === true) throw unicodeInputAbortError();
+  if (signal?.aborted === true) throw unicodeInputAbortError({
+    stage: "preflight",
+    effect: "not-applied",
+    sideEffects: unicodeInputSideEffects({ inputBehavior, replaceAll, effect: "not-applied" }),
+  });
 
   if (platform !== "win32") {
     throw unicodeInputError(
       "unicode_input.unsupported_platform",
       "Secure Unicode input is available only on Windows.",
+      validationFailureDetail({ inputBehavior, replaceAll }),
     );
   }
   if (typeof text !== "string") {
-    throw unicodeInputError("unicode_input.invalid_text", "Unicode input requires a text string.");
+    throw unicodeInputError(
+      "unicode_input.invalid_text",
+      "Unicode input requires a text string.",
+      validationFailureDetail({ inputBehavior, replaceAll }),
+    );
   }
   if (!["incremental", "commit"].includes(inputBehavior)) {
     throw unicodeInputError(
       "unicode_input.invalid_behavior",
       "Unicode input behavior must be incremental or commit.",
+      validationFailureDetail({ inputBehavior, replaceAll }),
     );
   }
   if (text.length > MAX_TEXT_CODE_UNITS) {
     throw unicodeInputError(
       "unicode_input.payload_too_large",
       `Unicode input exceeds the ${MAX_TEXT_CODE_UNITS} UTF-16 code-unit limit.`,
+      validationFailureDetail({ inputBehavior, replaceAll }),
     );
   }
   if (!isValidWindowId(windowId)) {
     throw unicodeInputError(
       "unicode_input.invalid_window",
       "Unicode input requires an approved target window handle.",
+      validationFailureDetail({ inputBehavior, replaceAll }),
     );
   }
   if (!isValidProcessId(processId)) {
     throw unicodeInputError(
       "unicode_input.invalid_process",
       "Unicode input requires an approved target process identifier.",
+      validationFailureDetail({ inputBehavior, replaceAll }),
     );
   }
 
@@ -525,18 +620,20 @@ export async function sendWindowsUnicodeText(options = {}) {
   return new Promise((resolve, reject) => {
     let settled = false;
     let stdout = "";
+    let stderr = "";
     let outputOverflow = false;
     const timer = setTimeout(() => {
       child.kill();
       finish(reject, unicodeInputError(
         "unicode_input.timeout",
         "The Windows Unicode input bridge timed out.",
+        executionFailureDetail({ inputBehavior, replaceAll }),
       ));
     }, timeoutMs);
     timer.unref?.();
     const onAbort = () => {
       child.kill();
-      finish(reject, unicodeInputAbortError());
+      finish(reject, unicodeInputAbortError(executionFailureDetail({ inputBehavior, replaceAll })));
     };
     signal?.addEventListener?.("abort", onAbort, { once: true });
 
@@ -552,19 +649,30 @@ export async function sendWindowsUnicodeText(options = {}) {
       stdout = appendOutput(stdout, chunk);
     });
     child.stderr.on("data", (chunk) => {
-      appendOutput("", chunk);
+      stderr = appendOutput(stderr, chunk);
     });
     child.once("error", () => {
       finish(reject, unicodeInputError(
         "unicode_input.bridge_unavailable",
         "The Windows Unicode input bridge could not be started.",
+        {
+          stage: "bridge-start",
+          effect: "not-applied",
+          sideEffects: unicodeInputSideEffects({ inputBehavior, replaceAll, effect: "not-applied" }),
+        },
       ));
     });
     child.once("close", (code) => {
       if (code !== 0 || outputOverflow) {
         finish(reject, unicodeInputError(
-          "unicode_input.bridge_failed",
+          "unicode_input.bridge_process_failed",
           "The Windows Unicode input bridge rejected the operation.",
+          {
+            ...executionFailureDetail({ inputBehavior, replaceAll }),
+            exitCode: Number.isInteger(code) ? code : null,
+            outputOverflow,
+            bridgeFailure: classifyPowerShellBridgeFailure(stderr),
+          },
         ));
         return;
       }
@@ -584,19 +692,41 @@ export async function sendWindowsUnicodeText(options = {}) {
           clipboardRestored: result.clipboardRestored,
           changeSignalDelivered: result.changeSignalDelivered,
           focusVerified: result.focusVerified,
+          ...(typeof result.exactValueVerified === "boolean"
+            ? { exactValueVerified: result.exactValueVerified }
+            : {}),
+          ...(typeof result.readBackStatus === "string"
+            ? { readBackStatus: result.readBackStatus }
+            : {}),
+          ...(typeof result.readBackComparison === "string"
+            ? { readBackComparison: result.readBackComparison }
+            : {}),
+          ...(Number.isInteger(result.readBackUtf16CodeUnits)
+            ? { readBackUtf16CodeUnits: result.readBackUtf16CodeUnits }
+            : {}),
           deliveryPath: result.deliveryPath,
         });
       } catch {
         finish(reject, unicodeInputError(
           "unicode_input.invalid_response",
           "The Windows Unicode input bridge returned an invalid response.",
+          {
+            stage: "bridge-response",
+            effect: "indeterminate",
+            sideEffects: unicodeInputSideEffects({ inputBehavior, replaceAll, effect: "indeterminate" }),
+          },
         ));
       }
     });
     child.stdin.once("error", () => {
       finish(reject, unicodeInputError(
-        "unicode_input.bridge_failed",
+        "unicode_input.bridge_input_failed",
         "The Windows Unicode input bridge rejected the operation.",
+        {
+          stage: "bridge-input",
+          effect: "not-applied",
+          sideEffects: unicodeInputSideEffects({ inputBehavior, replaceAll, effect: "not-applied" }),
+        },
       ));
     });
     child.stdin.end(JSON.stringify({
@@ -617,10 +747,22 @@ export async function sendWindowsUnicodeText(options = {}) {
   });
 }
 
-function unicodeInputAbortError() {
+function classifyPowerShellBridgeFailure(value) {
+  const text = String(value ?? "");
+  const compilerCode = text.match(/\berror\s+(CS\d{4})\b/iu)?.[1];
+  if (compilerCode) return `powershell-add-type-${compilerCode.toLocaleLowerCase()}`;
+  if (/clipboard/iu.test(text)) return "clipboard-operation-failed";
+  if (/foreground/iu.test(text)) return "foreground-verification-failed";
+  if (/focused window|no verified focused/iu.test(text)) return "focus-verification-failed";
+  if (/MethodInvocationException/iu.test(text)) return "powershell-method-invocation-failed";
+  return "bridge-process-rejected";
+}
+
+function unicodeInputAbortError(detail) {
   const error = unicodeInputError(
     "unicode_input.cancelled",
     "The Windows Unicode input operation was cancelled.",
+    detail,
   );
   error.name = "AbortError";
   return error;
@@ -636,8 +778,44 @@ function isValidProcessId(value) {
   return Number.isSafeInteger(numeric) && numeric > 0 && numeric <= 0xffff_ffff;
 }
 
-function unicodeInputError(code, message) {
+function validationFailureDetail({ inputBehavior, replaceAll }) {
+  return {
+    stage: "validate",
+    effect: "not-applied",
+    sideEffects: unicodeInputSideEffects({ inputBehavior, replaceAll, effect: "not-applied" }),
+  };
+}
+
+function executionFailureDetail({ inputBehavior, replaceAll }) {
+  return {
+    stage: "bridge-execution",
+    effect: "indeterminate",
+    sideEffects: unicodeInputSideEffects({ inputBehavior, replaceAll, effect: "indeterminate" }),
+  };
+}
+
+function unicodeInputSideEffects({ inputBehavior, replaceAll, effect }) {
+  if (effect === "not-applied") {
+    return {
+      focus: "not-applied",
+      selection: "not-applied",
+      text: "not-applied",
+      clipboard: "not-used",
+      ime: "not-used",
+    };
+  }
+  return {
+    focus: "indeterminate",
+    selection: replaceAll ? "indeterminate" : "not-used",
+    text: "indeterminate",
+    clipboard: inputBehavior === "commit" ? "indeterminate" : "not-used",
+    ime: inputBehavior === "incremental" ? "indeterminate" : "not-used",
+  };
+}
+
+function unicodeInputError(code, message, detail) {
   const error = new Error(message);
   error.code = code;
+  error.detail = detail;
   return error;
 }

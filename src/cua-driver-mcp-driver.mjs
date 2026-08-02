@@ -29,6 +29,7 @@ export class CuaDriverMcpDriver {
       ?? queryWindowsWindowRelationships;
     this.desktopSessionProbe = options.desktopSessionProbe ?? queryWindowsDesktopSession;
     this.unicodeInput = options.unicodeInput ?? null;
+    this.focusVerifier = options.focusVerifier ?? null;
     this.clientStarted = false;
     this.clientStartAttempted = false;
     this.sessionStarted = false;
@@ -683,11 +684,12 @@ export class CuaDriverMcpDriver {
         this.assertWorkTicket(ticket);
         return {
           ...result,
+          ...(result.exactValueVerified === true ? { verified: true } : {}),
           characters: value.length,
           textMode,
           inputBehavior,
           ...(coordinateFocusVerified ? { focusVerified: true } : {}),
-          providerPath: "windows-native-clipboard-change-boundary",
+          providerPath: result.deliveryPath ?? "windows-native-text-input",
         };
       }
       // Coordinates establish editable focus, but keyboard delivery must target
@@ -740,10 +742,20 @@ export class CuaDriverMcpDriver {
     }, signal);
   }
 
-  click({ window, elementToken, elementIndex, x, y, deliveryMode = "background", signal }) {
+  click({
+    window,
+    elementToken,
+    elementIndex,
+    x,
+    y,
+    deliveryMode = "background",
+    interactionIntent,
+    signal,
+  }) {
     return this.runWork(async (ticket) => {
       await this.ensureStartedResources(ticket);
-      if (Number.isFinite(x) && Number.isFinite(y) && deliveryMode === "foreground") {
+      const coordinateGrounded = Number.isFinite(x) && Number.isFinite(y);
+      if (coordinateGrounded && deliveryMode === "foreground") {
         const activation = await this.ensureForegroundActionResources(ticket, window);
         if (!activation) return foregroundActionNotApplied("click");
       }
@@ -755,6 +767,33 @@ export class CuaDriverMcpDriver {
         session: this.session,
       }, { signal: ticket.signal });
       this.assertWorkTicket(ticket);
+      if (interactionIntent === "focus-editable"
+        && coordinateGrounded
+        && deliveryMode === "foreground"
+        && result?.status !== "error"
+        && result?.effect !== "not-applied"
+        && this.focusVerifier) {
+        try {
+          const focus = await this.focusVerifier({
+            windowId: window.windowId,
+            processId: window.pid,
+            signal: ticket.signal,
+          });
+          this.assertWorkTicket(ticket);
+          return {
+            ...result,
+            focusVerified: focus?.focusVerified === true,
+            focusVerificationPath: focus?.verificationPath ?? "windows-focused-process-boundary",
+          };
+        } catch (error) {
+          this.assertWorkTicket(ticket);
+          return {
+            ...result,
+            focusVerified: false,
+            focusVerificationError: error?.code ?? "focus.verification_failed",
+          };
+        }
+      }
       return result;
     }, signal);
   }

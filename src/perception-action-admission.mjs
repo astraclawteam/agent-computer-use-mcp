@@ -62,7 +62,6 @@ export function admitPerceptionAction({
     if (action.kind === "click" && !isPixelClickIntent(action.interactionIntent)) {
       return denied("target.interaction_intent_required", {
         allowedInteractionIntents: [
-          "activate-recognized-text",
           "focus-editable",
           "activate-control",
           "select-item",
@@ -70,11 +69,9 @@ export function admitPerceptionAction({
         nextAction: "Declare what the pixel click is intended to do. A click whose purpose is text focus must use focus-editable and screenshot-grounded editable-interior geometry.",
       });
     }
-    if (action.kind === "click"
-      && isOcrTextGeometry(observation)
-      && action.interactionIntent !== "activate-recognized-text") {
+    if (action.kind === "click" && isOcrTextGeometry(observation)) {
       return denied("target.visual_grounding_required", {
-        reason: "OCR geometry can activate recognized text, but it cannot prove a control interior, list-item interior, or editable focus surface.",
+        reason: "OCR geometry proves glyph placement only; it cannot authorize a control, list item, or editable surface action.",
         rejectedGrounding: "ocr-recognized-text",
         interactionIntent: action.interactionIntent,
         requiredObservationMode: "screenshot",
@@ -132,16 +129,7 @@ export function admitPerceptionAction({
     && element.approvedActionLabel === true
     && providers.has("template");
   const fused = element.source === "local-proposal-fusion" && providers.size >= 2;
-  const exactOcr = element.source === "ocr"
-    && action.kind === "click"
-    && action.interactionIntent === "activate-recognized-text"
-    && providers.size === 1
-    && providers.has("ocr")
-    && typeof element.name === "string"
-    && element.name.trim() !== ""
-    && typeof element.rawTextSha256 === "string"
-    && element.rawTextSha256.length === 64;
-  return exactTemplate || fused || exactOcr ? allowed(true) : denied("observation.insufficient");
+  return exactTemplate || fused ? allowed(true) : denied("observation.insufficient");
 }
 
 function allowed(pixelLimitedAction) {
@@ -157,8 +145,7 @@ function isOcrTextGeometry(observation) {
 }
 
 function isPixelClickIntent(value) {
-  return value === "activate-recognized-text"
-    || value === "focus-editable"
+  return value === "focus-editable"
     || value === "activate-control"
     || value === "select-item";
 }

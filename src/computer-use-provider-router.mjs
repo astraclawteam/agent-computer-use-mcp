@@ -24,6 +24,12 @@ import { createRepairProgressPlan } from "./repair-progress-plan.mjs";
 import { cleanupRuntimeState } from "./runtime-cleanup.mjs";
 import { createComputerUseCapabilityHandshake } from "./computer-use-capability-handshake.mjs";
 import { MCP_RESULT_SCHEMA_VERSION } from "./computer-use-mcp-tools.mjs";
+import { buildHostScene, resolveHostSceneElement } from "./scene-region-ownership.mjs";
+import {
+  composeMessagingSceneElements,
+  detectMessagingVisualProposals,
+  stableCompositionOcrElements,
+} from "./messaging-scene-composition.mjs";
 
 function sameRequestContext(left, right) {
   if (!left || !right) return !left && !right;
@@ -47,7 +53,6 @@ const STABLE_FRAME_OBSERVATION_LIMIT = 6;
 const PUBLIC_OBSERVATION_LIMIT = 7;
 const VISUAL_ATTEMPT_WINDOW_MS = 30_000;
 const VISUAL_REGION_HINT_TTL_MS = 120_000;
-const STABLE_SEMANTIC_SOURCES = new Set(["cua-driver", "uia", "uia-som", "semantic"]);
 
 export class ComputerUseProviderRouter {
   constructor(options = {}) {
@@ -83,6 +88,7 @@ export class ComputerUseProviderRouter {
     this.lastVisualUnderstanding = null;
     this.lastActionVisualCrop = null;
     this.lastFocusedObservationCrop = null;
+    this.messagingSceneControls = [];
     this.consecutivePublicObservations = 0;
     this.interactionStep = 0;
     this.pendingUnverifiedMutation = null;
@@ -93,8 +99,6 @@ export class ComputerUseProviderRouter {
     this.actionTail = Promise.resolve();
     this.activeFocusReceipt = null;
     this.recentEditableTarget = null;
-    this.semanticElementAliases = new Map();
-    this.currentSemanticElements = new Map();
     this.applicationCatalog = new Map();
     this.pendingRepairApproval = null;
     this.assetOperationManager = options.assetOperationManager ?? null;
@@ -112,7 +116,26 @@ export class ComputerUseProviderRouter {
     this.installCacheDoctor = options.installCacheDoctor ?? runInstallCacheDoctor;
     this.auditEvents = [];
     this.policy = options.policy ?? createComputerUsePolicy(options.policyOptions);
+    this.messagingSceneComposition = options.messagingSceneComposition ?? composeMessagingSceneElements;
+    this.messagingVisualProposalOperation = options.messagingVisualProposalOperation
+      ?? detectMessagingVisualProposals;
     this.actionPolicy = this.policy.describe();
+  }
+
+  resetInteractionState() {
+    this.lastCapture = null;
+    this.lastScreenshot = null;
+    this.lastVisualUnderstanding = null;
+    this.lastActionVisualCrop = null;
+    this.lastFocusedObservationCrop = null;
+    this.messagingSceneControls = [];
+    this.consecutivePublicObservations = 0;
+    this.interactionStep = 0;
+    this.pendingUnverifiedMutation = null;
+    this.unconfirmedMutationHistory = [];
+    this.consumedSurfaceReceiptId = null;
+    this.activeFocusReceipt = null;
+    this.recentEditableTarget = null;
   }
 
   health(options = {}) {
@@ -681,9 +704,8 @@ export class ComputerUseProviderRouter {
         }
         const previous = this.activeController;
         this.activeController = null;
-        this.lastCapture = null;
-        this.pendingUnverifiedMutation = null;
-        this.activeFocusReceipt = null;
+        this.activeControllerRequestContext = null;
+        this.resetInteractionState();
         await this.awaitExternal(ticket, () => this.stopControlVisuals(ticket));
         this.recordAudit("computer.access.replaced", {
           controllerId: previous.controllerId,
@@ -943,12 +965,18 @@ export class ComputerUseProviderRouter {
       fail("capture.mode_unsupported", `Unsupported capture mode: ${mode}`);
     }
 
+    const controlledWindowForeground = await this.observeControlledWindowForeground(ticket);
     this.lastCapture = this.createActionObservation({
       ...observation,
       observationId: observation.observationId ?? `capture-${Date.now()}`,
       provider: observation.provider ?? "gateway-managed",
+      ...(controlledWindowForeground === null ? {} : {
+        window: {
+          ...(observation.window ?? {}),
+          isForeground: controlledWindowForeground,
+        },
+      }),
     });
-    this.rememberSemanticElements(this.lastCapture);
     this.reconcilePendingTextFocus(this.lastCapture);
     this.recordAudit("computer.capture.created", {
       controllerId: this.activeController.controllerId,
@@ -956,6 +984,24 @@ export class ComputerUseProviderRouter {
       observationId: this.lastCapture.observationId,
     });
     return this.lastCapture;
+  }
+
+  async observeControlledWindowForeground(ticket) {
+    if (!this.driver?.listWindows) return null;
+    try {
+      const windows = await this.awaitExternal(
+        ticket,
+        () => this.driver.listWindows({ onScreenOnly: false }),
+      );
+      const controlledWindowId = controllerWindowId(this.activeController?.window);
+      const controlled = windows.find(
+        (window) => String(controllerWindowId(window)) === String(controlledWindowId),
+      );
+      return controlled ? controlled.isForeground === true : null;
+    } catch (error) {
+      this.assertOperationTicket(ticket);
+      return null;
+    }
   }
 
   canReuseLatestScreenshotObservation() {
@@ -1166,6 +1212,44 @@ export class ComputerUseProviderRouter {
         };
       }
     }
+    if (localObservation
+      && (explicitVisualQuestion || this.messagingSceneControls.length > 0)) {
+      try {
+        const compositionOcrElements = stableCompositionOcrElements({
+          currentElements: Array.isArray(localObservation.elements) ? localObservation.elements : [],
+          previousElements: previousOcrElements,
+          visualSceneStable,
+        });
+        const visualProposals = await this.awaitExternal(
+          ticket,
+          () => this.messagingVisualProposalOperation({
+            imagePath,
+            ocrElements: compositionOcrElements,
+          }),
+        );
+        const composition = this.messagingSceneComposition({
+          coordinateBounds: visualBounds,
+          ocrElements: compositionOcrElements,
+          visualProposals,
+          knownControls: this.messagingSceneControls,
+          focusedTarget: this.activeFocusReceipt?.target ?? null,
+        });
+        this.messagingSceneControls = [...composition.knownControls];
+        localObservation = {
+          ...localObservation,
+          elements: [
+            ...(Array.isArray(localObservation.elements) ? localObservation.elements : []),
+            ...composition.elements,
+          ],
+        };
+      } catch (error) {
+        this.assertOperationTicket(ticket);
+        this.messagingSceneControls = [];
+        this.recordAudit("computer.scene.composition_failed", {
+          errorCode: safeAuditErrorCode(error, "scene.composition_failed"),
+        });
+      }
+    }
     const localElements = Array.isArray(localObservation?.elements)
       ? localObservation.elements.length
       : 0;
@@ -1346,13 +1430,7 @@ export class ComputerUseProviderRouter {
       this.lastCapture,
       this.activeController?.window,
     );
-    const transientSelectionFallback = planTransientSelectionKeyboardCommit({
-      action: requestedAction,
-      observation: actionObservation,
-      focusReceipt: this.activeFocusReceipt,
-      now: this.clock.now(),
-    });
-    const action = transientSelectionFallback?.action ?? requestedAction;
+    const action = requestedAction;
     if (this.pendingUnverifiedMutation) {
       if (isCorrectiveEditableRefocus(action, this.pendingUnverifiedMutation)) {
         this.pendingUnverifiedMutation = null;
@@ -1418,7 +1496,7 @@ export class ComputerUseProviderRouter {
     if (surfaceReceipt?.id && !focusContinuation) this.consumedSurfaceReceiptId = surfaceReceipt.id;
 
     let result;
-    let outcome = "applied";
+    let outcome = "committed";
     try {
       if (action.kind === "activate_window") {
         if (!this.driver?.activateWindow) fail("provider.unavailable", "window activation provider is not available");
@@ -1427,7 +1505,7 @@ export class ComputerUseProviderRouter {
         }, signal)));
         if (isExplicitlyUnverified(result)) {
           result = describeUnverifiedAction(result, action);
-          outcome = "unverified";
+          outcome = "indeterminate";
         } else if (hasVerifiedFocus(result)) {
           try {
             const observation = await this.captureOperation({
@@ -1459,7 +1537,7 @@ export class ComputerUseProviderRouter {
         }, signal)));
         if (isExplicitlyUnverified(result)) {
           result = describeUnverifiedAction(result, action);
-          outcome = "unverified";
+          outcome = "indeterminate";
         }
       } else if (action.kind === "type_text") {
         if (!this.driver?.typeText) fail("provider.unavailable", "type_text provider is not available");
@@ -1498,7 +1576,7 @@ export class ComputerUseProviderRouter {
               ...describePossiblyAppliedTextMutation(result),
               ...(verification ? { verification } : {}),
             };
-            outcome = "unverified";
+            outcome = "indeterminate";
           }
         }
       } else if (action.kind === "click") {
@@ -1507,8 +1585,22 @@ export class ComputerUseProviderRouter {
           window: this.activeController.window,
           ...driverTarget,
           deliveryMode: effectiveDeliveryMode,
+          ...(action.interactionIntent === "focus-editable"
+            ? { interactionIntent: action.interactionIntent }
+            : {}),
         }, signal)));
-        if (isExplicitlyUnverified(result)) {
+        if (hasVerifiedFocus(result)) {
+          result = {
+            ...result,
+            effect: "verified",
+            verified: true,
+            verification: {
+              status: "focused",
+              method: result.focusVerificationPath ?? "provider-focus-boundary",
+            },
+          };
+          this.activeFocusReceipt = this.createFocusReceipt({ action, element, driverTarget });
+        } else if (isExplicitlyUnverified(result)) {
           const verification = admission.pixelLimitedAction === false && element
             ? await this.verifySemanticStateTransition(actionObservation, args.requestContext, ticket)
             : null;
@@ -1521,16 +1613,14 @@ export class ComputerUseProviderRouter {
             };
           } else if (admission.pixelLimitedAction === false && element) {
             result = describeDeliveredSemanticClick(result, verification);
-            outcome = "delivered";
+            outcome = "indeterminate";
           } else {
             result = {
               ...describeUnverifiedAction(result, action),
               ...(verification ? { verification } : {}),
             };
-            outcome = "unverified";
+            outcome = "indeterminate";
           }
-        } else if (hasVerifiedFocus(result)) {
-          this.activeFocusReceipt = this.createFocusReceipt({ action, element, driverTarget });
         }
       } else if (action.kind === "press_key") {
         if (!this.driver?.pressKey) fail("provider.unavailable", "press_key provider is not available");
@@ -1557,7 +1647,7 @@ export class ComputerUseProviderRouter {
               ...describeUnverifiedAction(result),
               ...(verification ? { verification } : {}),
             };
-            outcome = "unverified";
+            outcome = "indeterminate";
           }
         }
       }
@@ -1571,7 +1661,7 @@ export class ComputerUseProviderRouter {
       throw error;
     }
 
-    if (outcome === "unverified" && action.kind !== "activate_window") {
+    if (outcome === "indeterminate" && action.kind !== "activate_window") {
       const independentlyVerifiedTextFocus = action.kind === "type_text"
         && (hasVerifiedFocus(result) || focusReceipt?.status === "verified");
       if (!independentlyVerifiedTextFocus) this.activeFocusReceipt = null;
@@ -1598,7 +1688,7 @@ export class ComputerUseProviderRouter {
       this.unconfirmedMutationHistory = [];
     }
     const actionResult = {
-      status: outcome === "unverified" ? "indeterminate" : (result.status ?? "ok"),
+      status: outcome,
       provider: "gateway-managed",
       action: action.kind,
       result,
@@ -1621,20 +1711,8 @@ export class ComputerUseProviderRouter {
         postActionObservationRequired: true,
       } : {}),
     };
-    if (transientSelectionFallback) {
-      actionResult.requestedAction = requestedAction.kind;
-      actionResult.execution = {
-        ...actionResult.execution,
-        targetPath: "focus-receipt",
-        selectionReason: "transient-dependent-first-item",
-        fallback: {
-          used: true,
-          reason: transientSelectionFallback.reason,
-        },
-      };
-    }
     if (this.activeFocusReceipt) actionResult.focusReceipt = serializeFocusReceipt(this.activeFocusReceipt);
-    const automaticLocalPostActionObservation = outcome === "unverified"
+    const automaticLocalPostActionObservation = outcome === "indeterminate"
       && admission.pixelLimitedAction === true
       && (action.kind === "click" || action.kind === "type_text")
       && typeof this.driver?.captureScreenshot === "function"
@@ -1687,9 +1765,17 @@ export class ComputerUseProviderRouter {
           ticket,
           () => new Promise((resolve) => setTimeout(resolve, POST_TEXT_DEPENDENT_UI_RETRY_MS)),
         );
+        const {
+          crop: _targetCrop,
+          includeChangedRegionAlongsideCrop: _includeChangedRegion,
+          ...fullWindowVerificationArgs
+        } = postActionCaptureArgs;
         actionResult.capture = await this.awaitExternal(
           ticket,
-          () => this.captureOperation(postActionCaptureArgs, ticket),
+          () => this.captureOperation({
+            ...fullWindowVerificationArgs,
+            crop: actionObservation.coordinateBounds,
+          }, ticket),
         );
       }
       if (automaticLocalPostActionObservation) {
@@ -1719,7 +1805,7 @@ export class ComputerUseProviderRouter {
             : {}),
           freshSurfaceReceiptId: actionResult.capture?.surfaceReceipt?.id ?? null,
           nextAction: effectRegion
-            ? "This capture already includes both the action target and the bounded dependent UI region in perceptionRouting.secondaryOcrRegion. Do not call computer.observe to refresh or rediscover either region. If the focused editable produced a transient result popup and the intended choice is the uniquely evidenced first result, press Enter once with the returned focusReceipt; prefer this stable keyboard commit over clicking popup geometry. Otherwise use the returned OCR evidence directly and ask at most one visual question on exactly secondaryOcrRegion before one action."
+            ? "This capture already includes both the action target and the bounded dependent UI region. Use only an actionable element from this Scene; OCR text alone and conflicting region evidence cannot authorize an action."
             : "This capture is the fresh post-action observation; do not call computer.observe merely to refresh it. If a focused edit needs a separate commit or navigation key before dependent UI appears, use the returned verified focusReceipt for one press_key action without re-clicking or retyping. Request Host vision only for one remaining layout, icon, or complex-scene ambiguity.",
         };
         actionResult.postActionObservationRequired = false;
@@ -1730,8 +1816,8 @@ export class ComputerUseProviderRouter {
         };
         if (action.kind === "type_text"
           && actionResult.capture?.mutationVerification?.status === "confirmed") {
-          outcome = "completed";
-          actionResult.status = "ok";
+          outcome = "committed";
+          actionResult.status = outcome;
           actionResult.outcome = outcome;
           actionResult.result = {
             ...actionResult.result,
@@ -1744,14 +1830,14 @@ export class ComputerUseProviderRouter {
             },
           };
           actionResult.postActionObservation.nextAction = effectRegion
-            ? "Text entry is confirmed and the same capture includes the bounded dependent UI region. Do not observe or type again. If a transient popup shows the uniquely evidenced intended result first, press Enter once with the issued focusReceipt; prefer that stable commit over popup coordinates. Otherwise use its OCR evidence and ask at most one visual question on secondaryOcrRegion before one select-item action."
+            ? "Text entry is confirmed and the same capture includes the bounded dependent UI region. Do not observe or type again; select only a consistent actionable element from this Scene."
             : "Text entry is already confirmed by a fresh exact OCR value that was absent before the action. Do not observe or type it again; continue with the next distinct action using the issued focus receipt when needed.";
           actionResult.result.nextAction = actionResult.postActionObservation.nextAction;
         } else if (action.kind === "type_text"
           && actionResult.capture?.mutationVerification?.status === "not-confirmed") {
           const blockedNextAction = actionResult.capture.mutationVerification.nextAction;
           actionResult.status = "indeterminate";
-          actionResult.outcome = "unverified";
+          actionResult.outcome = "indeterminate";
           actionResult.result = {
             ...actionResult.result,
             effect: "possibly_applied",
@@ -1768,13 +1854,15 @@ export class ComputerUseProviderRouter {
       }
     }
     this.recordAudit(
-      outcome === "unverified" ? "computer.action.indeterminate" : "computer.action.completed",
+      outcome === "indeterminate" ? "computer.action.indeterminate" : "computer.action.committed",
       {
       controllerId: this.activeController.controllerId,
       kind: action.kind,
       status: actionResult.status,
       outcome,
     });
+    actionResult.status = actionResult.outcome;
+    actionResult.result = normalizePublicActionReceipt(actionResult.result, actionResult.outcome);
     return actionResult;
   }
 
@@ -1827,16 +1915,8 @@ export class ComputerUseProviderRouter {
     this.pendingAccessApproval = null;
     this.activeController = null;
     this.activeControllerRequestContext = null;
-    this.pendingUnverifiedMutation = null;
-    this.unconfirmedMutationHistory = [];
-    this.activeFocusReceipt = null;
-    this.lastScreenshot = null;
-    this.lastVisualUnderstanding = null;
-    this.lastActionVisualCrop = null;
-    this.lastFocusedObservationCrop = null;
-    this.consecutivePublicObservations = 0;
-    this.semanticElementAliases.clear();
-    this.currentSemanticElements.clear();
+    this.resetInteractionState();
+    await this.waitForDesktopMutations(ticket);
     await this.awaitExternal(ticket, () => this.stopControlVisuals(ticket));
     this.recordAudit("computer.cancelled", {
       controllerId: previous?.controllerId,
@@ -1861,17 +1941,8 @@ export class ComputerUseProviderRouter {
     this.pendingAccessApproval = null;
     this.activeController = null;
     this.activeControllerRequestContext = null;
-    this.pendingUnverifiedMutation = null;
-    this.unconfirmedMutationHistory = [];
-    this.activeFocusReceipt = null;
-    this.lastCapture = null;
-    this.lastScreenshot = null;
-    this.lastVisualUnderstanding = null;
-    this.lastActionVisualCrop = null;
-    this.lastFocusedObservationCrop = null;
-    this.consecutivePublicObservations = 0;
-    this.semanticElementAliases.clear();
-    this.currentSemanticElements.clear();
+    this.resetInteractionState();
+    await this.waitForDesktopMutations(ticket);
     this.pendingRepairApproval = null;
     let firstError;
     try {
@@ -2264,14 +2335,7 @@ export class ComputerUseProviderRouter {
       };
       this.activeController = null;
       this.activeControllerRequestContext = null;
-      this.lastCapture = null;
-      this.pendingUnverifiedMutation = null;
-      this.unconfirmedMutationHistory = [];
-      this.activeFocusReceipt = null;
-      this.lastActionVisualCrop = null;
-      this.lastFocusedObservationCrop = null;
-      this.semanticElementAliases.clear();
-      this.currentSemanticElements.clear();
+      this.resetInteractionState();
       this.pendingRepairApproval = null;
       this.pendingAccessApproval = null;
       if (this.closeContext.previous) {
@@ -2490,12 +2554,7 @@ export class ComputerUseProviderRouter {
           includeUserOverlay: false,
         },
       );
-      this.lastCapture = null;
-      this.pendingUnverifiedMutation = null;
-      this.unconfirmedMutationHistory = [];
-      this.activeFocusReceipt = null;
-      this.lastActionVisualCrop = null;
-      this.lastFocusedObservationCrop = null;
+      this.resetInteractionState();
       await this.awaitExternal(ticket, () => this.stopControlVisuals(ticket));
       this.recordAudit("computer.controller.expired", {
         controllerId: pending.controller.controllerId,
@@ -2509,14 +2568,7 @@ export class ComputerUseProviderRouter {
     const previous = this.activeController;
     this.activeController = null;
     this.activeControllerRequestContext = null;
-    this.lastCapture = null;
-    this.pendingUnverifiedMutation = null;
-    this.unconfirmedMutationHistory = [];
-    this.activeFocusReceipt = null;
-    this.lastActionVisualCrop = null;
-    this.lastFocusedObservationCrop = null;
-    this.semanticElementAliases.clear();
-    this.currentSemanticElements.clear();
+    this.resetInteractionState();
     await this.awaitExternal(ticket, () => this.stopControlVisuals(ticket));
     this.recordAudit("computer.controller.expired", {
       controllerId: previous.controllerId,
@@ -2597,14 +2649,9 @@ export class ComputerUseProviderRouter {
       }
       throw error;
     }
-    this.semanticElementAliases.clear();
-    this.currentSemanticElements.clear();
+    this.resetInteractionState();
     this.activeController = controller;
     this.activeControllerRequestContext = requestContext ?? null;
-    this.activeFocusReceipt = null;
-    this.consecutivePublicObservations = 0;
-    this.lastVisualUnderstanding = null;
-    this.interactionStep = 0;
     this.recordAudit("computer.access.granted", {
       controllerId: controller.controllerId,
       title: window.title,
@@ -2628,8 +2675,57 @@ export class ComputerUseProviderRouter {
       observation: this.lastCapture,
     });
     this.enforcePolicyDecision(decision);
-    const element = resolveObservationElement(this.lastCapture, action)
-      ?? this.resolveSemanticElementAlias(action);
+    if (this.lastCapture && !this.lastCapture.scene) {
+      this.lastCapture.scene = buildHostScene({
+        observation: {
+          ...this.lastCapture,
+          observationId: this.lastCapture.observationId ?? `observation-${this.clock.now()}`,
+          coordinateSpace: this.lastCapture.coordinateSpace ?? "window-local",
+          window: {
+            ...(this.lastCapture.window ?? {}),
+            id: controllerWindowId(this.activeController?.window),
+            bounds: this.lastCapture.window?.bounds ?? this.activeController?.window?.bounds,
+          },
+        },
+        observationVersion: Number.isInteger(this.lastCapture.surfaceReceipt?.generation)
+          ? this.lastCapture.surfaceReceipt.generation
+          : this.surfaceGeneration,
+      });
+    }
+    const sceneElement = resolveHostSceneElement(this.lastCapture?.scene, action);
+    const targetsElement = action.elementId !== undefined
+      || action.elementToken !== undefined
+      || action.elementId !== undefined
+      || action.elementIndex !== undefined;
+    if (targetsElement && !sceneElement) {
+      fail(
+        "scene.element_invalid",
+        "The target does not belong to the current Host Scene observation.",
+        {
+          observationId: this.lastCapture?.observationId ?? null,
+          observationVersion: this.lastCapture?.scene?.observationVersion ?? null,
+          invalidatesOn: ["new-observation", "window-change"],
+        },
+      );
+    }
+    if (sceneElement
+      && (sceneElement.evidenceConsistency !== "consistent"
+        || !sceneElement.actions.includes(action.kind))) {
+      fail(
+        sceneElement.evidenceConsistency === "conflict"
+          ? "scene.evidence_conflict"
+          : "scene.action_not_available",
+        "The current Host Scene does not authorize this action for the target.",
+        {
+          elementId: sceneElement.id,
+          evidenceConsistency: sceneElement.evidenceConsistency,
+          availableActions: sceneElement.actions,
+        },
+      );
+    }
+    const element = sceneElement
+      ? resolveProviderElementBinding(this.lastCapture, sceneElement)
+      : null;
     const focusReceipt = this.validateFocusReceipt(action);
     const admission = admitPerceptionAction({
       observation: this.lastCapture,
@@ -2652,6 +2748,7 @@ export class ComputerUseProviderRouter {
         this.lastCapture?.coordinateScale,
       ),
       element,
+      sceneElement,
       focusReceipt,
     };
   }
@@ -2659,6 +2756,20 @@ export class ComputerUseProviderRouter {
   bindCurrentActionReceipts(action = {}) {
     if (!action || typeof action !== "object" || Array.isArray(action)) return action;
     let normalized = { ...action };
+    const sceneElement = resolveHostSceneElement(this.lastCapture?.scene, normalized);
+    const providerElement = sceneElement
+      ? resolveProviderElementBinding(this.lastCapture, sceneElement)
+      : null;
+    if (providerElement?.pixelLimitedAction === true
+      && isCoordinateBox(sceneElement?.coordinate?.bounds)
+      && typeof sceneElement.coordinate.screenshotId === "string") {
+      normalized = {
+        ...normalized,
+        observationId: normalized.observationId ?? sceneElement.coordinate.screenshotId,
+        coordinateSpace: normalized.coordinateSpace ?? sceneElement.coordinate.space,
+        targetBounds: normalized.targetBounds ?? { ...sceneElement.coordinate.bounds },
+      };
+    }
     const surfaceReceipt = this.lastCapture?.surfaceReceipt;
     if (typeof normalized.observationId !== "string"
       && typeof normalized.surfaceReceiptId === "string"
@@ -2681,40 +2792,13 @@ export class ComputerUseProviderRouter {
     const hasSuppliedTarget = isCoordinateBox(normalized.targetBounds)
       || (Number.isFinite(normalized.x) && Number.isFinite(normalized.y))
       || normalized.elementToken !== undefined
+      || normalized.elementId !== undefined
       || normalized.elementIndex !== undefined;
     if (hasSuppliedTarget && !actionTargetsOverlap(focusReceipt.target, suppliedTarget)) {
       return normalized;
     }
     normalized.focusReceiptId = focusReceipt.id;
     return normalized;
-  }
-
-  rememberSemanticElements(observation) {
-    const elements = observationElements(observation);
-    if (!Array.isArray(elements)) return;
-    const current = new Map();
-    for (const element of elements) {
-      if (!isStableSemanticElement(element)) continue;
-      const identity = semanticElementIdentity(element);
-      const existing = current.get(identity);
-      current.set(identity, existing ? null : element);
-      if (typeof element.elementToken === "string" && element.elementToken.trim() !== "") {
-        this.semanticElementAliases.set(element.elementToken, {
-          controllerId: this.activeController?.controllerId,
-          identity,
-        });
-      }
-    }
-    this.currentSemanticElements = new Map(
-      [...current.entries()].filter(([, element]) => element !== null),
-    );
-  }
-
-  resolveSemanticElementAlias(action = {}) {
-    if (action.kind !== "click" || typeof action.elementToken !== "string") return null;
-    const alias = this.semanticElementAliases.get(action.elementToken);
-    if (!alias || alias.controllerId !== this.activeController?.controllerId) return null;
-    return this.currentSemanticElements.get(alias.identity) ?? null;
   }
 
   validateFocusReceipt(action = {}) {
@@ -2749,6 +2833,7 @@ export class ComputerUseProviderRouter {
     const hasSuppliedTarget = isCoordinateBox(action.targetBounds)
       || (Number.isFinite(action.x) && Number.isFinite(action.y))
       || action.elementToken !== undefined
+      || action.elementId !== undefined
       || action.elementIndex !== undefined;
     if (hasSuppliedTarget && !actionTargetsOverlap(this.activeFocusReceipt.target, suppliedTarget)) {
       fail(
@@ -2953,7 +3038,7 @@ export class ComputerUseProviderRouter {
               identityVerified: true,
             },
         };
-    return {
+    const actionObservation = {
       ...observation,
       observationId,
       interactionStep: this.interactionStep,
@@ -3008,6 +3093,11 @@ export class ComputerUseProviderRouter {
       ),
       includeUserOverlay: false,
     };
+    actionObservation.scene = buildHostScene({
+      observation: actionObservation,
+      observationVersion: surfaceReceipt.generation,
+    });
+    return actionObservation;
   }
 
   async probeDesktopState(ticket) {
@@ -3280,6 +3370,13 @@ export class ComputerUseProviderRouter {
     }
   }
 
+  async waitForDesktopMutations(exceptTicket) {
+    const admitted = [...this.operationTickets].filter((ticket) => (
+      ticket !== exceptTicket && ticket.desktopMutation === true
+    ));
+    await Promise.all(admitted.map((ticket) => ticket.settled));
+  }
+
   async waitForAdmittedOperations() {
     const admitted = [...this.operationTickets];
     await Promise.all(admitted.map((ticket) => ticket.settled));
@@ -3437,22 +3534,40 @@ function perceptionAdmissionMessage(admission) {
   return admission?.code ?? "observation.insufficient";
 }
 
-function resolveObservationElement(observation, action) {
-  const elements = observationElements(observation);
-  if (typeof action?.elementToken === "string") {
-    return elements.find((element) => element.elementToken === action.elementToken) ?? null;
+function resolveProviderElementBinding(observation, sceneElement) {
+  const binding = sceneElement?.binding;
+  if (!binding) return null;
+  const elements = [
+    ...(Array.isArray(observation?.elements) ? observation.elements : []),
+    ...(Array.isArray(observation?.observation?.elements) ? observation.observation.elements : []),
+    ...(Array.isArray(observation?.localObservation?.elements) ? observation.localObservation.elements : []),
+  ];
+  if (typeof binding.elementToken === "string") {
+    const tokenMatch = elements.find((element) => element?.elementToken === binding.elementToken);
+    if (tokenMatch) return tokenMatch;
   }
-  if (Number.isSafeInteger(action?.elementIndex) && action.elementIndex >= 0) return elements[action.elementIndex] ?? null;
-  return null;
+  return Number.isSafeInteger(binding.providerElementIndex)
+    ? elements[binding.providerElementIndex] ?? null
+    : null;
 }
 
 function observationElements(observation) {
-  const direct = observation?.elements;
-  if (Array.isArray(direct)) return direct;
-  const nested = observation?.observation?.elements;
-  if (Array.isArray(nested)) return nested;
-  const local = observation?.localObservation?.elements;
-  return Array.isArray(local) ? local : [];
+  const sources = [
+    observation?.elements,
+    observation?.observation?.elements,
+    observation?.localObservation?.elements,
+  ].filter(Array.isArray);
+  const seen = new Set();
+  return sources.flatMap((elements) => elements.filter((element) => {
+    if (seen.has(element)) return false;
+    seen.add(element);
+    return true;
+  }));
+}
+
+function safeAuditErrorCode(error, fallback) {
+  const candidate = typeof error?.code === "string" ? error.code : "";
+  return /^[a-z][a-z0-9._-]{1,100}$/u.test(candidate) ? candidate : fallback;
 }
 
 function semanticStateFingerprint(observation) {
@@ -3466,30 +3581,6 @@ function semanticStateFingerprint(observation) {
     actions: Array.isArray(element?.actions) ? [...element.actions].sort() : [],
     bounds: element?.bounds ?? null,
   })));
-}
-
-function isStableSemanticElement(element) {
-  return element
-    && typeof element.elementToken === "string"
-    && Array.isArray(element.actions)
-    && element.actions.length > 0
-    && element.pixelLimitedAction !== true
-    && STABLE_SEMANTIC_SOURCES.has(element.source);
-}
-
-function semanticElementIdentity(element) {
-  const bounds = element?.bounds;
-  return JSON.stringify({
-    role: element?.role ?? null,
-    name: element?.name ?? null,
-    actions: [...(element?.actions ?? [])].sort(),
-    bounds: Number.isFinite(bounds?.x)
-      && Number.isFinite(bounds?.y)
-      && Number.isFinite(bounds?.width)
-      && Number.isFinite(bounds?.height)
-      ? [bounds.x, bounds.y, bounds.width, bounds.height]
-      : null,
-  });
 }
 
 function assessSemanticActionability(observation) {
@@ -3596,9 +3687,34 @@ function describeDeliveredSemanticClick(result, verification) {
   };
 }
 
+function normalizePublicActionReceipt(result, outcome) {
+  const {
+    effect: _legacyEffect,
+    replaySafe: _legacyReplaySafety,
+    completionEligible: _legacyCompletionEligibility,
+    delivered: _legacyDelivered,
+    escalation: _legacyEscalation,
+    status: providerStatus,
+    ...detail
+  } = result ?? {};
+  return {
+    ...detail,
+    outcome,
+    applied: outcome === "committed"
+      ? true
+      : outcome === "not-applied"
+        ? false
+        : null,
+    mayHaveSideEffects: outcome !== "not-applied",
+    postconditionVerified: detail.verified === true,
+    ...(typeof providerStatus === "string" ? { providerStatus } : {}),
+  };
+}
+
 function isTargetlessKeyboardAction(action = {}) {
   return (action.kind === "type_text" || action.kind === "press_key")
     && action.elementToken === undefined
+    && action.elementId === undefined
     && action.elementIndex === undefined
     && !(Number.isFinite(action.x) && Number.isFinite(action.y));
 }
@@ -3798,51 +3914,6 @@ function boxesIntersect(left, right) {
     && left.x + left.width > right.x
     && left.y < right.y + right.height
     && left.y + left.height > right.y;
-}
-
-function planTransientSelectionKeyboardCommit({ action, observation, focusReceipt, now }) {
-  if (action?.kind !== "click"
-    || action?.interactionIntent !== "select-item"
-    || action?.targetRole !== "list-item"
-    || focusReceipt?.status !== "verified"
-    || focusReceipt?.target?.kind !== "type_text"
-    || !Number.isFinite(focusReceipt?.expiresAtMs)
-    || focusReceipt.expiresAtMs <= now
-    || observation?.mutationVerification?.status !== "confirmed") {
-    return null;
-  }
-  const secondaryRegion = observation?.perceptionRouting?.secondaryOcrRegion;
-  const primaryLocalRegion = observation?.localObservation?.crop;
-  const dependentRegion = isCoordinateBox(secondaryRegion)
-    ? secondaryRegion
-    : isCoordinateBox(primaryLocalRegion)
-      ? primaryLocalRegion
-      : null;
-  if (!isCoordinateBox(dependentRegion)) return null;
-  const target = isCoordinateBox(action.targetBounds)
-    ? action.targetBounds
-    : Number.isFinite(action.x) && Number.isFinite(action.y)
-      ? { x: action.x - 1, y: action.y - 1, width: 2, height: 2 }
-      : null;
-  if (!target || !boxesIntersect(target, dependentRegion)) return null;
-
-  // A dependent popup's default keyboard selection is only equivalent to the
-  // requested click for its leading item. Keep this intentionally narrow: the
-  // declared list item must be centered in the leading half of the changed
-  // region and must not overlap the editable surface that produced the popup.
-  const targetCenterY = target.y + (target.height / 2);
-  const leadingBoundary = dependentRegion.y + (dependentRegion.height / 2);
-  if (targetCenterY > leadingBoundary || boxesIntersect(target, focusReceipt.target?.bounds)) {
-    return null;
-  }
-  return {
-    reason: "transient-popup-keyboard-commit",
-    action: {
-      kind: "press_key",
-      key: "enter",
-      focusReceiptId: focusReceipt.id,
-    },
-  };
 }
 
 function selectOcrEvidenceForRegion(elements, region) {
@@ -4053,7 +4124,9 @@ function resolveEffectiveDeliveryMode(action, admission, focusReceipt) {
 
 function resolveDriverActionTarget(action, element, pixelLimitedAction, coordinateScale) {
   if (!pixelLimitedAction) {
-    if (action.elementToken === undefined && action.elementIndex === undefined) return {};
+    if (action.elementId === undefined
+      && action.elementToken === undefined
+      && action.elementIndex === undefined) return {};
     return {
       elementToken: element?.elementToken ?? action.elementToken,
       elementIndex: action.elementIndex === undefined
@@ -4118,6 +4191,7 @@ function transformObservationPoint(point, transform) {
 
 function describeActionTarget(action, element, driverTarget) {
   const target = { kind: action.kind };
+  if (typeof action.elementId === "string") target.elementId = action.elementId;
   if (typeof action.elementToken === "string") target.elementToken = action.elementToken;
   if (Number.isSafeInteger(action.elementIndex)) target.elementIndex = action.elementIndex;
   if (Number.isFinite(driverTarget?.x) && Number.isFinite(driverTarget?.y)) {
@@ -4130,6 +4204,9 @@ function describeActionTarget(action, element, driverTarget) {
 }
 
 function actionTargetsOverlap(left, right) {
+  if (left?.elementId && right?.elementId) {
+    return left.elementId === right.elementId;
+  }
   if (left?.elementToken && right?.elementToken) {
     return left.elementToken === right.elementToken;
   }
@@ -4180,13 +4257,11 @@ function findObservedTextAtTarget(
   const horizontalTolerance = Number.isFinite(width) ? Math.max(96, width * 0.22) : 176;
   const verticalTolerance = Number.isFinite(height) ? Math.max(96, height * 0.16) : 112;
 
-  const compositeTargetMatches = exactOnly
-    ? []
-    : elements.filter((element) => observedCompositeTextElementAtTarget(
-      element,
-      intendedText,
-      target?.bounds,
-    ));
+  const compositeTargetMatches = elements.filter((element) => (
+    exactOnly
+      ? observedExactDecoratedEditableTextAtTarget(element, intendedText, target?.bounds)
+      : observedCompositeTextElementAtTarget(element, intendedText, target?.bounds)
+  ));
   return [...collectObservedTextElements(observation, intendedText), ...compositeTargetMatches]
     .filter((element) => {
       const bounds = observedElementBounds(element);
@@ -4314,6 +4389,32 @@ export function observedCompositeTextElementAtTarget(element, intendedValue, tar
   );
   const elementArea = elementBounds.width * elementBounds.height;
   return elementArea > 0 && (intersectionWidth * intersectionHeight) / elementArea >= 0.6;
+}
+
+export function observedExactDecoratedEditableTextAtTarget(element, intendedValue, targetBounds) {
+  if (element?.source !== "ocr" || !isCoordinateBox(targetBounds)) return false;
+  const elementBounds = observedElementBounds(element);
+  if (!elementBounds) return false;
+  const intendedText = normalizeRecognizedUiText(intendedValue, { languageClass: "mixed" });
+  const observedValue = typeof element?.value === "string"
+    ? element.value
+    : typeof element?.name === "string"
+      ? element.name
+      : "";
+  const observedText = normalizeRecognizedUiText(observedValue, { languageClass: "mixed" });
+  if (!intendedText || ![`Q${intendedText}`, `Q ${intendedText}`].includes(observedText)) return false;
+  if (elementBounds.x > targetBounds.x + (targetBounds.width * 0.1)) return false;
+  const intersectionWidth = Math.max(
+    0,
+    Math.min(elementBounds.x + elementBounds.width, targetBounds.x + targetBounds.width)
+      - Math.max(elementBounds.x, targetBounds.x),
+  );
+  const intersectionHeight = Math.max(
+    0,
+    Math.min(elementBounds.y + elementBounds.height, targetBounds.y + targetBounds.height)
+      - Math.max(elementBounds.y, targetBounds.y),
+  );
+  return (intersectionWidth * intersectionHeight) / (elementBounds.width * elementBounds.height) >= 0.6;
 }
 
 function collectObservedTextOccurrences(observation, intendedValue) {

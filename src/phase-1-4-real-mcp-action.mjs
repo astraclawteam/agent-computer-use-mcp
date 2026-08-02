@@ -47,33 +47,31 @@ try {
     throw new Error(`acquire.failed: ${JSON.stringify(access)}`);
   }
   const capture = await server.callTool("computer.observe", { mode: "semantic" });
-  if (!Array.isArray(capture.elements)) {
+  if (!Array.isArray(capture.scene?.elements)) {
     throw new Error(`observe.invalid_response: ${JSON.stringify(capture)}`);
   }
-  const name = capture.elements.find((element) => element.role === "edit" && element.name === "Name")
-    ?? capture.elements.find((element) => element.name === "Name");
-  const save = capture.elements.find((element) => element.role === "button" && element.name === "Save")
-    ?? capture.elements.find((element) => element.name === "Save");
+  const name = capture.scene.elements.find((element) => element.type === "Editable" && element.name === "Name")
+    ?? capture.scene.elements.find((element) => element.name === "Name");
+  const save = capture.scene.elements.find((element) => element.type === "ActionableItem" && element.name === "Save")
+    ?? capture.scene.elements.find((element) => element.name === "Save");
   if (!name) throw new Error("element.not_found: Name");
   if (!save) throw new Error("element.not_found: Save");
 
   const setValue = await server.callTool("computer.act", {
     action: {
       kind: "set_value",
-      elementToken: name.elementToken,
-      elementIndex: name.elementIndex,
+      elementId: name.id,
       value: expectedText,
     },
   });
   const postValueCapture = await server.callTool("computer.observe", { mode: "semantic" });
-  const postValueSave = postValueCapture.elements.find((element) => element.role === "button" && element.name === "Save")
-    ?? postValueCapture.elements.find((element) => element.name === "Save");
+  const postValueSave = postValueCapture.scene?.elements.find((element) => element.type === "ActionableItem" && element.name === "Save")
+    ?? postValueCapture.scene?.elements.find((element) => element.name === "Save");
   if (!postValueSave) throw new Error("element.not_found_after_set_value: Save");
   const click = await server.callTool("computer.act", {
     action: {
       kind: "click",
-      elementToken: postValueSave.elementToken,
-      elementIndex: postValueSave.elementIndex,
+      elementId: postValueSave.id,
       deliveryMode: "background",
       captureAfter: true,
     },
@@ -83,12 +81,12 @@ try {
   const diskText = await readFile(outputFile, "utf8");
   const release = await server.callTool("computer.release", { reason: "phase-1-4-complete" });
   const stateAfterRelease = await server.callTool("computer.observe", { mode: "state" });
-  const clickOutcomeIsHonest = click.status === "ok"
-    || (click.status === "indeterminate" && click.outcome === "unverified");
+  const clickOutcomeIsHonest = click.outcome === "committed"
+    || click.outcome === "indeterminate";
   const passed = diskText === expectedText
     && access.status === "granted"
     && capture.includeUserOverlay === false
-    && setValue.status === "ok"
+    && setValue.outcome === "committed"
     && clickOutcomeIsHonest
     && stateBeforeRelease.status === "active"
     && stateAfterRelease.status === "idle";
@@ -112,7 +110,7 @@ try {
     },
     capture: {
       observationId: capture.observationId,
-      elementCount: capture.elements.length,
+      elementCount: capture.scene.elements.length,
       includeUserOverlay: capture.includeUserOverlay,
     },
     setValue,
