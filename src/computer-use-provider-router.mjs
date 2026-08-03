@@ -1008,7 +1008,7 @@ export class ComputerUseProviderRouter {
         }
       }
       const semanticAssessment = assessSemanticActionability(semanticObservation);
-      if (semanticAssessment.sufficient) {
+      if (semanticAssessment.sufficient && args.forceScreenshotSurfaceCapture !== true) {
         observation = {
           ...semanticObservation,
           requestedMode: "screenshot",
@@ -1033,6 +1033,14 @@ export class ComputerUseProviderRouter {
           ),
         }, ticket));
         observation = await this.prioritizeLocalScreenshotPerception(screenshot, args, ticket);
+        if (args.forceScreenshotSurfaceCapture === true
+          && Array.isArray(semanticObservation?.elements)
+          && semanticObservation.elements.length > 0) {
+          observation = {
+            ...observation,
+            elements: semanticObservation.elements,
+          };
+        }
       }
     } else {
       fail("capture.mode_unsupported", `Unsupported capture mode: ${mode}`);
@@ -1426,7 +1434,15 @@ export class ComputerUseProviderRouter {
           && Array.isArray(element?.actions)
           && element.actions.includes("type_text")
           && isCoordinateBox(element.bounds));
-      if (searchControl) {
+      const navigationControl = isCoordinateBox(args.relatedSurfaceAnchor?.bounds)
+        ? {
+            role: typeof args.relatedSurfaceAnchor.role === "string"
+              ? args.relatedSurfaceAnchor.role
+              : "navigation-control",
+            bounds: { ...args.relatedSurfaceAnchor.bounds },
+          }
+        : null;
+      if (searchControl || navigationControl) {
         const ownedSurfaces = [];
         for (const surface of screenshot.capture.relatedSurfaces) {
           if (typeof surface?.path !== "string") continue;
@@ -1467,6 +1483,7 @@ export class ComputerUseProviderRouter {
             windowId: controllerWindowId(this.activeController?.window),
           },
           searchControl,
+          navigationControl,
           surfaces: ownedSurfaces,
         });
         if (ownedElements.length > 0) {

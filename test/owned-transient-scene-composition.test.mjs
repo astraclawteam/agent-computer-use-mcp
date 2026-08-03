@@ -18,6 +18,11 @@ const searchControl = {
   state: { focused: true },
 };
 
+const navigationControl = {
+  role: "button",
+  bounds: { x: 24, y: 650, width: 42, height: 42 },
+};
+
 function surface(overrides = {}) {
   return {
     status: "ok",
@@ -185,6 +190,51 @@ test("OCR without an independent visual owner cannot create a search result", ()
   });
   assert.equal(elements.some((element) => element.role === "search-result"), false);
   assert.equal(elements.some((element) => element.role === "search-results"), true);
+});
+
+test("a proven related popup near a navigation control becomes one generic owned navigation surface", () => {
+  const elements = composeOwnedTransientSceneElements({
+    mainCapture,
+    navigationControl,
+    surfaces: [surface({
+      x: 452,
+      y: 470,
+      width: 240,
+      height: 180,
+      ocrElements: [{
+        source: "ocr",
+        name: "Settings",
+        confidence: 0.99,
+        bounds: { x: 52, y: 112, width: 78, height: 22 },
+      }],
+      visualProposals: [{
+        proposalId: "settings-row",
+        confidence: 0.96,
+        bounds: { x: 24, y: 100, width: 190, height: 44 },
+      }],
+      coordinateScale: {
+        actionTransform: { scaleX: 1, scaleY: 1, offsetX: 0, offsetY: 370 },
+        nativeToObservation: { scaleX: 1, scaleY: 1 },
+      },
+    })],
+  });
+
+  const ownedWindow = elements.find((element) => element.hostType === "Window");
+  const transient = elements.find((element) => element.role === "navigation-surface");
+  const item = elements.find((element) => element.role === "navigation-item");
+  assert.equal(transient.parentElementToken, ownedWindow.elementToken);
+  assert.equal(item.parentElementToken, transient.elementToken);
+  assert.equal(item.name, "Settings");
+  assert.equal(item.semanticKey, "navigation:settings");
+  assert.deepEqual(item.actions, ["click"]);
+});
+
+test("a proven auxiliary window detached from the navigation control is not assigned to it", () => {
+  assert.deepEqual(composeOwnedTransientSceneElements({
+    mainCapture,
+    navigationControl,
+    surfaces: [surface({ x: 1200, y: 700, width: 180, height: 120 })],
+  }), []);
 });
 
 test("an adjacent visual avatar grounds one row without absorbing a distant accessory", () => {

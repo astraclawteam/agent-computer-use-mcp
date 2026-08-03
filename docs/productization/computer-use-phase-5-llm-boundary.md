@@ -62,9 +62,16 @@ therefore a semantic choice, not an action target supplied by the model.
 application name and user goal, then selects only opaque application or Scene
 candidates. The Host reacquires and observes a fresh Scene before every
 selection, requires a unique match to the prior semantic candidate, performs at
-most one action, captures the post-action Scene, returns only consistent
-parent-owned facts and fresh opaque candidates, and releases before the tool
-result. Candidate output contains no coordinate, crop, provider token,
+most one action, and captures the post-action Scene. Navigation clicks are
+committed only when that newer Scene proves an advanced target state, a
+target-labelled destination, or a newly owned actionable transient surface.
+The public action receipt retains the provider outcome separately from the
+Host-decided outcome and lists the proof class and observation versions; an
+unrelated changing fact is never a navigation postcondition. If the first Scene
+is inconclusive, the Host performs at most one read-only related-surface capture
+without replaying the click. The Host then returns only consistent parent-owned
+facts and fresh opaque candidates and releases before the tool result. Candidate
+output contains no coordinate, crop, provider token,
 `elementId`, controller, or lifecycle field. `not-applied` and `indeterminate`
 actions are never replayed. Stop cancels the in-flight invocation and release
 still runs before the terminal result.

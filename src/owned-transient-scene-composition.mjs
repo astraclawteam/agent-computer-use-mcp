@@ -8,21 +8,32 @@ const MAX_RESULT_LINE_HEIGHT = 96;
 export function composeOwnedTransientSceneElements({
   mainCapture,
   searchControl,
+  navigationControl,
   surfaces = [],
 } = {}) {
-  if (!isBox(mainCapture) || !isBox(searchControl?.bounds)) return [];
+  if (!isBox(mainCapture)
+    || (!isBox(searchControl?.bounds) && !isBox(navigationControl?.bounds))) return [];
   const mainWindowId = String(mainCapture.windowId ?? mainCapture.hwnd ?? "");
   if (mainWindowId === "") return [];
 
   const elements = [];
   for (const surface of surfaces) {
-    if (!isProvenRelatedSurface(surface, mainWindowId)
-      || !isSearchOwnedSurface({ mainCapture, searchControl, surface })) continue;
+    if (!isProvenRelatedSurface(surface, mainWindowId)) continue;
+    const surfaceKind = isBox(searchControl?.bounds)
+      && isSearchOwnedSurface({ mainCapture, searchControl, surface })
+      ? "search"
+      : isBox(navigationControl?.bounds)
+        && isNavigationOwnedSurface({ mainCapture, navigationControl, surface })
+        ? "navigation"
+        : null;
+    if (!surfaceKind) continue;
     const coordinate = surfaceCoordinate(surface, mainWindowId);
     if (!coordinate) continue;
     const relationship = surface.surfaceProvenance.relationship;
     const windowToken = `owned-window:${surface.hwnd}`;
-    const surfaceToken = `search-results:${surface.hwnd}`;
+    const surfaceToken = surfaceKind === "search"
+      ? `search-results:${surface.hwnd}`
+      : `navigation-surface:${surface.hwnd}`;
     const bounds = { x: 0, y: 0, width: surface.width, height: surface.height };
     elements.push({
       hostType: "Window",
@@ -40,7 +51,7 @@ export function composeOwnedTransientSceneElements({
       support: nativeSurfaceSupport(surface),
     }, {
       hostType: "TransientSurface",
-      role: "search-results",
+      role: surfaceKind === "search" ? "search-results" : "navigation-surface",
       elementToken: surfaceToken,
       parentElementToken: windowToken,
       bounds,
@@ -51,16 +62,17 @@ export function composeOwnedTransientSceneElements({
       semanticKey: `search-results:${surface.hwnd}`,
       support: nativeSurfaceSupport(surface),
     });
-    elements.push(...searchResultElements({
+    elements.push(...surfaceActionableElements({
       surface,
       parentElementToken: surfaceToken,
       coordinate,
+      surfaceKind,
     }));
   }
   return elements;
 }
 
-function searchResultElements({ surface, parentElementToken, coordinate }) {
+function surfaceActionableElements({ surface, parentElementToken, coordinate, surfaceKind }) {
   const ocrElements = (Array.isArray(surface.ocrElements) ? surface.ocrElements : [])
     .filter((element) => element?.source === "ocr" && isBox(element.bounds))
     .filter((element) => finiteConfidence(element.confidence, 0) >= 0.6)
@@ -111,8 +123,8 @@ function searchResultElements({ surface, parentElementToken, coordinate }) {
     const confidence = complementConfidence([visualConfidence, ocrConfidence]);
     elements.push({
       hostType: "ActionableItem",
-      role: "search-result",
-      elementToken: `search-result:${surface.hwnd}:${stableBoxId(row.owner.bounds)}:${normalizedName}`,
+      role: surfaceKind === "search" ? "search-result" : "navigation-item",
+      elementToken: `${surfaceKind === "search" ? "search-result" : "navigation-item"}:${surface.hwnd}:${stableBoxId(row.owner.bounds)}:${normalizedName}`,
       parentElementToken,
       bounds: { ...row.owner.bounds },
       sourceRegion: { ...row.owner.bounds },
@@ -120,7 +132,9 @@ function searchResultElements({ surface, parentElementToken, coordinate }) {
       modelIdentity: { provider: "local-proposal-fusion", model: "owned-surface-som-ocr-v1" },
       actions: row.conflicting ? [] : ["click"],
       name,
-      semanticKey: conversationEntitySemanticKey(normalizedName),
+      semanticKey: surfaceKind === "search"
+        ? conversationEntitySemanticKey(normalizedName)
+        : `navigation:${normalizedName}`,
       confidence,
       proposalId: row.ownerId,
       pixelLimitedAction: true,
@@ -142,6 +156,48 @@ function searchResultElements({ surface, parentElementToken, coordinate }) {
     });
   }
   return elements;
+}
+
+function isNavigationOwnedSurface({ mainCapture, navigationControl, surface }) {
+  const navigationScreen = {
+    x: mainCapture.x + navigationControl.bounds.x,
+    y: mainCapture.y + navigationControl.bounds.y,
+    width: navigationControl.bounds.width,
+    height: navigationControl.bounds.height,
+  };
+  const surfaceBounds = {
+    x: surface.x,
+    y: surface.y,
+    width: surface.width,
+    height: surface.height,
+  };
+  const mainBounds = {
+    x: mainCapture.x,
+    y: mainCapture.y,
+    width: mainCapture.width,
+    height: mainCapture.height,
+  };
+  const horizontalGap = axisGap(
+    navigationScreen.x,
+    navigationScreen.x + navigationScreen.width,
+    surfaceBounds.x,
+    surfaceBounds.x + surfaceBounds.width,
+  );
+  const verticalGap = axisGap(
+    navigationScreen.y,
+    navigationScreen.y + navigationScreen.height,
+    surfaceBounds.y,
+    surfaceBounds.y + surfaceBounds.height,
+  );
+  return intersectionArea(mainBounds, surfaceBounds) >= area(surfaceBounds) * 0.5
+    && area(surfaceBounds) <= area(mainBounds) * 0.75
+    && Math.hypot(horizontalGap, verticalGap) <= 160;
+}
+
+function axisGap(leftStart, leftEnd, rightStart, rightEnd) {
+  if (leftEnd < rightStart) return rightStart - leftEnd;
+  if (rightEnd < leftStart) return leftStart - rightEnd;
+  return 0;
 }
 
 function isTrailingAccessoryLine(line, surface) {

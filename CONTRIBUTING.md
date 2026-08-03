@@ -42,6 +42,11 @@ instead of a public issue.
   when process evidence proves one application family.
 - **Evidence before mutation.** Semantic elements, focus receipts, or a fresh
   observation must ground actions.
+- **Postconditions decide navigation.** A provider click status is transport
+  evidence, not completion evidence. Commit navigation only from a newer,
+  consistently owned Host Scene showing the target state, destination, or
+  actionable transient; unrelated dynamic text never qualifies. One forced
+  related-surface observation is permitted, but the click is never replayed.
 - **No guessed coordinates.** Pixel actions stay bound to observation identity,
   bounds, scale, confidence, and expiry.
 - **Fail closed.** Uncertain targeting, policy violations, corrupt artifacts,

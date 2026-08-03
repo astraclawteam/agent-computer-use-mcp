@@ -47,6 +47,15 @@ test("computer.task advances a generic GUI goal through opaque Host candidates a
   assert.equal(router.actions[0].kind, "click");
   assert.equal(router.actions[0].captureAfter, true);
   assert.equal(router.actions[0].elementId.endsWith(":settings"), true);
+  assert.deepEqual(second.action.receipt, {
+    providerOutcome: "committed",
+    outcome: "committed",
+    postconditionVerified: true,
+    verificationMethod: "host-scene-navigation-transition",
+    evidence: ["target-labelled-destination-added"],
+    beforeObservationVersion: 2,
+    afterObservationVersion: 3,
+  });
   const usage = second.candidates.find((candidate) => candidate.label === "Usage" && candidate.action === "select");
   assert.ok(usage);
 
@@ -60,6 +69,8 @@ test("computer.task advances a generic GUI goal through opaque Host candidates a
   assert.equal(third.released, true);
   assert.equal(router.cancelCalls, 3);
   assert.equal(router.actions.length, 2);
+  assert.equal(third.action.receipt.postconditionVerified, true);
+  assert.deepEqual(third.action.receipt.evidence, ["target-labelled-destination-added"]);
   assert.ok(third.facts.some((fact) => fact.label === "12,345 tokens" && fact.parentRole === "usage-page"));
 
   const complete = await runGenericTaskTool(router, {
@@ -72,6 +83,130 @@ test("computer.task advances a generic GUI goal through opaque Host candidates a
   assert.equal(complete.phase, "complete");
   assert.equal(complete.released, true);
   assert.equal(router.cancelCalls, 3);
+});
+
+test("computer.task confirms an indeterminate navigation receipt from a fresh owned destination Scene", async () => {
+  const router = fixtureRouter({ actionOutcome: "indeterminate", indeterminateActionApplies: true });
+  const context = { agentId: "agent", sessionId: "session-navigation-postcondition" };
+  const first = await runGenericTaskTool(router, { applicationName: APP, goal: GOAL }, context);
+  const settings = first.candidates.find((candidate) => candidate.label === "Settings" && candidate.action === "select");
+
+  const second = await runGenericTaskTool(router, {
+    applicationName: APP,
+    goal: GOAL,
+    taskToken: first.taskToken,
+    candidateId: settings.candidateId,
+  }, context);
+
+  assert.equal(second.outcome, "committed");
+  assert.equal(second.phase, "decision-required");
+  assert.equal(second.action.receipt.providerOutcome, "indeterminate");
+  assert.equal(second.action.receipt.postconditionVerified, true);
+  assert.deepEqual(second.action.receipt.evidence, ["target-labelled-destination-added"]);
+  assert.ok(second.candidates.some((candidate) => candidate.label === "Usage"));
+  assert.equal(router.actions.length, 1);
+  assert.equal(router.cancelCalls, 2);
+});
+
+test("computer.task confirms a navigation click when a fresh owned actionable transient appears", async () => {
+  const router = fixtureRouter({
+    actionOutcome: "indeterminate",
+    indeterminateActionApplies: true,
+    transientNavigation: true,
+  });
+  const context = { agentId: "agent", sessionId: "session-navigation-transient" };
+  const first = await runGenericTaskTool(router, { applicationName: APP, goal: GOAL }, context);
+  const settings = first.candidates.find((candidate) => candidate.label === "Settings" && candidate.action === "select");
+
+  const second = await runGenericTaskTool(router, {
+    applicationName: APP,
+    goal: GOAL,
+    taskToken: first.taskToken,
+    candidateId: settings.candidateId,
+  }, context);
+
+  assert.equal(second.outcome, "committed");
+  assert.equal(second.action.receipt.providerOutcome, "indeterminate");
+  assert.deepEqual(second.action.receipt.evidence, ["owned-actionable-transient-added"]);
+  assert.ok(second.candidates.some((candidate) => candidate.label === "Preferences"));
+});
+
+test("computer.task performs one forced owned-surface observation when the first post-click Scene is unproven", async () => {
+  const router = fixtureRouter({
+    actionOutcome: "indeterminate",
+    indeterminateActionApplies: true,
+    transientNavigation: true,
+    forceCaptureRevealsTransient: true,
+  });
+  const context = { agentId: "agent", sessionId: "session-navigation-forced-surface" };
+  const first = await runGenericTaskTool(router, { applicationName: APP, goal: GOAL }, context);
+  const settings = first.candidates.find((candidate) => candidate.label === "Settings" && candidate.action === "select");
+
+  const second = await runGenericTaskTool(router, {
+    applicationName: APP,
+    goal: GOAL,
+    taskToken: first.taskToken,
+    candidateId: settings.candidateId,
+  }, context);
+
+  assert.equal(second.outcome, "committed");
+  assert.deepEqual(second.action.receipt.evidence, ["owned-actionable-transient-added"]);
+  assert.equal(router.captureRequests.at(-1).mode, "screenshot");
+  assert.equal(router.captureRequests.at(-1).forceScreenshotSurfaceCapture, true);
+  assert.equal(router.captureRequests.at(-1).includeRelatedSurfaces, true);
+  assert.equal(router.actions.length, 1);
+});
+
+test("computer.task lets a proven navigation postcondition override a contradictory not-applied provider receipt", async () => {
+  const router = fixtureRouter({ actionOutcome: "not-applied" });
+  const context = { agentId: "agent", sessionId: "session-navigation-receipt-conflict" };
+  const first = await runGenericTaskTool(router, { applicationName: APP, goal: GOAL }, context);
+  const settings = first.candidates.find((candidate) => candidate.label === "Settings" && candidate.action === "select");
+
+  const second = await runGenericTaskTool(router, {
+    applicationName: APP,
+    goal: GOAL,
+    taskToken: first.taskToken,
+    candidateId: settings.candidateId,
+  }, context);
+
+  assert.equal(second.outcome, "committed");
+  assert.equal(second.action.receipt.providerOutcome, "not-applied");
+  assert.equal(second.action.receipt.outcome, "committed");
+  assert.equal(second.action.receipt.postconditionVerified, true);
+  assert.ok(second.candidates.some((candidate) => candidate.label === "Usage"));
+});
+
+test("computer.task rejects a committed navigation receipt when only unrelated dynamic text changed", async () => {
+  const router = fixtureRouter({ suppressActionEffect: true, includeVolatileFact: true });
+  const context = { agentId: "agent", sessionId: "session-navigation-unproven" };
+  const first = await runGenericTaskTool(router, { applicationName: APP, goal: GOAL }, context);
+  const settings = first.candidates.find((candidate) => candidate.label === "Settings" && candidate.action === "select");
+
+  const second = await runGenericTaskTool(router, {
+    applicationName: APP,
+    goal: GOAL,
+    taskToken: first.taskToken,
+    candidateId: settings.candidateId,
+  }, context);
+
+  assert.equal(second.outcome, "indeterminate");
+  assert.equal(second.phase, "failed");
+  assert.equal(second.error.code, "task.navigation_postcondition_unverified");
+  assert.equal(second.error.replayAllowed, false);
+  assert.equal(second.action.receipt.providerOutcome, "committed");
+  assert.equal(second.action.receipt.postconditionVerified, false);
+  assert.deepEqual(second.action.receipt.evidence, []);
+  assert.equal(router.actions.length, 1);
+
+  const replay = await runGenericTaskTool(router, {
+    applicationName: APP,
+    goal: GOAL,
+    taskToken: first.taskToken,
+    candidateId: settings.candidateId,
+  }, context);
+  assert.equal(replay.error.code, "task.token_invalid");
+  assert.equal(router.actions.length, 1);
 });
 
 test("computer.task revalidates a candidate against a fresh Scene before acting", async () => {
@@ -220,6 +355,11 @@ test("computer.task is Agent-visible, keeps lifecycle tools Host-only, and valid
 function fixtureRouter({
   staleSettingsAfterFirstObservation = false,
   actionOutcome = "committed",
+  indeterminateActionApplies = false,
+  suppressActionEffect = false,
+  includeVolatileFact = false,
+  transientNavigation = false,
+  forceCaptureRevealsTransient = false,
   hangAction = false,
   onAction = () => {},
   unavailableApplicationOnce = false,
@@ -227,13 +367,16 @@ function fixtureRouter({
 } = {}) {
   let version = 0;
   let page = "main";
+  let transientOpen = false;
   let captureCalls = 0;
   let cancelCalls = 0;
   const actions = [];
   const accessRequests = [];
+  const captureRequests = [];
   return {
     actions,
     accessRequests,
+    captureRequests,
     get cancelCalls() { return cancelCalls; },
     async listState() {
       return {
@@ -251,19 +394,32 @@ function fixtureRouter({
       }
       return { status: "granted", controller: { id: "controller:example" } };
     },
-    async capture() {
+    async capture(args = {}) {
+      captureRequests.push(structuredClone(args));
       captureCalls += 1;
       version += 1;
       const settingsLabel = staleSettingsAfterFirstObservation && captureCalls > 1 ? "Preferences" : "Settings";
-      return { scene: taskScene({ version, page, settingsLabel }) };
+      return { scene: taskScene({
+        version,
+        page,
+        settingsLabel,
+        includeVolatileFact,
+        transientOpen: transientOpen
+          && (!forceCaptureRevealsTransient || args.forceScreenshotSurfaceCapture === true),
+      }) };
     },
     async act({ action }) {
       actions.push(structuredClone(action));
       onAction();
       if (hangAction) return new Promise(() => {});
+      if (!suppressActionEffect && (actionOutcome !== "indeterminate" || indeterminateActionApplies)) {
+        if (action.elementId.endsWith(":settings")) {
+          if (transientNavigation) transientOpen = true;
+          else page = "settings";
+        }
+        if (action.elementId.endsWith(":usage")) page = "usage";
+      }
       if (actionOutcome === "indeterminate") return { status: "indeterminate", outcome: "indeterminate" };
-      if (action.elementId.endsWith(":settings")) page = "settings";
-      if (action.elementId.endsWith(":usage")) page = "usage";
       return {
         status: actionOutcome,
         outcome: actionOutcome,
@@ -277,7 +433,13 @@ function fixtureRouter({
   };
 }
 
-function taskScene({ version, page, settingsLabel }) {
+function taskScene({
+  version,
+  page,
+  settingsLabel,
+  includeVolatileFact = false,
+  transientOpen = false,
+}) {
   const elements = [];
   const add = ({ key, parentKey = null, ...element }) => elements.push({
     id: `scene:${version}:${key}`,
@@ -292,6 +454,9 @@ function taskScene({ version, page, settingsLabel }) {
   });
   add({ key: "window", type: "Window", role: "main-window", name: APP });
   add({ key: "shell", type: "Container", role: "application", parentKey: "window" });
+  if (includeVolatileFact) {
+    add({ key: "clock", type: "ActionableItem", role: "status", parentKey: "shell", name: `Clock ${version}` });
+  }
   if (page === "main") {
     add({
       key: "settings",
@@ -303,6 +468,25 @@ function taskScene({ version, page, settingsLabel }) {
       actions: ["click"],
       actionable: true,
     });
+    if (transientOpen) {
+      add({
+        key: "settings-menu",
+        type: "TransientSurface",
+        role: "menu",
+        parentKey: "window",
+        name: "Application menu",
+      });
+      add({
+        key: "preferences",
+        type: "ActionableItem",
+        role: "menu-item",
+        parentKey: "settings-menu",
+        name: "Preferences",
+        semanticKey: "command:preferences",
+        actions: ["click"],
+        actionable: true,
+      });
+    }
   } else {
     add({ key: "settings-page", type: "Container", role: "settings-page", parentKey: "shell", name: "Settings" });
     add({

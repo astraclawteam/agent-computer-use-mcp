@@ -899,6 +899,55 @@ const GENERIC_TASK_FACT_SCHEMA = {
   additionalProperties: false,
 };
 
+const GENERIC_TASK_NAVIGATION_RECEIPT_SCHEMA = {
+  type: "object",
+  required: [
+    "providerOutcome",
+    "outcome",
+    "postconditionVerified",
+    "verificationMethod",
+    "evidence",
+    "beforeObservationVersion",
+    "afterObservationVersion",
+  ],
+  properties: {
+    providerOutcome: { type: "string", enum: ["committed", "not-applied", "indeterminate"] },
+    outcome: { type: "string", enum: ["committed", "not-applied", "indeterminate"] },
+    postconditionVerified: { type: "boolean" },
+    verificationMethod: { const: "host-scene-navigation-transition" },
+    evidence: {
+      type: "array",
+      items: {
+        type: "string",
+        enum: [
+          "target-navigation-state-advanced",
+          "target-labelled-destination-added",
+          "owned-actionable-transient-added",
+          "target-replaced-by-owned-navigation-surface",
+        ],
+      },
+      uniqueItems: true,
+    },
+    beforeObservationVersion: { anyOf: [{ type: "integer", minimum: 0 }, { type: "null" }] },
+    afterObservationVersion: { anyOf: [{ type: "integer", minimum: 0 }, { type: "null" }] },
+  },
+  additionalProperties: false,
+};
+
+const GENERIC_TASK_ACTION_SCHEMA = {
+  type: "object",
+  required: ["label", "role", "parentRole", "action", "outcome"],
+  properties: {
+    label: { type: "string" },
+    role: { type: "string" },
+    parentRole: { anyOf: [{ type: "string" }, { type: "null" }] },
+    action: { type: "string", enum: ["activate", "select", "edit"] },
+    outcome: { type: "string", enum: ["committed", "not-applied", "indeterminate"] },
+    receipt: GENERIC_TASK_NAVIGATION_RECEIPT_SCHEMA,
+  },
+  additionalProperties: false,
+};
+
 const GENERIC_TASK_EXECUTION_CONTROL_SCHEMA = {
   type: "object",
   required: ["status", "scope", "retryable", "allowedNextTools", "reason", "nextAction"],
@@ -1201,7 +1250,7 @@ const actTool = {
 const genericTaskTool = {
   name: "computer.task",
   title: "Run Generic Desktop Task",
-  description: "Continue one generic non-messaging desktop task through Host-owned observations and opaque semantic candidates. Start with applicationName and goal. The Host acquires, observes one versioned Scene, performs at most one freshly revalidated candidate action, verifies its canonical receipt, and releases before every result. Continue with taskToken plus one candidateId, or finish with decision=complete, reobserve, report, or cancel. If the requested final control is not directly visible, select one reversible navigation candidate such as an account/profile/menu/navigation control that is semantically likely to reveal it; do not report merely because the final target is not yet exposed. A named product surface may be hosted by a differently labelled desktop application: when the Host returns owning-window candidates, choose the defensible semantic product relationship instead of treating a background same-name process as proof that no window exists. Never use shell commands, guessed coordinates, element ids, OCR-region assignment, or lifecycle tools for a GUI task. Messaging requests must use computer.message.",
+  description: "Continue one generic non-messaging desktop task through Host-owned observations and opaque semantic candidates. Start with applicationName and goal. The Host acquires, observes one versioned Scene, performs at most one freshly revalidated candidate action, verifies its canonical receipt, and releases before every result. A navigation click is committed only when a newer consistent Scene proves an advanced target state, a target-labelled destination, or an owned actionable transient surface; provider delivery status alone is insufficient and an unproven click is never replayed. Continue with taskToken plus one candidateId, or finish with decision=complete, reobserve, report, or cancel. If the requested final control is not directly visible, select one reversible navigation candidate such as an account/profile/menu/navigation control that is semantically likely to reveal it; do not report merely because the final target is not yet exposed. A named product surface may be hosted by a differently labelled desktop application: when the Host returns owning-window candidates, choose the defensible semantic product relationship instead of treating a background same-name process as proof that no window exists. Never use shell commands, guessed coordinates, element ids, OCR-region assignment, or lifecycle tools for a GUI task. Messaging requests must use computer.message.",
   _meta: {
     ...semanticCapabilityMeta({
       summary: "Advance a native desktop GUI goal one Host-grounded semantic action at a time without exposing coordinates or controller lifecycle decisions.",
@@ -1283,7 +1332,7 @@ const genericTaskTool = {
     candidates: { type: "array", items: GENERIC_TASK_CANDIDATE_SCHEMA },
     facts: { type: "array", items: GENERIC_TASK_FACT_SCHEMA },
     factsTruncated: { type: "boolean" },
-    action: ANY_OBJECT,
+    action: GENERIC_TASK_ACTION_SCHEMA,
     allowedDecisions: {
       type: "array",
       items: { type: "string", enum: ["complete", "reobserve", "report", "cancel"] },

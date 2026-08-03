@@ -62,8 +62,12 @@ inventory.
   understanding is reserved for layouts, icons, and complex scenes.
 - **Coordinates carry provenance.** Screenshot dimensions, native-window scale,
   truncation, focus, observation identity, and expiry travel with the result.
-- **Actions explain themselves.** Every successful mutation reports the target
-  path, provider path, delivery mode, and any fallback reason.
+- **Actions prove their postconditions.** Navigation receipts expose the
+  provider outcome and the newer Host Scene evidence that confirmed the target
+  state, destination surface, or owned transient. Provider status alone cannot
+  turn an unobserved click into success. When the first post-action Scene is
+  inconclusive, the Host may perform one read-only related-surface capture; it
+  never replays the click.
 - **Chinese input is a first-class path.** Coordinate-grounded Unicode entry
   uses verified native delivery, while semantic fields remain on the driver
   path.
@@ -75,7 +79,9 @@ inventory.
 - **Task routing cannot escape the Host.** A generic task result limits the next
   interaction step to `computer.task`; shell, raw targeting, and lifecycle
   tools cannot replace an unresolved Host candidate. Same-package child
-  processes inherit only their proven owning-window process identity.
+  processes inherit only their proven owning-window process identity. A
+  navigation click whose Scene postcondition is not proven closes without
+  replay, even if the provider reported delivery.
 - **No hidden self-update.** Startup is offline. Installation, upgrade,
   downgrade, and rollback are explicit Host or operator actions.
 

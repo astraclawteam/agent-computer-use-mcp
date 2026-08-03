@@ -361,6 +361,7 @@ async function actOnTaskCandidate({
 
     const currentCandidate = matching[0];
     const action = actionForCandidate(currentCandidate, text);
+    const navigationClick = isNavigationClickCandidate(currentCandidate);
     let receipt;
     try {
       receipt = await abortable(() => router.act({
@@ -373,13 +374,13 @@ async function actOnTaskCandidate({
       failure.mutationMayHaveStarted = true;
       throw failure;
     }
-    const outcome = canonicalOutcome(receipt?.outcome ?? receipt?.status);
-    if (outcome === "indeterminate") {
+    const providerOutcome = canonicalOutcome(receipt?.outcome ?? receipt?.status);
+    if (providerOutcome === "indeterminate" && !navigationClick) {
       pendingTasks.delete(task.taskToken);
       return {
-        outcome,
+        outcome: providerOutcome,
         phase: "failed",
-        action: publicAction(currentCandidate, outcome),
+        action: publicAction(currentCandidate, providerOutcome),
         error: {
           code: "task.action_indeterminate",
           message: "The Host cannot prove whether the action was applied. The action was not replayed and the task was closed.",
@@ -388,18 +389,130 @@ async function actOnTaskCandidate({
       };
     }
 
-    const postScene = receipt?.capture?.scene
-      ?? (await abortable(() => router.capture({ mode: "screenshot", requestContext }), signal))?.scene;
-    const post = projectScene(postScene);
+    let postScene = receipt?.capture?.scene;
+    if (!isFreshSceneAfter(postScene, scene)) {
+      try {
+        postScene = (await abortable(
+          () => router.capture({ mode: "screenshot", requestContext }),
+          signal,
+        ))?.scene;
+      } catch (error) {
+        if (!navigationClick || signal?.aborted) throw error;
+        return navigationVerificationFailure({
+          task,
+          candidate: currentCandidate,
+          providerOutcome,
+          beforeScene: scene,
+          afterScene: postScene,
+          code: "task.navigation_verification_unavailable",
+          message: "The navigation click may have been applied, but the Host could not obtain a fresh post-action Scene. The task was closed and the click was not replayed.",
+        });
+      }
+    }
+    if (navigationClick && !isFreshSceneAfter(postScene, scene)) {
+      return navigationVerificationFailure({
+        task,
+        candidate: currentCandidate,
+        providerOutcome,
+        beforeScene: scene,
+        afterScene: postScene,
+        code: "task.navigation_verification_stale",
+        message: "The navigation click may have been applied, but the Host did not receive a newer post-action Scene. The task was closed and the click was not replayed.",
+      });
+    }
+    let post;
+    try {
+      post = projectScene(postScene);
+    } catch (error) {
+      if (!navigationClick) throw error;
+      return navigationVerificationFailure({
+        task,
+        candidate: currentCandidate,
+        providerOutcome,
+        beforeScene: scene,
+        afterScene: postScene,
+        code: "task.navigation_verification_invalid",
+        message: "The navigation click may have been applied, but its fresh post-action Scene was invalid. The task was closed and the click was not replayed.",
+      });
+    }
     if (post.messaging) {
       pendingTasks.delete(task.taskToken);
       return {
         outcome: "not-applied",
         phase: "failed",
-        action: publicAction(currentCandidate, outcome),
+        action: publicAction(currentCandidate, "not-applied"),
         error: {
           code: "task.messaging_surface_denied",
           message: "The action reached a messaging Scene. The generic task was closed without further interaction.",
+        },
+      };
+    }
+
+    let navigationVerification = navigationClick
+      ? verifyNavigationClickPostcondition({
+          beforeScene: scene,
+          afterScene: postScene,
+          candidate: currentCandidate,
+        })
+      : null;
+    if (navigationClick && navigationVerification?.verified !== true) {
+      const relatedSurfaceAnchor = navigationSurfaceAnchor(scene, currentCandidate);
+      try {
+        const forcedScene = (await abortable(() => router.capture({
+          mode: "screenshot",
+          forceScreenshotSurfaceCapture: true,
+          includeRelatedSurfaces: true,
+          ...(relatedSurfaceAnchor ? { relatedSurfaceAnchor } : {}),
+          requestContext,
+        }), signal))?.scene;
+        if (isFreshSceneAfter(forcedScene, postScene)) {
+          const forcedPost = projectScene(forcedScene);
+          if (forcedPost.messaging) {
+            pendingTasks.delete(task.taskToken);
+            return {
+              outcome: "not-applied",
+              phase: "failed",
+              action: publicAction(currentCandidate, "not-applied"),
+              error: {
+                code: "task.messaging_surface_denied",
+                message: "The action reached a messaging Scene. The generic task was closed without further interaction.",
+              },
+            };
+          }
+          postScene = forcedScene;
+          post = forcedPost;
+          navigationVerification = verifyNavigationClickPostcondition({
+            beforeScene: scene,
+            afterScene: postScene,
+            candidate: currentCandidate,
+          });
+        }
+      } catch (error) {
+        if (signal?.aborted) throw error;
+      }
+    }
+    const outcome = navigationVerification?.verified === true
+      ? "committed"
+      : navigationClick && providerOutcome === "committed"
+        ? "indeterminate"
+        : providerOutcome;
+    const publicReceipt = navigationVerification
+      ? navigationReceipt(providerOutcome, outcome, navigationVerification)
+      : null;
+    if (navigationClick && outcome === "indeterminate") {
+      pendingTasks.delete(task.taskToken);
+      return {
+        outcome,
+        phase: "failed",
+        action: publicAction(currentCandidate, outcome, publicReceipt),
+        error: {
+          code: providerOutcome === "committed"
+            ? "task.navigation_postcondition_unverified"
+            : "task.action_indeterminate",
+          message: providerOutcome === "committed"
+            ? "The provider reported the navigation click as committed, but the fresh Host Scene did not prove its navigation postcondition. The task was closed and the click was not replayed."
+            : "The Host cannot prove whether the navigation click was applied. The action was not replayed and the task was closed.",
+          replayAllowed: false,
         },
       };
     }
@@ -411,7 +524,7 @@ async function actOnTaskCandidate({
       candidates: publicCandidates(task.candidates),
       facts: task.facts,
       factsTruncated: task.factsTruncated,
-      action: publicAction(currentCandidate, outcome),
+      action: publicAction(currentCandidate, outcome, publicReceipt),
       allowedDecisions: allowedDecisions(),
       ...(outcome === "not-applied" ? {
         error: {
@@ -688,6 +801,254 @@ function targetRole(candidate) {
   return "other";
 }
 
+function isNavigationClickCandidate(candidate) {
+  if (candidate?.actionKind !== "click") return false;
+  return !["editable", "toggle"].includes(targetRole(candidate));
+}
+
+function navigationSurfaceAnchor(scene, candidate) {
+  const target = scene?.elements?.find((element) => element?.id === candidate?.elementId);
+  const bounds = target?.coordinate?.bounds;
+  if (!isCoordinateBox(bounds)) return null;
+  return {
+    role: candidate.role,
+    bounds: { x: bounds.x, y: bounds.y, width: bounds.width, height: bounds.height },
+  };
+}
+
+function isCoordinateBox(value) {
+  return value !== null && typeof value === "object" && !Array.isArray(value)
+    && Number.isFinite(value.x) && Number.isFinite(value.y)
+    && Number.isFinite(value.width) && value.width > 0
+    && Number.isFinite(value.height) && value.height > 0;
+}
+
+function verifyNavigationClickPostcondition({ beforeScene, afterScene, candidate }) {
+  const method = "host-scene-navigation-transition";
+  const beforeVersion = beforeScene?.observationVersion;
+  const afterVersion = afterScene?.observationVersion;
+  if (!isFreshSceneAfter(afterScene, beforeScene)) {
+    return {
+      status: "unavailable",
+      verified: false,
+      method,
+      evidence: [],
+      beforeObservationVersion: Number.isInteger(beforeVersion) ? beforeVersion : null,
+      afterObservationVersion: Number.isInteger(afterVersion) ? afterVersion : null,
+    };
+  }
+
+  const before = consistentSceneIndex(beforeScene);
+  const after = consistentSceneIndex(afterScene);
+  const matchingAfterTargets = after.elements.filter((element) => sceneElementMatchesCandidate(
+    element,
+    after.byId,
+    candidate,
+  ));
+  if (matchingAfterTargets.length === 1
+    && navigationStateAdvanced(
+      before.byId.get(candidate.elementId)?.state,
+      matchingAfterTargets[0]?.state,
+    )) {
+    return confirmedNavigationVerification(
+      method,
+      "target-navigation-state-advanced",
+      beforeVersion,
+      afterVersion,
+    );
+  }
+
+  const beforeSurfaces = new Set(before.elements
+    .filter(isNavigationSurface)
+    .map((element) => navigationSurfaceSignature(element, before.byId)));
+  const addedSurfaces = after.elements.filter((element) => (
+    isNavigationSurface(element)
+    && !beforeSurfaces.has(navigationSurfaceSignature(element, after.byId))
+  ));
+  const targetLabel = normalizeText(candidate.label);
+  if (targetLabel && addedSurfaces.some((element) => normalizeText(elementLabel(element)) === targetLabel)) {
+    return confirmedNavigationVerification(
+      method,
+      "target-labelled-destination-added",
+      beforeVersion,
+      afterVersion,
+    );
+  }
+
+  if (addedSurfaces.some((element) => (
+    element.type === "TransientSurface"
+    && hasConsistentActionableDescendant(element, after.elements, after.byId)
+  ))) {
+    return confirmedNavigationVerification(
+      method,
+      "owned-actionable-transient-added",
+      beforeVersion,
+      afterVersion,
+    );
+  }
+
+  const beforeTarget = before.byId.get(candidate.elementId);
+  const beforeAnchor = beforeTarget?.parentId ? before.byId.get(beforeTarget.parentId) : null;
+  const beforeAnchorSignature = beforeAnchor
+    ? navigationAnchorSignature(beforeAnchor, before.byId)
+    : null;
+  if (matchingAfterTargets.length === 0 && beforeAnchorSignature
+    && addedSurfaces.some((element) => {
+      const parent = typeof element.parentId === "string" ? after.byId.get(element.parentId) : null;
+      return parent
+        && navigationAnchorSignature(parent, after.byId) === beforeAnchorSignature
+        && hasConsistentActionableDescendant(element, after.elements, after.byId);
+    })) {
+    return confirmedNavigationVerification(
+      method,
+      "target-replaced-by-owned-navigation-surface",
+      beforeVersion,
+      afterVersion,
+    );
+  }
+
+  return {
+    status: "not-confirmed",
+    verified: false,
+    method,
+    evidence: [],
+    beforeObservationVersion: beforeVersion,
+    afterObservationVersion: afterVersion,
+  };
+}
+
+function unavailableNavigationVerification(beforeScene, afterScene) {
+  return {
+    status: "unavailable",
+    verified: false,
+    method: "host-scene-navigation-transition",
+    evidence: [],
+    beforeObservationVersion: Number.isInteger(beforeScene?.observationVersion)
+      ? beforeScene.observationVersion
+      : null,
+    afterObservationVersion: Number.isInteger(afterScene?.observationVersion)
+      ? afterScene.observationVersion
+      : null,
+  };
+}
+
+function navigationVerificationFailure({
+  task,
+  candidate,
+  providerOutcome,
+  beforeScene,
+  afterScene,
+  code,
+  message,
+}) {
+  pendingTasks.delete(task.taskToken);
+  const verification = unavailableNavigationVerification(beforeScene, afterScene);
+  return {
+    outcome: "indeterminate",
+    phase: "failed",
+    action: publicAction(
+      candidate,
+      "indeterminate",
+      navigationReceipt(providerOutcome, "indeterminate", verification),
+    ),
+    error: {
+      code,
+      message,
+      replayAllowed: false,
+    },
+  };
+}
+
+function confirmedNavigationVerification(method, evidence, beforeObservationVersion, afterObservationVersion) {
+  return {
+    status: "confirmed",
+    verified: true,
+    method,
+    evidence: [evidence],
+    beforeObservationVersion,
+    afterObservationVersion,
+  };
+}
+
+function consistentSceneIndex(scene) {
+  const byId = new Map(scene.elements.map((element) => [element.id, element]));
+  return {
+    byId,
+    elements: scene.elements.filter((element) => hasConsistentOwnership(element, byId)),
+  };
+}
+
+function isNavigationSurface(element) {
+  return element?.type === "Container"
+    || element?.type === "TransientSurface"
+    || element?.type === "Editable";
+}
+
+function navigationSurfaceSignature(element, byId) {
+  const parent = typeof element?.parentId === "string" ? byId.get(element.parentId) : null;
+  return JSON.stringify([
+    String(element?.type ?? ""),
+    normalizeText(element?.role),
+    normalizeText(element?.semanticKey),
+    normalizeText(elementLabel(element)),
+    parent ? navigationAnchorSignature(parent, byId) : null,
+  ]);
+}
+
+function navigationAnchorSignature(element, byId) {
+  const parent = typeof element?.parentId === "string" ? byId.get(element.parentId) : null;
+  return JSON.stringify([
+    String(element?.type ?? ""),
+    normalizeText(element?.role),
+    normalizeText(element?.semanticKey),
+    normalizeText(elementLabel(element)),
+    parent ? normalizeText(parent.role) : null,
+  ]);
+}
+
+function sceneElementMatchesCandidate(element, byId, candidate) {
+  if (String(element?.role ?? "unknown") !== candidate.role) return false;
+  const parentRole = typeof element?.parentId === "string" ? byId.get(element.parentId)?.role ?? null : null;
+  if (parentRole !== candidate.parentRole) return false;
+  if (candidate.semanticKey) return element?.semanticKey === candidate.semanticKey;
+  return elementLabel(element) === candidate.label;
+}
+
+function navigationStateAdvanced(beforeState, afterState) {
+  const affirmative = new Set([true, 1, "true", "active", "current", "expanded", "open", "pressed", "selected"]);
+  for (const key of ["active", "current", "expanded", "open", "pressed", "selected"]) {
+    const before = beforeState?.[key];
+    const after = afterState?.[key];
+    if (before !== after && affirmative.has(after)) return true;
+  }
+  return false;
+}
+
+function hasConsistentActionableDescendant(surface, elements, byId) {
+  return elements.some((element) => (
+    element?.actionable === true
+    && element.id !== surface.id
+    && isDescendantOf(element, surface.id, byId)
+  ));
+}
+
+function isDescendantOf(element, ancestorId, byId) {
+  const visited = new Set();
+  let parentId = element?.parentId;
+  while (typeof parentId === "string" && !visited.has(parentId)) {
+    if (parentId === ancestorId) return true;
+    visited.add(parentId);
+    parentId = byId.get(parentId)?.parentId;
+  }
+  return false;
+}
+
+function isFreshSceneAfter(afterScene, beforeScene) {
+  return Number.isInteger(beforeScene?.observationVersion)
+    && Number.isInteger(afterScene?.observationVersion)
+    && afterScene.observationVersion > beforeScene.observationVersion;
+}
+
 function applicationCandidates(applications) {
   return applications
     .filter((application) => typeof application?.applicationToken === "string" && typeof application?.name === "string")
@@ -826,13 +1187,26 @@ function publicCandidates(candidates = []) {
   }));
 }
 
-function publicAction(candidate, outcome) {
+function publicAction(candidate, outcome, receipt = null) {
   return {
     label: candidate.label,
     role: candidate.role,
     parentRole: candidate.parentRole,
     action: candidate.action,
     outcome,
+    ...(receipt ? { receipt } : {}),
+  };
+}
+
+function navigationReceipt(providerOutcome, outcome, verification) {
+  return {
+    providerOutcome,
+    outcome,
+    postconditionVerified: verification?.verified === true,
+    verificationMethod: verification?.method ?? "host-scene-navigation-transition",
+    evidence: Array.isArray(verification?.evidence) ? [...verification.evidence] : [],
+    beforeObservationVersion: verification?.beforeObservationVersion ?? null,
+    afterObservationVersion: verification?.afterObservationVersion ?? null,
   };
 }
 

@@ -19,12 +19,18 @@ propagate MCP cancellation. `computer.task` reacquires and releases on every
 bounded semantic action, so Level 7 no longer depends on the hidden lifecycle
 tools being projected to the Agent.
 
-The initial natural-prompt generic smoke resolved a headless child process to
-its same-package owner window, proved the requested product surface from the
-root Scene, and selected the returned profile-menu candidate without shell or
-coordinate fallback. The click receipt was `indeterminate`, so the Host closed
-the task and did not replay it. This is a safety-contract pass but not a Level 7
-acceptance pass; navigation receipt verification remains required.
+The natural-prompt generic smoke resolves a headless child process to its
+same-package owner window, proves the requested product surface from the root
+Scene, and selects the returned profile-menu candidate without shell or
+coordinate fallback. The Host now performs one forced related-surface capture
+when the first post-click Scene is inconclusive and returns a public navigation
+receipt containing the provider outcome, Host outcome, evidence class, and
+before/after observation versions. In the latest real run, the receipt remained
+`indeterminate` across observation versions 2 to 5 with no qualifying evidence,
+so the Host closed the task, did not replay the click, and released control.
+This is a safety-contract pass but not a Level 7 acceptance pass; the remaining
+blocker is proving that the generic navigation click was delivered and changed
+the owned Scene.
 
 ## Gate contract
 

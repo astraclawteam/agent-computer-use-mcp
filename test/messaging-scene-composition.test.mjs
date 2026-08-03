@@ -1440,6 +1440,112 @@ test("the production screenshot path merges a proven related search surface into
   assert.equal(result.coordinate.windowId, "77");
 });
 
+test("the production screenshot path merges a proven related navigation surface from its click anchor", async (t) => {
+  const relatedPath = "C:\\owned\\navigation.related-1.png";
+  const router = new ComputerUseProviderRouter({
+    ocrSession: {
+      async start() {},
+      async close() {},
+      async recognize({ imagePath }) {
+        assert.equal(imagePath, relatedPath);
+        return {
+          status: "ok",
+          items: [{
+            text: "Settings",
+            confidence: 0.99,
+            bounds: { x: 52, y: 112, width: 78, height: 22 },
+          }],
+        };
+      },
+    },
+    messagingVisualProposalOperation: async ({ imagePath }) => (
+      imagePath === relatedPath
+        ? [{
+            proposalId: "settings-row",
+            confidence: 0.96,
+            bounds: { x: 24, y: 100, width: 190, height: 44 },
+          }]
+        : []
+    ),
+  });
+  t.after(() => router.close());
+  router.activeController = {
+    controllerId: "controller-1",
+    tier: "full",
+    window: { id: "42", windowId: "42", title: "Fixture", bounds: { ...bounds, x: 452, y: 100 } },
+    expiresAtMs: Date.now() + 60_000,
+  };
+  router.readOwnedArtifact = async () => Buffer.from("fixture-pixels");
+  router.ocrRegionOperation = async () => ({
+    observation: { source: "ocr", elements: [] },
+  });
+
+  const observation = await router.runOperation((ticket) => (
+    router.prioritizeLocalScreenshotPerception({
+      observationId: "shot-related-navigation",
+      artifact: { path: "C:\\owned\\shot.png" },
+      capture: {
+        hwnd: "42",
+        x: 452,
+        y: 100,
+        width: bounds.width,
+        height: bounds.height,
+        relatedSurfaces: [{
+          status: "ok",
+          hwnd: "77",
+          ownerWindowId: "42",
+          title: "",
+          screenshotId: "screenshot-navigation-1",
+          x: 452,
+          y: 470,
+          width: 240,
+          height: 180,
+          path: relatedPath,
+          window: { id: "77", pid: 1234, bounds: { x: 452, y: 470, width: 240, height: 180 } },
+          surfaceProvenance: {
+            relationshipVerified: true,
+            relationship: "owned-window",
+            requestedWindowId: "42",
+            relatedWindowId: "77",
+            requestedProcessId: 1234,
+            relatedProcessId: 1234,
+            ownerWindowId: "42",
+          },
+          coordinateScale: {
+            actionTransform: { scaleX: 1, scaleY: 1, offsetX: 0, offsetY: 370 },
+            nativeToObservation: { scaleX: 1, scaleY: 1 },
+          },
+        }],
+      },
+      coordinateSpace: "window-local",
+      coordinateBounds: bounds,
+      window: { id: "42", bounds: { ...bounds, x: 452, y: 100 } },
+      includeUserOverlay: false,
+    }, {
+      relatedSurfaceAnchor: {
+        role: "button",
+        bounds: { x: 24, y: 650, width: 42, height: 42 },
+      },
+    }, ticket)
+  ));
+  const actionObservation = router.createActionObservation(observation);
+  const main = actionObservation.scene.elements.find((element) => (
+    element.type === "Window" && element.role === "main-window"
+  ));
+  const owned = actionObservation.scene.elements.find((element) => element.role === "owned-auxiliary-window");
+  const surfaceElement = actionObservation.scene.elements.find((element) => element.role === "navigation-surface");
+  const result = actionObservation.scene.elements.find((element) => element.role === "navigation-item");
+
+  assert.equal(owned.parentId, main.id);
+  assert.equal(surfaceElement.parentId, owned.id);
+  assert.equal(result.parentId, surfaceElement.id);
+  assert.equal(result.name, "Settings");
+  assert.equal(result.semanticKey, "navigation:settings");
+  assert.deepEqual(result.actions, ["click"]);
+  assert.equal(result.coordinate.screenshotId, "screenshot-navigation-1");
+  assert.equal(result.coordinate.windowId, "77");
+});
+
 function structuralProposal(role, proposalBounds) {
   return {
     proposalId: `visual-${role}`,

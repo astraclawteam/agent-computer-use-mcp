@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { writeFile } from "node:fs/promises";
 import { test } from "node:test";
 
 import {
@@ -1474,6 +1475,85 @@ test("screenshot requests stay on the low-latency semantic path when actionable 
   assert.equal(captured.perceptionRouting.avoidedVision, true);
   assert.equal(captured.perceptionRouting.actionableElementCount, 4);
   assert.deepEqual(calls, ["capture"]);
+});
+
+test("forced navigation receipt observations bypass sufficient semantic coverage and preserve semantic elements", async (t) => {
+  const calls = [];
+  const semanticElements = ["Profile", "Settings", "Usage", "Help"].map((name, index) => ({
+    elementToken: `button-${index}`,
+    role: "button",
+    name,
+    actions: ["click"],
+    source: "cua-driver",
+  }));
+  const router = new ComputerUseProviderRouter({
+    driver: {
+      async capture() {
+        calls.push("capture");
+        return {
+          observationId: "semantic-sufficient",
+          source: "cua-driver",
+          mode: "semantic",
+          elements: semanticElements,
+          includeUserOverlay: false,
+        };
+      },
+      async captureScreenshot(args) {
+        calls.push("captureScreenshot");
+        await writeFile(args.outputPath, Buffer.from(
+          "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M/wHwAF/gL+Xh9GAAAAAElFTkSuQmCC",
+          "base64",
+        ));
+        return {
+          status: "ok",
+          source: "cua-driver-window-state",
+          title: "Fixture",
+          path: args.outputPath,
+          method: "cua-driver-get_window_state",
+          hwnd: 42,
+          x: 10,
+          y: 20,
+          width: 640,
+          height: 480,
+          window: {
+            id: 42,
+            title: "Fixture",
+            pid: 100,
+            bounds: { x: 10, y: 20, width: 640, height: 480 },
+          },
+        };
+      },
+    },
+  });
+  t.after(() => router.close());
+  router.activeController = {
+    controllerId: "controller-1",
+    tier: "full",
+    window: {
+      id: 42,
+      windowId: 42,
+      title: "Fixture",
+      pid: 100,
+      bounds: { x: 10, y: 20, width: 640, height: 480 },
+    },
+    expiresAt: new Date(Date.now() + 10_000).toISOString(),
+    expiresAtMs: Date.now() + 10_000,
+  };
+
+  const captured = await router.capture({
+    mode: "screenshot",
+    forceScreenshotSurfaceCapture: true,
+    includeRelatedSurfaces: true,
+    relatedSurfaceAnchor: {
+      role: "navigation-item",
+      bounds: { x: 500, y: 20, width: 80, height: 40 },
+    },
+  });
+
+  assert.equal(captured.requestedMode, undefined);
+  assert.equal(captured.source, "cua-driver-window-state");
+  assert.deepEqual(captured.elements, semanticElements);
+  assert.deepEqual(calls, ["capture", "captureScreenshot"]);
 });
 
 test("provider router keeps action observations fresh for one real Agent reasoning turn", async (t) => {
