@@ -1149,7 +1149,7 @@ const actTool = {
 const messagingTool = {
   name: "computer.message",
   title: "Run Deterministic Messaging Workflow",
-  description: "Send one exact message through the Host-owned deterministic messaging state machine when the existing main application window is already foreground. This is the only Agent-facing path authorized to mutate a messaging interface: the Host owns application entry conditions, search, coordinates, title verification, input, send verification, cancellation, and release. Supply semantic goal slots only; never use computer.act for messaging UI.",
+  description: "Send one exact message through the Host-owned deterministic messaging state machine. The Host restores the selected running application's main window, and returns opaque application candidates when the semantic application name is not an exact inventory match. This is the only Agent-facing path authorized to mutate a messaging interface: the Host owns application selection, search, coordinates, title verification, input, send verification, cancellation, and release. Supply semantic goal slots only; never use computer.act for messaging UI.",
   _meta: {
     ...semanticCapabilityMeta({
       summary: "Complete one role-based desktop messaging workflow while the Host retains every action target and lifecycle decision.",
@@ -1159,13 +1159,16 @@ const messagingTool = {
       ],
       prerequisites: [
         "The user authorized the destination and exact message content.",
-        "The existing main application window is already foreground.",
+        "The messaging application is running or recoverable in the Host application inventory.",
       ],
       effects: ["May send one message after every deterministic postcondition succeeds."],
       modalities: ["local desktop messaging GUI", "Host Scene", "deterministic workflow"],
       constraints: ["Never replays an indeterminate action and always releases control on every terminal path."],
     }),
-    "xiaozhiclaw/requestTimeoutMs": 65_000,
+    // Transport cleanup must outlive the 60-second acceptance SLA so the Host
+    // can still return a canonical receipt and confirmed release on a slow or
+    // cold run. This does not relax the separately measured workflow SLA.
+    "xiaozhiclaw/requestTimeoutMs": 120_000,
   },
   annotations: { phase: "6.0", destructiveHint: true },
   inputSchema: {
@@ -1176,7 +1179,7 @@ const messagingTool = {
         type: "string",
         minLength: 1,
         maxLength: 256,
-        description: "Exact current application name supplied by the user goal; the Host resolves it without guessing a window.",
+        description: "Semantic application name from the user goal. The Host resolves an exact inventory match or returns opaque candidates for bounded selection without guessing a window.",
       },
       query: {
         type: "string",

@@ -23,16 +23,16 @@ relationship, evidence consistency, action availability, and observed state.
 
 | Step | Preconditions | Postconditions | Default timeout | Only allowed next step |
 | --- | --- | --- | ---: | --- |
-| `restore-main-window` | One consistent `Window/main-window`; if not foreground it allows `activate_window`. | The same logical window is foreground in a newer Scene, or was already foreground. | 5 s | `focus-search` |
-| `focus-search` | One clickable `Editable/search` belongs to the main window. | The search editable owns focus in a newer Scene. | 5 s | `enter-query` |
-| `enter-query` | The focused search editable allows `type_text`. | Its value exactly equals the requested query in a newer Scene. | 5 s | `wait-results-stable` |
-| `wait-results-stable` | A `TransientSurface/search-results` belongs to the main window. | The same owned actionable candidate identities occur in two consecutive Scenes. | 5 s | `select-result` |
-| `select-result` | Exactly one stable result has an exact normalized semantic label match. | The exact owned result surface is natively dismissed, or a conversation container is visible in a newer Scene; the next step still must verify the conversation title. | 5 s | `verify-conversation-title` |
-| `verify-conversation-title` | One title belongs to that conversation container. | Its semantic identity, or label when no semantic identity exists, matches the selected result. | 5 s | `focus-message-editor` |
-| `focus-message-editor` | One clickable message editor belongs to the conversation. | The editor owns focus in a newer Scene. | 5 s | `enter-message` |
-| `enter-message` | The focused editor allows `type_text`. | Its value exactly equals the requested message in a newer Scene. | 5 s | `send` |
-| `send` | The editor still has the exact draft; one clickable send item belongs to the conversation. | The action is committed, or one fresh post-action Scene proves both a cleared editor and a new exact self-authored bubble. An indeterminate click is never replayed. | 5 s | `verify-new-bubble` |
-| `verify-new-bubble` | One transcript belongs to the conversation. | A fresh self-authored exact-value bubble exists under that transcript. | 5 s | `release` |
+| `restore-main-window` | One consistent `Window/main-window`; if not foreground it allows `activate_window`. | The same logical window is foreground in a newer Scene, or was already foreground. | 15 s | `focus-search` |
+| `focus-search` | One clickable `Editable/search` belongs to the main window. | The search editable owns focus in a newer Scene. | 15 s | `enter-query` |
+| `enter-query` | The focused search editable allows `type_text`. | Its value exactly equals the requested query in a newer Scene. | 15 s | `wait-results-stable` |
+| `wait-results-stable` | A `TransientSurface/search-results` belongs to the main window. | The same owned actionable candidate identities occur in two consecutive Scenes. | 15 s | `select-result` |
+| `select-result` | Exactly one stable result has an exact normalized semantic label match. | The exact owned result surface is natively dismissed, or a conversation container is visible in a newer Scene; the next step still must verify the conversation title. | 15 s | `verify-conversation-title` |
+| `verify-conversation-title` | One title belongs to that conversation container. | Its semantic identity, or label when no semantic identity exists, matches the selected result. | 15 s | `focus-message-editor` |
+| `focus-message-editor` | One clickable message editor belongs to the conversation. | The editor owns focus in a newer Scene. | 15 s | `enter-message` |
+| `enter-message` | The focused editor allows `type_text`. | Its value exactly equals the requested message in a newer Scene. | 15 s | `send` |
+| `send` | The editor still has the exact draft; one clickable send item belongs to the conversation. | The action is committed, or one fresh post-action Scene proves both a cleared editor and a new exact self-authored bubble. An indeterminate click is never replayed. | 15 s | `verify-new-bubble` |
+| `verify-new-bubble` | One transcript belongs to the conversation. | A fresh self-authored exact-value bubble exists under that transcript. | 15 s | `release` |
 | `release` | A lease is held, or terminal cleanup is required. | Host returns a committed release receipt. | 2 s | none |
 
 The code exports this table as `DETERMINISTIC_MESSAGING_STEPS`; tests compare

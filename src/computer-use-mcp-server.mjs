@@ -290,29 +290,37 @@ export async function runDeterministicMessagingTool(router, args = {}, requestCo
       message,
       now: startedAt,
     });
-    try {
-      access = await acquireComputer(router, {
-        applicationName,
-        tier: "full",
-        agentId: requestContext?.agentId ?? "deterministic-messaging-host",
-        reason: "Host-owned deterministic messaging workflow",
-      }, requestContext, {
-        activationPolicy: "foreground-only",
-      });
-    } catch (error) {
-      if (error?.code === "window.application_not_foreground") {
-        return messagingToolResult({
-          outcome: "not-applied",
-          released: true,
-          startedAt,
-          phase: "preflight",
-          error: {
-            code: "workflow.initial_foreground_required",
-            message: "The main application window was not foreground at workflow start.",
-          },
+    const applicationSelection = pendingSelection?.kind === "application"
+      ? resolveSelectedMessagingApplication(args, pendingSelection)
+      : await createMessagingApplicationSelection({
+          router,
+          scopeKey,
+          applicationName,
+          query,
+          message,
         });
-      }
-      throw error;
+    if (applicationSelection.selection) {
+      return messagingToolResult({
+        outcome: "not-applied",
+        released: true,
+        startedAt,
+        phase: "selection-required",
+        selectionToken: applicationSelection.selection.selectionToken,
+        candidates: applicationSelection.selection.candidates,
+        error: {
+          code: "llm.application_selection_required",
+          message: "Select one opaque Host application candidate and call computer.message again with selectionToken and candidateId.",
+        },
+      });
+    }
+    access = await acquireComputer(router, {
+      applicationToken: applicationSelection.applicationToken,
+      tier: "full",
+      agentId: requestContext?.agentId ?? "deterministic-messaging-host",
+      reason: "Host-owned deterministic messaging workflow",
+    }, requestContext);
+    if (pendingSelection?.kind === "application") {
+      pendingMessagingSelections.delete(args.selectionToken);
     }
     if (access?.status !== "granted" && access?.status !== "reused") {
       return messagingToolResult({
@@ -326,24 +334,9 @@ export async function runDeterministicMessagingTool(router, args = {}, requestCo
         },
       });
     }
-    if (!initialMainWindowIsForeground(access.initialObservation?.scene)) {
-      preMachineReleaseAttempted = true;
-      await router.cancel({ reason: "workflow.initial_foreground_required", requestContext });
-      return messagingToolResult({
-        outcome: "not-applied",
-        released: true,
-        startedAt,
-        phase: "preflight",
-        error: {
-          code: "workflow.initial_foreground_required",
-          message: "The main application window was not foreground at workflow start.",
-        },
-      });
-    }
-
     const decisionPort = createMessagingDecisionPort({
       args,
-      pendingSelection,
+      pendingSelection: pendingSelection?.kind === "conversation" ? pendingSelection : null,
       scopeKey,
       applicationName,
       query,
@@ -472,6 +465,7 @@ function createMessagingDecisionPort({ args, pendingSelection, scopeKey, applica
         evidenceSources: Object.freeze([...candidate.evidenceSources]),
       }));
       pendingMessagingSelections.set(selectionToken, Object.freeze({
+        kind: "conversation",
         scopeKey,
         applicationName,
         query,
@@ -490,6 +484,58 @@ function createMessagingDecisionPort({ args, pendingSelection, scopeKey, applica
       return { decision: "report" };
     },
   };
+}
+
+async function createMessagingApplicationSelection({ router, scopeKey, applicationName, query, message }) {
+  const discovery = await freshAcquisitionTargets(router);
+  const normalizedApplicationName = normalizeMessagingText(applicationName);
+  const exact = discovery.applications.filter((application) => (
+    normalizeMessagingText(application?.name) === normalizedApplicationName
+  ));
+  if (exact.length === 1) {
+    return { applicationToken: exact[0].applicationToken };
+  }
+  if (discovery.applications.length === 0) {
+    throw boundedMessagingError(
+      "workflow.application_not_found",
+      "The Host did not discover a running or recoverable application candidate.",
+    );
+  }
+  const selectionToken = randomUUID();
+  const candidates = discovery.applications.map((application, index) => Object.freeze({
+    candidateId: `application:${index + 1}`,
+    label: application.name,
+    role: "application",
+    parentRole: "desktop",
+    evidenceSources: Object.freeze(["host.application-inventory"]),
+  }));
+  const privateCandidates = candidates.map((candidate, index) => Object.freeze({
+    ...candidate,
+    applicationToken: discovery.applications[index].applicationToken,
+  }));
+  pendingMessagingSelections.set(selectionToken, Object.freeze({
+    kind: "application",
+    scopeKey,
+    applicationName,
+    query,
+    message,
+    expiresAt: Date.now() + PENDING_MESSAGING_SELECTION_TTL_MS,
+    candidates: Object.freeze(privateCandidates),
+  }));
+  return {
+    selection: Object.freeze({ selectionToken, candidates: Object.freeze(candidates) }),
+  };
+}
+
+function resolveSelectedMessagingApplication(args, pendingSelection) {
+  const selected = pendingSelection.candidates.find((candidate) => candidate.candidateId === args.candidateId);
+  if (!selected?.applicationToken) {
+    throw boundedMessagingError(
+      "llm.application_selection_invalid",
+      "The selected Host application candidate is invalid or expired.",
+    );
+  }
+  return { applicationToken: selected.applicationToken };
 }
 
 function resolvePendingMessagingSelection({ args, scopeKey, applicationName, query, message, now }) {
@@ -522,13 +568,6 @@ function messagingToolResult({ outcome, released, startedAt, phase, history, sel
     ...(Array.isArray(candidates) ? { candidates } : {}),
     ...(error ? { error } : {}),
   };
-}
-
-function initialMainWindowIsForeground(scene) {
-  return Array.isArray(scene?.elements) && scene.elements.some((element) => (
-    element.type === "Window" && element.role === "main-window"
-    && element.evidenceConsistency === "consistent" && element.state?.foreground === true
-  ));
 }
 
 function requiredMessagingInput(value, field, maxLength) {

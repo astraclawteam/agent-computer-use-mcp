@@ -3,9 +3,18 @@
 Status: implemented in the real MCP composition root on `main`. The
 Agent-facing `computer.message` tool accepts only the semantic application,
 query, and message slots, then runs the Phase 4 state machine inside the Host.
-Exact matches complete without another model decision; ambiguous candidates
-are returned only as opaque IDs for a bounded follow-up selection. The module
-does not own model credentials, provider routing, or Agent lifecycle.
+Exact application and conversation matches complete without another model
+decision. A non-exact application inventory match or ambiguous conversation
+is returned only as opaque IDs for a bounded follow-up selection. The Host
+restores the selected running application's main window before the fixed
+workflow continues. The module does not own model credentials, provider
+routing, or Agent lifecycle.
+
+The Host request timeout is intentionally longer than the 60-second acceptance
+SLA. The SLA remains a measured qualification result; the transport window
+exists so a cold or slow run can still return one canonical terminal receipt
+and a confirmed release instead of being truncated into an unstructured MCP
+timeout.
 
 ## Allowed model authority
 

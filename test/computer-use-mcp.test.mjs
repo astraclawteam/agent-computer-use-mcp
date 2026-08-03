@@ -2488,7 +2488,7 @@ test("agent-computer-use-mcp freezes the local MCP tool contract", () => {
   const message = COMPUTER_USE_MCP_TOOLS.find((tool) => tool.name === "computer.message");
   assert.match(message.description, /only Agent-facing path authorized/u);
   assert.deepEqual(message.inputSchema.required, ["applicationName", "query", "message"]);
-  assert.equal(message._meta["xiaozhiclaw/requestTimeoutMs"], 65_000);
+  assert.equal(message._meta["xiaozhiclaw/requestTimeoutMs"], 120_000);
 
   const health = COMPUTER_USE_MCP_TOOLS.find((tool) => tool.name === "computer.health");
   assert.equal(health.annotations.phase, "0.9");

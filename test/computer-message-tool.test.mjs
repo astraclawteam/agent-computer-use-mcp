@@ -20,7 +20,8 @@ test("computer.message owns the exact messaging sequence and controller lifecycl
   assert.equal(result.outcome, "committed");
   assert.equal(result.released, true);
   assert.equal(router.requestAccessCalls.length, 1);
-  assert.equal(router.requestAccessCalls[0].activationPolicy, "foreground-only");
+  assert.equal(router.requestAccessCalls[0].applicationToken, "application:fixture");
+  assert.equal(router.requestAccessCalls[0].activationPolicy, undefined);
   assert.deepEqual(result.history.map((entry) => entry.step), [
     "restore-main-window",
     "focus-search",
@@ -61,7 +62,7 @@ test("computer.message requests one Host-owned send-role refresh when the post-e
   assert.equal(router.actions.filter((action) => action.elementId.endsWith(":send")).length, 1);
 });
 
-test("computer.message fails closed before actions when foreground is required", async () => {
+test("computer.message restores a non-foreground main window inside the deterministic workflow", async () => {
   const router = fixtureRouter({ initialForeground: false });
   const result = await runDeterministicMessagingTool(router, {
     applicationName: APP,
@@ -69,11 +70,10 @@ test("computer.message fails closed before actions when foreground is required",
     message: MESSAGE,
   });
 
-  assert.equal(result.outcome, "not-applied");
-  assert.equal(result.phase, "preflight");
-  assert.equal(result.error.code, "workflow.initial_foreground_required");
+  assert.equal(result.outcome, "committed");
+  assert.equal(result.phase, "complete");
   assert.equal(result.released, true);
-  assert.equal(router.actions.length, 0);
+  assert.equal(router.actions[0].kind, "activate_window");
   assert.equal(router.cancelCalls, 1);
 
   const envelope = await callTool(fixtureRouter({ initialForeground: false }), "computer.message", {
@@ -86,45 +86,41 @@ test("computer.message fails closed before actions when foreground is required",
   assert.equal(validate(envelope.structuredContent), true, JSON.stringify(validate.errors));
 });
 
-test("computer.message rejects a non-foreground application before capture or control", async () => {
-  let captureCalls = 0;
-  let cancelCalls = 0;
-  let requestAccessArgs;
-  const result = await runDeterministicMessagingTool({
-    async listState() {
-      return {
-        foregroundWindow: null,
-        windows: [],
-        applications: [{ applicationToken: "application:fixture", name: APP }],
-      };
-    },
-    async requestAccess(args) {
-      requestAccessArgs = args;
-      throw Object.assign(new Error("The application is not foreground."), {
-        code: "window.application_not_foreground",
-      });
-    },
-    async capture() {
-      captureCalls += 1;
-      throw new Error("capture must not run before foreground preflight passes");
-    },
-    async cancel() {
-      cancelCalls += 1;
-      return { status: "cancelled" };
-    },
-  }, {
+test("computer.message returns Host application candidates and accepts one opaque semantic selection", async () => {
+  const router = fixtureRouter({ discoveredApplicationName: "Weixin", initialForeground: false });
+  const first = await runDeterministicMessagingTool(router, {
     applicationName: APP,
     query: QUERY,
     message: MESSAGE,
   });
 
-  assert.equal(requestAccessArgs.activationPolicy, "foreground-only");
-  assert.equal(result.outcome, "not-applied");
-  assert.equal(result.phase, "preflight");
-  assert.equal(result.error.code, "workflow.initial_foreground_required");
-  assert.equal(result.released, true);
-  assert.equal(captureCalls, 0);
-  assert.equal(cancelCalls, 0);
+  assert.equal(first.outcome, "not-applied");
+  assert.equal(first.phase, "selection-required");
+  assert.equal(first.error.code, "llm.application_selection_required");
+  assert.equal(first.released, true);
+  assert.deepEqual(first.candidates, [{
+    candidateId: "application:1",
+    label: "Weixin",
+    role: "application",
+    parentRole: "desktop",
+    evidenceSources: ["host.application-inventory"],
+  }]);
+  assert.equal(router.requestAccessCalls.length, 0);
+
+  const second = await runDeterministicMessagingTool(router, {
+    applicationName: APP,
+    query: QUERY,
+    message: MESSAGE,
+    selectionToken: first.selectionToken,
+    candidateId: first.candidates[0].candidateId,
+  });
+
+  assert.equal(second.outcome, "committed");
+  assert.equal(second.released, true);
+  assert.equal(router.requestAccessCalls.length, 1);
+  assert.equal(router.requestAccessCalls[0].applicationToken, "application:fixture");
+  assert.equal(router.requestAccessCalls[0].activationPolicy, undefined);
+  assert.equal(router.actions[0].kind, "activate_window");
 });
 
 test("computer.message exposes semantic goal slots but no lifecycle policy input", () => {
@@ -161,6 +157,7 @@ function fixtureRouter({
   hangFirstAction = false,
   onAction = () => {},
   sendRequiresIntent = false,
+  discoveredApplicationName = APP,
 } = {}) {
   let version = 0;
   let foreground = initialForeground;
@@ -190,7 +187,7 @@ function fixtureRouter({
       return {
         foregroundWindow: { id: "window:fixture", title: APP },
         windows: [{ id: "window:fixture", title: APP }],
-        applications: [{ applicationToken: "application:fixture", name: APP }],
+        applications: [{ applicationToken: "application:fixture", name: discoveredApplicationName }],
       };
     },
     async requestAccess(args) {
