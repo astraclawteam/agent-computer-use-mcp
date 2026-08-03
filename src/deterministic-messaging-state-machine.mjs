@@ -5,26 +5,31 @@ const RELEASE_TIMEOUT_MS = 2_000;
 const FAILURE_DECISION_TIMEOUT_MS = 2_000;
 const FAILURE_REOBSERVE_TIMEOUT_MS = 2_000;
 const ACTION_OUTCOMES = new Set(["committed", "not-applied", "indeterminate"]);
-const MUTATING_STEPS = new Set([
-  "restore-main-window",
-  "focus-search",
-  "enter-query",
-  "select-result",
-  "focus-message-editor",
-  "enter-message",
-  "send",
-]);
 
 const STEP_DEFINITIONS = [
   {
     id: "restore-main-window",
     preconditions: ["one consistent main Window is present and can be activated"],
     postconditions: ["that Window is the foreground window in a newer Scene"],
+    allowedNext: ["resolve-target"],
+  },
+  {
+    id: "resolve-target",
+    preconditions: ["the main Window has one authoritative current Scene"],
+    postconditions: ["the Host chooses current target, one exact visible candidate, or discovery"],
+    allowedNext: ["verify-conversation-title", "select-visible-target", "focus-search"],
+  },
+  {
+    id: "select-visible-target",
+    preconditions: ["one exact actionable target-candidate belongs to the target-list Container"],
+    postconditions: ["the selected target identity becomes the active conversation title in a newer Scene"],
+    allowedNext: ["verify-conversation-title"],
   },
   {
     id: "focus-search",
     preconditions: ["one actionable search Editable belongs to the main Window"],
     postconditions: ["that Editable owns the current focus in a newer Scene"],
+    allowedNext: ["enter-query"],
   },
   {
     id: "enter-query",
@@ -42,6 +47,7 @@ const STEP_DEFINITIONS = [
     postconditions: [
       "the exact owned result surface is natively dismissed or a conversation Container is visible in a newer Scene",
     ],
+    allowedNext: ["verify-conversation-title"],
   },
   {
     id: "verify-conversation-title",
@@ -83,7 +89,8 @@ export const DETERMINISTIC_MESSAGING_STEPS = Object.freeze(
     postconditions: Object.freeze([...step.postconditions]),
     timeoutMs: step.timeoutMs ?? DEFAULT_TIMEOUT_MS,
     allowedNext: Object.freeze(
-      index + 1 < STEP_DEFINITIONS.length ? [STEP_DEFINITIONS[index + 1].id] : [],
+      step.allowedNext
+        ?? (index + 1 < STEP_DEFINITIONS.length ? [STEP_DEFINITIONS[index + 1].id] : []),
     ),
   })),
 );
@@ -201,8 +208,20 @@ export class DeterministicMessagingStateMachine {
     this.#status = "running";
 
     try {
-      for (const step of DETERMINISTIC_MESSAGING_STEPS.slice(0, -1)) {
-        await this.#runStep(step);
+      let stepId = "restore-main-window";
+      while (stepId !== "release") {
+        const step = STEP_BY_ID.get(stepId);
+        const selectedNext = await this.#runStep(step);
+        const next = selectedNext ?? (step.allowedNext.length === 1 ? step.allowedNext[0] : null);
+        if (next === null || !step.allowedNext.includes(next)) {
+          throw workflowError({
+            code: "workflow.invalid_transition",
+            message: `No deterministic transition exists from ${step.id}.`,
+            step: step.id,
+            outcome: "not-applied",
+          });
+        }
+        stepId = next;
       }
       await this.#release({ cleanup: false, reason: "completed" });
       this.#status = "committed";
@@ -243,9 +262,10 @@ export class DeterministicMessagingStateMachine {
   async #runStep(step) {
     this.#currentStep = step.id;
     try {
-      await this.#withStepTimeout(step, (signal) => this.#dispatch(step.id, signal));
+      const selectedNext = await this.#withStepTimeout(step, (signal) => this.#dispatch(step.id, signal));
       this.#history.push({ step: step.id, status: "committed" });
       this.#inFlightMutation = false;
+      return selectedNext;
     } catch (caught) {
       const error = asWorkflowError(caught, {
         step: step.id,
@@ -266,6 +286,8 @@ export class DeterministicMessagingStateMachine {
 
   async #dispatch(step, signal) {
     if (step === "restore-main-window") return this.#restoreMainWindow(signal);
+    if (step === "resolve-target") return this.#resolveTarget(signal);
+    if (step === "select-visible-target") return this.#selectVisibleTarget(signal);
     if (step === "focus-search") return this.#focusSearch(signal);
     if (step === "enter-query") return this.#enterQuery(signal);
     if (step === "wait-results-stable") return this.#waitResultsStable(signal);
@@ -304,6 +326,98 @@ export class DeterministicMessagingStateMachine {
       afterVersion: before.observationVersion,
       predicate: (scene) => findElements(scene, { type: "Window", role: "main-window" })
         .some((element) => element.state?.foreground === true),
+    });
+    this.#inFlightMutation = false;
+  }
+
+  async #resolveTarget(signal) {
+    const scene = await this.#observe("resolve-target", signal);
+    const main = requireUniqueElement(scene, {
+      type: "Window",
+      role: "main-window",
+      step: "resolve-target",
+    });
+    const currentTitle = conversationTitle(scene);
+    if (currentTitle && normalizeText(elementText(currentTitle)) === normalizeText(this.#goal.query)) {
+      this.#selectedIdentity = currentTitle.semanticKey ?? null;
+      this.#selectedLabel = elementText(currentTitle);
+      return "verify-conversation-title";
+    }
+
+    const targetList = findUniqueElement(scene, {
+      type: "Container",
+      role: "target-list",
+      ownerId: main.id,
+    });
+    const matching = targetList
+      ? findElements(scene, {
+          type: "ActionableItem",
+          role: "target-candidate",
+          action: "click",
+          ownerId: targetList.id,
+        }).filter((candidate) => (
+          normalizeText(elementText(candidate)) === normalizeText(this.#goal.query)
+        ))
+      : [];
+    if (matching.length === 1) {
+      this.#selectedIdentity = matching[0].semanticKey ?? null;
+      this.#selectedLabel = elementText(matching[0]);
+      return "select-visible-target";
+    }
+    this.#selectedIdentity = null;
+    this.#selectedLabel = null;
+    return "focus-search";
+  }
+
+  async #selectVisibleTarget(signal) {
+    const before = await this.#observe("select-visible-target", signal, {
+      requiredRole: "target-candidate",
+      requiredSemanticKey: this.#selectedIdentity,
+    });
+    const main = requireUniqueElement(before, {
+      type: "Window",
+      role: "main-window",
+      step: "select-visible-target",
+    });
+    const targetList = requireUniqueElement(before, {
+      type: "Container",
+      role: "target-list",
+      ownerId: main.id,
+      step: "select-visible-target",
+    });
+    const matching = findElements(before, {
+      type: "ActionableItem",
+      role: "target-candidate",
+      action: "click",
+      ownerId: targetList.id,
+    }).filter((candidate) => (
+      this.#selectedIdentity !== null
+        ? candidate.semanticKey === this.#selectedIdentity
+        : normalizeText(elementText(candidate)) === normalizeText(this.#selectedLabel)
+    ));
+    if (matching.length !== 1) {
+      throw preconditionError(
+        "select-visible-target",
+        `Expected one current exact visible target, observed ${matching.length}.`,
+      );
+    }
+    await this.#act("select-visible-target", {
+      kind: "click",
+      elementId: matching[0].id,
+      interactionIntent: "select-item",
+    }, signal);
+    await this.#observeUntil({
+      step: "select-visible-target",
+      signal,
+      afterVersion: before.observationVersion,
+      requiredRole: "conversation-title",
+      requiredSemanticKey: this.#selectedIdentity,
+      predicate: (scene) => {
+        const title = conversationTitle(scene);
+        if (!title) return false;
+        if (this.#selectedIdentity !== null) return title.semanticKey === this.#selectedIdentity;
+        return normalizeText(elementText(title)) === normalizeText(this.#selectedLabel);
+      },
     });
     this.#inFlightMutation = false;
   }
@@ -875,6 +989,18 @@ function requireUniqueElement(scene, query) {
 function findUniqueElement(scene, query) {
   const matches = findElements(scene, query);
   return matches.length === 1 ? matches[0] : null;
+}
+
+function conversationTitle(scene) {
+  const conversation = findUniqueElement(scene, { type: "Container", role: "conversation" });
+  if (!conversation) return null;
+  const header = findUniqueElement(scene, {
+    type: "Container",
+    role: "conversation-header",
+    ownerId: conversation.id,
+  });
+  if (!header) return null;
+  return findUniqueElement(scene, { role: "conversation-title", ownerId: header.id });
 }
 
 function findElements(scene, { type, role, action, ownerId, state }) {

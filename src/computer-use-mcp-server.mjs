@@ -618,9 +618,9 @@ function hasUniqueConsistentSceneRole(scene, role, semanticKey) {
   const matching = scene.elements.filter((element) => (
       element?.role === role
       && element.evidenceConsistency === "consistent"
+      && (typeof semanticKey !== "string" || element.semanticKey === semanticKey)
     ));
-  return matching.length === 1
-    && (typeof semanticKey !== "string" || matching[0].semanticKey === semanticKey);
+  return matching.length === 1;
 }
 
 function requiredRoleObservationCrop(scene, role) {

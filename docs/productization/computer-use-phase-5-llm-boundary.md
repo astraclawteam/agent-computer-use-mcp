@@ -50,15 +50,17 @@ therefore a semantic choice, not an action target supplied by the model.
 ## Workflow composition
 
 `computer.message` is the only Agent-facing messaging mutation path. It owns
-acquire, current Scene observation, element-targeted actions, fixed transition
-order, canonical receipts, Stop propagation, and release. Raw coordinate or
+acquire, current Scene observation, element-targeted actions, guarded transition
+selection, canonical receipts, Stop propagation, and release. Raw coordinate or
 provider-token mutations are rejected once the Host Scene is recognized as a
 messaging interface. The low-level lifecycle tools are Host-only and cannot be
 selected by the Agent. Model-facing observations omit inconsistent evidence,
 provider bindings, and chat-body bubbles.
 
 `runLlmBoundedMessagingWorkflow` performs goal understanding before creating
-the deterministic Phase 4 state machine. During `select-result`, the state
+the deterministic Phase 4 state machine. The Host first resolves an already
+active exact target or one exact visible candidate and falls back to search only
+when neither is proven. During `select-result`, the state
 machine supplies current stable candidates to the bounded decision port, maps
 the selected opaque ID back to the current `elementId`, and performs the click
 itself. Conversation title, focus, input value, send result, new-bubble

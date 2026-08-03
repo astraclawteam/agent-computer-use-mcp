@@ -5,7 +5,9 @@ Status: the known Level 1 Scene and composition-root blockers are repaired on
 the sent result and final idle state. The Host can compose the
 search editable from consistent evidence, import relationship-proven owned or
 same-process auxiliary screenshots, and merge their windows, transient
-surfaces, and independently grounded result rows into one versioned Scene. No
+surfaces, and independently grounded result rows into one versioned Scene. It
+also resolves the target through the active title, one exact visible collection
+candidate, or search in that order. No
 preflight is counted as passed or failed, no later level was started, and no
 candidate artifact was generated.
 
@@ -41,6 +43,13 @@ cases.
 The recorder rejects unknown fields so contact names, message bodies, OCR text,
 screenshots, and local paths cannot enter retained Phase 6 evidence. Local
 candidate generation remains locked until all seven levels are 10/10.
+
+The visible-candidate route is not a WeChat shortcut. The Scene exposes a
+generic `Container/target-list` and child `ActionableItem/target-candidate` only
+from consistent owned layout, visual row-surface, and OCR-label evidence. The
+deterministic Host clicks one exact match, verifies the resulting conversation
+title, and otherwise uses the existing search route. No application keyword,
+contact keyword, or coordinate enters transition selection.
 
 ## Historical Level 1 blockers
 

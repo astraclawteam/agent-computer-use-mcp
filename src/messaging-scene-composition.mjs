@@ -65,10 +65,18 @@ export async function detectMessagingVisualProposals({
     ...semanticSurfaces,
   ];
   const deduplicated = deduplicateVisualProposals(proposals);
+  const searchStructures = inferSearchVisualStructure({ pixels, proposals: deduplicated });
+  const conversationStructures = inferConversationVisualStructure({ pixels });
+  const targetStructures = inferTargetCollectionVisualStructure({
+    pixels,
+    ocrElements,
+    proposals: [...deduplicated, ...searchStructures, ...conversationStructures],
+  });
   return deduplicateVisualProposals([
     ...deduplicated,
-    ...inferSearchVisualStructure({ pixels, proposals: deduplicated }),
-    ...inferConversationVisualStructure({ pixels }),
+    ...searchStructures,
+    ...conversationStructures,
+    ...targetStructures,
   ]);
 }
 
@@ -189,6 +197,55 @@ export function inferConversationVisualStructure({ pixels } = {}) {
   }));
 }
 
+export function inferTargetCollectionVisualStructure({
+  pixels,
+  ocrElements = [],
+  proposals = [],
+} = {}) {
+  if (!pixels || !Number.isFinite(pixels.width) || !Number.isFinite(pixels.height)) return [];
+  const pane = uniqueProposal(proposals, "conversation-pane");
+  const search = uniqueProposal(proposals, "search-surface");
+  if (!pane || !search || pane.bounds.x <= search.bounds.x + search.bounds.width) return [];
+  const left = Math.max(0, Math.floor(search.bounds.x - (search.bounds.height * 0.55)));
+  const top = Math.ceil(search.bounds.y + search.bounds.height + (search.bounds.height * 0.35));
+  const right = Math.floor(pane.bounds.x);
+  const bottom = pixels.height;
+  const listBounds = { x: left, y: top, width: right - left, height: bottom - top };
+  if (!isTargetListGeometry(listBounds, pixels)) return [];
+
+  const list = {
+    proposalId: `visual-target-list:${stableBoxId(listBounds)}`,
+    role: "target-list",
+    bounds: listBounds,
+    confidence: complementConfidence([
+      finiteConfidence(pane.confidence, 0.7),
+      finiteConfidence(search.confidence, 0.7),
+    ]),
+    source: "visual-structure",
+    pixelLimitedAction: false,
+    guessedAction: false,
+  };
+  const rows = ocrElements.flatMap((element) => {
+    if (!isOcrElement(element) || !contains(listBounds, element.bounds)
+      || finiteConfidence(element.confidence, 0) < 0.8) return [];
+    const surface = detectControlSurfaceFromPixels(pixels, element.bounds);
+    if (!isTargetRowGeometry(surface, listBounds, element.bounds)) return [];
+    return [{
+      proposalId: `visual-target-row:${stableBoxId(surface)}`,
+      role: "target-row",
+      bounds: surface,
+      confidence: complementConfidence([
+        finiteConfidence(element.confidence, 0.8),
+        0.9,
+      ]),
+      source: "visual-structure",
+      pixelLimitedAction: true,
+      guessedAction: false,
+    }];
+  });
+  return [list, ...deduplicateVisualProposals(rows)];
+}
+
 export function composeMessagingSceneElements({
   coordinateBounds,
   ocrElements = [],
@@ -290,8 +347,78 @@ export function composeMessagingSceneElements({
     changedRegion,
   });
   elements.push(...conversation);
+  elements.push(...composeTargetCollectionSceneElements({ ocr, visual }));
 
   return frozenResult(elements, uniqueKnownControls(nextKnownControls));
+}
+
+function composeTargetCollectionSceneElements({ ocr, visual }) {
+  const list = uniqueProposal(visual, "target-list");
+  if (!list) return [];
+  const rows = visual
+    .filter((proposal) => proposal.source === "visual-structure"
+      && proposal.role === "target-row"
+      && contains(list.bounds, proposal.bounds))
+    .sort((left, right) => left.bounds.y - right.bounds.y || left.bounds.x - right.bounds.x);
+  if (rows.length === 0) return [];
+  const rowClaims = rows.flatMap((row) => {
+    const owned = ocr.filter((element) => (
+      contains(row.bounds, element.bounds)
+      && finiteConfidence(element.confidence, 0) >= 0.8
+      && elementText(element).trim().length > 0
+    ));
+    const labels = primaryRowLabels(owned);
+    if (labels.length === 0) return [];
+    const label = labels[0];
+    const conflict = labels.some((candidate) => candidate !== label
+      && overlapBySmallerArea(candidate.bounds, label.bounds) >= 0.8
+      && normalizeControlLabel(elementText(candidate)) !== normalizeControlLabel(elementText(label)));
+    return [{ row, label, conflict }];
+  });
+  if (rowClaims.length === 0) return [];
+
+  const listToken = `target-list:${stableBoxId(list.bounds)}`;
+  const firstClaim = rowClaims[0];
+  const elements = [{
+    hostType: "Container",
+    elementToken: listToken,
+    role: "target-list",
+    name: "Target collection",
+    bounds: list.bounds,
+    sourceRegion: list.bounds,
+    source: "local-proposal-fusion",
+    modelIdentity: { provider: "local-proposal-fusion", model: "target-collection-structure-v1" },
+    confidence: complementConfidence([
+      finiteConfidence(list.confidence, 0.7),
+      finiteConfidence(firstClaim.label.confidence, 0.8),
+    ]),
+    actions: [],
+    support: independentSupport(list, firstClaim.label),
+    guessedAction: false,
+  }];
+  for (const { row, label, conflict } of rowClaims) {
+    const support = independentSupport(row, label);
+    elements.push({
+      hostType: "ActionableItem",
+      elementToken: `target-candidate:${stableBoxId(row.bounds)}`,
+      parentElementToken: listToken,
+      role: "target-candidate",
+      name: elementText(label),
+      value: elementText(label),
+      bounds: row.bounds,
+      sourceRegion: list.bounds,
+      source: "local-proposal-fusion",
+      modelIdentity: { provider: "local-proposal-fusion", model: "target-row-ocr-v1" },
+      confidence: complementConfidence(support.map((entry) => entry.confidence)),
+      actions: conflict ? [] : ["click"],
+      support,
+      pixelLimitedAction: true,
+      guessedAction: false,
+      semanticKey: conversationEntitySemanticKey(elementText(label)),
+      ...(conflict ? { evidenceConsistency: "conflict", conflicts: ["value"] } : {}),
+    });
+  }
+  return elements;
 }
 
 function composeConversationSceneElements({ ocr, visual, focusedTarget, changedRegion }) {
@@ -618,7 +745,12 @@ function searchComposition({ ocr, owners, conflict, conflictReasons = [], value,
   const confidence = complementConfidence(support.map((entry) => entry.confidence));
   const parentToken = `local-search-container:${stableBoxId(bounds)}`;
   const elementToken = `local-search:${stableBoxId(bounds)}`;
-  const valueBounds = searchValueBoundsFromEvidence(ocr, bounds);
+  // Placeholder text identifies the editable's role, not its current value.
+  // Retaining placeholder geometry as valueBounds makes a later replace-all
+  // verification crop the old label instead of the newly entered text.
+  const valueBounds = typeof value === "string" && value.length > 0
+    ? searchValueBoundsFromEvidence(ocr, bounds)
+    : null;
   const common = {
     bounds,
     sourceRegion: bounds,
@@ -857,16 +989,65 @@ export function deduplicateVisualProposals(proposals) {
     );
     if (duplicateIndex < 0) {
       kept.push(proposal);
-    } else if (isSemanticSurface(proposal) && !isSemanticSurface(kept[duplicateIndex])) {
+    } else if (proposalEvidencePriority(proposal) > proposalEvidencePriority(kept[duplicateIndex])) {
       kept[duplicateIndex] = proposal;
     }
   }
   return kept;
 }
 
+function proposalEvidencePriority(proposal) {
+  if (isSemanticSurface(proposal)) return 3;
+  if (proposal?.source === "visual-structure") return 2;
+  return 1;
+}
+
 function isSemanticSurface(proposal) {
   return typeof proposal?.proposalId === "string"
     && proposal.proposalId.startsWith("semantic-surface-");
+}
+
+function uniqueProposal(proposals, role) {
+  const matches = proposals.filter((proposal) => (
+    proposal?.source === "visual-structure"
+    && proposal.role === role
+    && isBox(proposal.bounds)
+  ));
+  return matches.length === 1 ? matches[0] : null;
+}
+
+function primaryRowLabels(elements) {
+  if (elements.length === 0) return [];
+  const ordered = [...elements].sort((left, right) => (
+    left.bounds.y - right.bounds.y || left.bounds.x - right.bounds.x
+  ));
+  const top = ordered[0].bounds.y;
+  const tolerance = Math.max(4, ordered[0].bounds.height * 0.5);
+  return ordered
+    .filter((element) => element.bounds.y <= top + tolerance)
+    .sort((left, right) => left.bounds.x - right.bounds.x || left.bounds.y - right.bounds.y);
+}
+
+function isTargetListGeometry(bounds, pixels) {
+  if (!isBox(bounds)) return false;
+  const widthRatio = bounds.width / pixels.width;
+  const heightRatio = bounds.height / pixels.height;
+  return widthRatio >= 0.12 && widthRatio <= 0.4
+    && heightRatio >= 0.45
+    && bounds.x <= pixels.width * 0.2
+    && bounds.x + bounds.width <= pixels.width * 0.5;
+}
+
+function isTargetRowGeometry(surface, listBounds, labelBounds) {
+  if (!isBox(surface) || !contains(listBounds, surface) || !contains(surface, labelBounds)) return false;
+  const widthRatio = surface.width / listBounds.width;
+  const heightRatio = surface.height / listBounds.height;
+  return widthRatio >= 0.55
+    && widthRatio <= 1.02
+    && heightRatio >= 0.025
+    && heightRatio <= 0.2
+    && surface.x <= listBounds.x + (listBounds.width * 0.25)
+    && surface.x + surface.width >= listBounds.x + (listBounds.width * 0.85);
 }
 
 function semanticControlRole(value) {

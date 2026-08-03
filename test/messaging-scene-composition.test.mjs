@@ -7,6 +7,7 @@ import {
   detectSemanticControlSurfaceFromPixels,
   inferConversationVisualStructure,
   inferSearchVisualStructure,
+  inferTargetCollectionVisualStructure,
   stableCompositionOcrElements,
 } from "../src/messaging-scene-composition.mjs";
 import { detectControlSurfaceFromPixels } from "../src/control-surface-detection.mjs";
@@ -41,6 +42,48 @@ test("OCR alone cannot create an actionable search editable", () => {
 
   assert.deepEqual(result.elements, []);
   assert.deepEqual(result.knownControls, []);
+});
+
+test("search placeholder geometry is never published as current value bounds", () => {
+  const result = composeMessagingSceneElements({
+    coordinateBounds: bounds,
+    ocrElements: [searchOcr],
+    visualProposals: [searchSurface],
+  });
+  const search = result.elements.find((element) => element.role === "search");
+
+  assert.ok(search);
+  assert.equal(search.value, "");
+  assert.equal(search.state.valueBounds, undefined);
+});
+
+test("fresh non-empty search value keeps its owned OCR value bounds", () => {
+  const query = {
+    ...searchOcr,
+    elementToken: "ocr-query-value-bounds",
+    proposalId: "ocr-query-value-bounds",
+    name: "Q Y-大风",
+    value: "Q Y-大风",
+    bounds: { x: 80, y: 44, width: 74, height: 23 },
+  };
+  const result = composeMessagingSceneElements({
+    coordinateBounds: bounds,
+    ocrElements: [query],
+    visualProposals: [searchSurface],
+    knownControls: [{
+      role: "search",
+      bounds: searchSurface.bounds,
+      semanticKey: "control:search",
+    }],
+  });
+  const search = result.elements.find((element) => element.role === "search");
+
+  assert.ok(search);
+  assert.equal(search.value, "Y-大风");
+  assert.ok(search.state.valueBounds);
+  assert.ok(search.state.valueBounds.x > query.bounds.x);
+  assert.equal(search.state.valueBounds.y, searchSurface.bounds.y);
+  assert.equal(search.state.valueBounds.height, searchSurface.bounds.height);
 });
 
 test("stable composition can retain non-duplicate full-window OCR without exposing it as current OCR", () => {
@@ -472,6 +515,117 @@ test("owned layout separators plus header OCR and editor SOM compose one convers
   assert.equal(bubble.state.latestInTranscript, true);
   assert.equal(bubble.state.changedSincePreviousFrame, true);
   assert.equal(transcript.state.changedSincePreviousFrame, true);
+});
+
+test("an owned visible target row composes under its collection with consistent evidence", () => {
+  const targetLabel = {
+    elementToken: "ocr-visible-target",
+    role: "text",
+    name: "Y-大风",
+    value: "Y-大风",
+    bounds: { x: 116, y: 510, width: 58, height: 20 },
+    confidence: 0.99,
+    source: "ocr",
+    proposalId: "ocr-visible-target",
+  };
+  const targetList = structuralProposal("target-list", { x: 60, y: 82, width: 240, height: 638 });
+  const targetRow = structuralProposal("target-row", { x: 60, y: 496, width: 240, height: 64 });
+  const result = composeMessagingSceneElements({
+    coordinateBounds: bounds,
+    ocrElements: [targetLabel],
+    visualProposals: [targetList, targetRow],
+  });
+  const collection = result.elements.find((element) => element.role === "target-list");
+  const candidate = result.elements.find((element) => element.role === "target-candidate");
+
+  assert.ok(collection);
+  assert.ok(candidate);
+  assert.equal(candidate.parentElementToken, collection.elementToken);
+  assert.equal(candidate.name, "Y-大风");
+  assert.equal(candidate.semanticKey, "conversation:y-大风");
+  assert.deepEqual(candidate.actions, ["click"]);
+  assert.deepEqual(candidate.support.map(({ provider }) => provider).sort(), ["ocr", "visual-structure"]);
+
+  const scene = buildHostScene({
+    observationVersion: 7,
+    observation: {
+      observationId: "visible-target-composition",
+      coordinateSpace: "window-local",
+      coordinateBounds: bounds,
+      surfaceReceipt: {
+        generation: 7,
+        screenshotId: "visible-target-shot",
+        windowId: "visible-target-window",
+      },
+      window: { id: "visible-target-window", title: "Fixture", bounds },
+      elements: result.elements,
+    },
+  });
+  const hostCandidate = scene.elements.find((element) => element.role === "target-candidate");
+  assert.equal(hostCandidate.evidenceConsistency, "consistent");
+  assert.equal(hostCandidate.actionable, true);
+  assert.equal(hostCandidate.coordinate.screenshotId, "visible-target-shot");
+  assert.equal(hostCandidate.coordinate.windowId, "visible-target-window");
+});
+
+test("pixel structure discovers a visible target collection and row without OCR click geometry", () => {
+  const image = solidImage(960, 720, 230);
+  const targetRowBounds = { x: 60, y: 496, width: 240, height: 64 };
+  const targetLabel = {
+    elementToken: "ocr-pixel-visible-target",
+    role: "text",
+    name: "Y-大风",
+    value: "Y-大风",
+    bounds: { x: 116, y: 510, width: 58, height: 20 },
+    confidence: 0.99,
+    source: "ocr",
+    proposalId: "ocr-pixel-visible-target",
+  };
+  fillRect(image, targetRowBounds, 250);
+  fillRect(image, targetLabel.bounds, 20);
+  const proposals = [
+    structuralProposal("search-surface", { x: 76, y: 38, width: 178, height: 36 }),
+    structuralProposal("conversation-pane", { x: 300, y: 30, width: 660, height: 690 }),
+  ];
+
+  const structures = inferTargetCollectionVisualStructure({
+    pixels: image,
+    ocrElements: [targetLabel],
+    proposals,
+  });
+  const list = structures.find((proposal) => proposal.role === "target-list");
+  const row = structures.find((proposal) => proposal.role === "target-row");
+
+  assert.ok(list);
+  assert.ok(row);
+  assert.deepEqual(row.bounds, targetRowBounds);
+  assert.equal(row.guessedAction, false);
+  assert.equal(containsBox(list.bounds, row.bounds), true);
+});
+
+test("conflicting OCR labels on one visible row suppress its action", () => {
+  const shared = {
+    role: "text",
+    bounds: { x: 116, y: 510, width: 58, height: 20 },
+    confidence: 0.99,
+    source: "ocr",
+  };
+  const result = composeMessagingSceneElements({
+    coordinateBounds: bounds,
+    ocrElements: [
+      { ...shared, elementToken: "ocr-visible-a", proposalId: "ocr-visible-a", name: "Y-大风", value: "Y-大风" },
+      { ...shared, elementToken: "ocr-visible-b", proposalId: "ocr-visible-b", name: "Y-大凤", value: "Y-大凤" },
+    ],
+    visualProposals: [
+      structuralProposal("target-list", { x: 60, y: 82, width: 240, height: 638 }),
+      structuralProposal("target-row", { x: 60, y: 496, width: 240, height: 64 }),
+    ],
+  });
+  const candidate = result.elements.find((element) => element.role === "target-candidate");
+
+  assert.ok(candidate);
+  assert.equal(candidate.evidenceConsistency, "conflict");
+  assert.deepEqual(candidate.actions, []);
 });
 
 test("a broad SOM region cannot masquerade as the role-owned send control", () => {
@@ -1294,6 +1448,12 @@ function structuralProposal(role, proposalBounds) {
     confidence: 0.98,
     source: "visual-structure",
   };
+}
+
+function containsBox(outer, inner) {
+  return inner.x >= outer.x && inner.y >= outer.y
+    && inner.x + inner.width <= outer.x + outer.width
+    && inner.y + inner.height <= outer.y + outer.height;
 }
 
 function solidImage(width, height, value) {

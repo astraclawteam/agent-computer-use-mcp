@@ -27,6 +27,7 @@ test("computer.message owns the exact messaging sequence and controller lifecycl
   assert.equal(router.captureArgs[0].mode, "screenshot");
   assert.deepEqual(result.history.map((entry) => entry.step), [
     "restore-main-window",
+    "resolve-target",
     "focus-search",
     "enter-query",
     "wait-results-stable",
@@ -63,6 +64,22 @@ test("computer.message requests one Host-owned send-role refresh when the post-e
   assert.equal(router.refineCalls, 1);
   assert.equal(router.refineArgs.filter((args) => args.messagingSceneIntent === "send").length, 1);
   assert.equal(router.actions.filter((action) => action.elementId.endsWith(":send")).length, 1);
+});
+
+test("computer.message selects one exact visible target among sibling candidates before search", async () => {
+  const router = fixtureRouter({ visibleTargets: ["其他会话", QUERY] });
+  const result = await runDeterministicMessagingTool(router, {
+    applicationName: APP,
+    query: QUERY,
+    message: MESSAGE,
+  });
+
+  assert.equal(result.outcome, "committed");
+  assert.equal(result.released, true);
+  assert.equal(router.actions.filter((action) => action.elementId?.endsWith(":target-1")).length, 1);
+  assert.equal(router.actions.some((action) => action.elementId?.endsWith(":search")), false);
+  assert.equal(router.actions.some((action) => action.elementId?.endsWith(":candidate")), false);
+  assert.equal(result.history.some((entry) => entry.step === "select-visible-target"), true);
 });
 
 test("computer.message refreshes a non-actionable initial Scene before focus-search", async () => {
@@ -210,6 +227,7 @@ function fixtureRouter({
   omitResultsFromQueryReceipt = false,
   partialTitleInSelectionReceipt = false,
   discoveredApplicationName = APP,
+  visibleTargets = [],
 } = {}) {
   let version = 0;
   let foreground = initialForeground;
@@ -269,6 +287,7 @@ function fixtureRouter({
         sent,
         includeSearch: !(initialSceneMissingSearch && captureCalls === 1),
         includeSend: !sendRequiresIntent || args.messagingSceneIntent === "send",
+        visibleTargets,
       }) };
     },
     async refineLatestScreenshotScene(args = {}) {
@@ -286,6 +305,7 @@ function fixtureRouter({
         editorValue,
         sent,
         includeSend: args.messagingSceneIntent === "send",
+        visibleTargets,
       }) };
     },
     async act({ action }) {
@@ -303,6 +323,9 @@ function fixtureRouter({
         conversationVisible = true;
         focusedRole = null;
         partialTitleOnce = partialTitleInSelectionReceipt;
+      } else if (action.kind === "click" && /:target-\d+$/u.test(action.elementId)) {
+        conversationVisible = true;
+        focusedRole = null;
       } else if (action.kind === "click" && action.elementId.endsWith(":editor")) focusedRole = "message-editor";
       else if (action.kind === "type_text" && focusedRole === "message-editor") editorValue = action.value;
       else if (action.kind === "click" && action.elementId.endsWith(":send")) {
@@ -335,6 +358,7 @@ function scene({
   sent,
   includeSearch = true,
   includeSend = true,
+  visibleTargets = [],
 }) {
   const elements = [];
   const add = ({ key, parentKey = null, ...element }) => elements.push({
@@ -355,6 +379,19 @@ function scene({
     actions: ["click", "type_text"], actionable: true, value: query,
     state: { focused: focusedRole === "search" },
   });
+  if (!conversationVisible && visibleTargets.length > 0) {
+    add({ key: "target-list", type: "Container", role: "target-list", parentKey: "main" });
+    visibleTargets.forEach((name, index) => add({
+      key: `target-${index}`,
+      type: "ActionableItem",
+      role: "target-candidate",
+      parentKey: "target-list",
+      actions: ["click"],
+      actionable: true,
+      name,
+      semanticKey: name === QUERY ? "contact:fixture" : `contact:other-${index}`,
+    }));
+  }
   if (resultsVisible) {
     add({ key: "results", type: "TransientSurface", role: "search-results", parentKey: "main" });
     add({

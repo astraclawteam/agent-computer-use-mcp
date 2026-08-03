@@ -19,11 +19,13 @@ chat-body text as a title, or pixel coordinates. It targets current Scene
 `elementId` values selected by element type, semantic role, parent-container
 relationship, evidence consistency, action availability, and observed state.
 
-## Fixed transition contract
+## Guarded transition contract
 
-| Step | Preconditions | Postconditions | Default timeout | Only allowed next step |
+| Step | Preconditions | Postconditions | Default timeout | Allowed next step |
 | --- | --- | --- | ---: | --- |
-| `restore-main-window` | One consistent `Window/main-window`; if not foreground it allows `activate_window`. | The same logical window is foreground in a newer Scene, or was already foreground. | 15 s | `focus-search` |
+| `restore-main-window` | One consistent `Window/main-window`; if not foreground it allows `activate_window`. | The same logical window is foreground in a newer Scene, or was already foreground. | 15 s | `resolve-target` |
+| `resolve-target` | The main Window has one authoritative current Scene. | The Host chooses exactly one guarded route: an already-active exact title, one exact actionable visible candidate, or discovery through search. | 15 s | `verify-conversation-title`, `select-visible-target`, or `focus-search` |
+| `select-visible-target` | One exact `ActionableItem/target-candidate` belongs to the `Container/target-list`. | The candidate identity becomes the active conversation title in a newer Scene. | 15 s | `verify-conversation-title` |
 | `focus-search` | One clickable `Editable/search` belongs to the main window. | The search editable owns focus in a newer Scene. | 15 s | `enter-query` |
 | `enter-query` | The focused search editable allows `type_text`. | Its value exactly equals the requested query in a newer Scene. An indeterminate write may be resolved only by this fresh postcondition and is never replayed. | 15 s | `wait-results-stable` |
 | `wait-results-stable` | A `TransientSurface/search-results` belongs to the main window. | The same owned actionable candidate identities occur in two consecutive Scenes. | 15 s | `select-result` |
@@ -35,9 +37,9 @@ relationship, evidence consistency, action availability, and observed state.
 | `verify-new-bubble` | One transcript belongs to the conversation, and the Host retains the pre-send exact self-bubble evidence. | A newer Scene contains either more exact self-authored bubbles or an exact self-authored latest bubble overlapping the post-send changed region; the bubble remains under that transcript. | 15 s | `release` |
 | `release` | A lease is held, or terminal cleanup is required. | Host returns a committed release receipt. | 2 s | none |
 
-The code exports this table as `DETERMINISTIC_MESSAGING_STEPS`; tests compare
-the executable order with the contract rather than maintaining a second test
-sequence.
+The code exports this graph as `DETERMINISTIC_MESSAGING_STEPS`; tests verify
+every allowed edge and each executed route. The Host never lets the model choose
+between these transitions.
 
 A successful `complete` receipt also exposes `toolErrorCount: 0` and
 `wrongSendCount: 0`. The latter is a Host-owned conclusion available only after
@@ -72,6 +74,15 @@ element tokens remain internal bindings and are not promoted into semantic
 identity. If no semantic key exists, the exact normalized visible label is used
 only for this deterministic exact-result phase.
 
+Visible targets use the same generic Scene ownership rules. A
+`Container/target-list` is composed from the current layout, and a child
+`ActionableItem/target-candidate` is emitted only when an independently detected
+row surface and owned OCR label agree. The action remains bound to the current
+screenshot, Window, coordinate space, crop offset, scale, and observation
+version. OCR-only rows, duplicate exact labels, and conflicting labels cannot
+be clicked. These roles describe a selectable collection; they do not encode an
+application name or messaging-product keyword.
+
 Exact editable values remain Host-owned postconditions. A verified native
 read-back is projected into the same returned Scene instead of creating a
 parallel value store. When native read-back is unavailable, one delivered
@@ -96,7 +107,7 @@ Run:
 npm run verify:deterministic:messaging
 ```
 
-The fixed Host driver proves the complete successful sequence, strict step
+The fixed Host driver proves all three target-resolution routes, strict step
 metadata, precondition failure without skipping, title/body ownership isolation,
 terminal `not-applied` and `indeterminate` receipts, action timeout, active Stop,
 fresh self-authored bubble ownership, and release-on-all-terminal-paths.

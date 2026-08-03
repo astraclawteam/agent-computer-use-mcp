@@ -24,7 +24,20 @@ test("the Host-driven workflow commits the fixed role-based sequence and release
   assert.equal(result.status, "committed");
   assert.deepEqual(
     result.history.map((entry) => entry.step),
-    DETERMINISTIC_MESSAGING_STEPS.map((step) => step.id),
+    [
+      "restore-main-window",
+      "resolve-target",
+      "focus-search",
+      "enter-query",
+      "wait-results-stable",
+      "select-result",
+      "verify-conversation-title",
+      "focus-message-editor",
+      "enter-message",
+      "send",
+      "verify-new-bubble",
+      "release",
+    ],
   );
   assert.equal(result.history.every((entry) => entry.status === "committed"), true);
   assert.equal(host.releaseCalls, 1);
@@ -44,6 +57,60 @@ test("the Host-driven workflow commits the fixed role-based sequence and release
   assert.deepEqual(textActions.map(({ action }) => action.textMode), ["replace-all", "replace-all"]);
   assert.deepEqual(textActions.map(({ action }) => action.inputBehavior), ["commit", "commit"]);
   assert.equal(host.actions.every(({ action }) => action.x === undefined && action.y === undefined), true);
+});
+
+test("an already active exact target skips visible selection and search", async () => {
+  const host = createFixtureHost({ initialConversationVisible: true });
+  const machine = new DeterministicMessagingStateMachine({
+    host,
+    goal: { query: QUERY, message: MESSAGE },
+    pollIntervalMs: 1,
+  });
+
+  const result = await machine.run();
+
+  assert.equal(result.status, "committed");
+  assert.equal(host.actions.some(({ step }) => step === "select-visible-target"), false);
+  assert.equal(host.actions.some(({ step }) => step === "focus-search"), false);
+  assert.equal(host.actions.some(({ step }) => step === "enter-query"), false);
+  assert.equal(host.actions.some(({ step }) => step === "select-result"), false);
+  assert.equal(host.actions.filter(({ step }) => step === "send").length, 1);
+  assert.equal(host.releaseCalls, 1);
+});
+
+test("one exact visible target is selected before search", async () => {
+  const host = createFixtureHost({ initialVisibleTarget: QUERY });
+  const machine = new DeterministicMessagingStateMachine({
+    host,
+    goal: { query: QUERY, message: MESSAGE },
+    pollIntervalMs: 1,
+  });
+
+  const result = await machine.run();
+
+  assert.equal(result.status, "committed");
+  assert.equal(host.actions.filter(({ step }) => step === "select-visible-target").length, 1);
+  assert.equal(host.actions.some(({ step }) => step === "focus-search"), false);
+  assert.equal(host.actions.some(({ step }) => step === "enter-query"), false);
+  assert.equal(host.actions.some(({ step }) => step === "select-result"), false);
+  assert.equal(host.releaseCalls, 1);
+});
+
+test("a non-matching visible target falls back to search without clicking it", async () => {
+  const host = createFixtureHost({ initialVisibleTarget: "其他会话" });
+  const machine = new DeterministicMessagingStateMachine({
+    host,
+    goal: { query: QUERY, message: MESSAGE },
+    pollIntervalMs: 1,
+  });
+
+  const result = await machine.run();
+
+  assert.equal(result.status, "committed");
+  assert.equal(host.actions.some(({ step }) => step === "select-visible-target"), false);
+  assert.equal(host.actions.filter(({ step }) => step === "focus-search").length, 1);
+  assert.equal(host.actions.filter(({ step }) => step === "select-result").length, 1);
+  assert.equal(host.releaseCalls, 1);
 });
 
 test("an already exact search value advances without replaying text entry", async () => {
@@ -316,11 +383,13 @@ test("Stop cancels an in-flight LLM selection before any candidate action and Ho
   assert.equal(host.releaseCalls, 1);
 });
 
-test("every step publishes explicit conditions, timeout, and only one allowed successor", () => {
+test("every step publishes explicit conditions, timeout, and guarded successors", () => {
   assert.deepEqual(
     DETERMINISTIC_MESSAGING_STEPS.map((step) => step.id),
     [
       "restore-main-window",
+      "resolve-target",
+      "select-visible-target",
       "focus-search",
       "enter-query",
       "wait-results-stable",
@@ -333,16 +402,26 @@ test("every step publishes explicit conditions, timeout, and only one allowed su
       "release",
     ],
   );
-  for (const [index, step] of DETERMINISTIC_MESSAGING_STEPS.entries()) {
+  const allowedNext = {
+    "restore-main-window": ["resolve-target"],
+    "resolve-target": ["verify-conversation-title", "select-visible-target", "focus-search"],
+    "select-visible-target": ["verify-conversation-title"],
+    "focus-search": ["enter-query"],
+    "enter-query": ["wait-results-stable"],
+    "wait-results-stable": ["select-result"],
+    "select-result": ["verify-conversation-title"],
+    "verify-conversation-title": ["focus-message-editor"],
+    "focus-message-editor": ["enter-message"],
+    "enter-message": ["send"],
+    send: ["verify-new-bubble"],
+    "verify-new-bubble": ["release"],
+    release: [],
+  };
+  for (const step of DETERMINISTIC_MESSAGING_STEPS) {
     assert.ok(step.preconditions.length > 0, `${step.id} preconditions`);
     assert.ok(step.postconditions.length > 0, `${step.id} postconditions`);
     assert.ok(step.timeoutMs > 0, `${step.id} timeout`);
-    assert.deepEqual(
-      step.allowedNext,
-      index === DETERMINISTIC_MESSAGING_STEPS.length - 1
-        ? []
-        : [DETERMINISTIC_MESSAGING_STEPS[index + 1].id],
-    );
+    assert.deepEqual(step.allowedNext, allowedNext[step.id]);
   }
 });
 
@@ -530,7 +609,8 @@ function createFixtureHost(options = {}) {
   let focusedRole = null;
   let query = options.initialQuery ?? "";
   let resultsVisible = options.initialResultsVisible === true;
-  let conversationVisible = false;
+  let conversationVisible = options.initialConversationVisible === true;
+  let visibleTarget = options.initialVisibleTarget ?? null;
   let editorValue = options.initialEditorValue ?? "";
   let sent = false;
   let released = false;
@@ -563,6 +643,7 @@ function createFixtureHost(options = {}) {
         repeatedMessageReusesViewportSlot: options.repeatedMessageReusesViewportSlot === true,
         repeatedMessageChangesTranscriptOnly: options.repeatedMessageChangesTranscriptOnly === true,
         candidateName: options.candidateName ?? QUERY,
+        visibleTarget,
       });
     },
 
@@ -602,6 +683,11 @@ function createFixtureHost(options = {}) {
       }
       if (step === "select-result") {
         resultsVisible = false;
+        conversationVisible = true;
+        focusedRole = null;
+      }
+      if (step === "select-visible-target") {
+        visibleTarget = null;
         conversationVisible = true;
         focusedRole = null;
       }
@@ -650,6 +736,7 @@ function fixtureScene({
   repeatedMessageReusesViewportSlot,
   repeatedMessageChangesTranscriptOnly,
   candidateName,
+  visibleTarget,
 }) {
   const elements = [];
   const add = (element) => {
@@ -689,6 +776,18 @@ function fixtureScene({
       actions: ["click", "type_text"],
       value: query,
       state: { focused: focusedRole === "search" },
+    });
+  }
+  if (visibleTarget !== null) {
+    add({ key: "target-list", type: "Container", role: "target-list", parentKey: "shell" });
+    add({
+      key: "visible-target",
+      type: "ActionableItem",
+      role: "target-candidate",
+      parentKey: "target-list",
+      actions: ["click"],
+      name: visibleTarget,
+      semanticKey: "contact:fixture",
     });
   }
   if (resultsVisible) {
