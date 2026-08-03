@@ -318,7 +318,7 @@ export async function runDeterministicMessagingTool(router, args = {}, requestCo
       tier: "full",
       agentId: requestContext?.agentId ?? "deterministic-messaging-host",
       reason: "Host-owned deterministic messaging workflow",
-    }, requestContext);
+    }, requestContext, { initialObservationMode: "screenshot" });
     if (pendingSelection?.kind === "application") {
       pendingMessagingSelections.delete(args.selectionToken);
     }
@@ -347,26 +347,28 @@ export async function runDeterministicMessagingTool(router, args = {}, requestCo
     let lastObservedStep = null;
     machine = new DeterministicMessagingStateMachine({
       host: {
-        observe: async ({ step, signal, requiredRole }) => {
+        observe: async ({ step, signal, requiredRole, requiredSemanticKey }) => {
           if (signal?.aborted) throw signal.reason ?? new DOMException("Aborted", "AbortError");
-          const requiresSendRoleRefresh = requiredRole === "send"
-            && !hasUniqueConsistentSceneRole(latestScene, "send");
-          if (latestScene && !requiresSendRoleRefresh && (latestScenePending || step !== lastObservedStep)) {
+          const requiresRoleRefresh = typeof requiredRole === "string"
+            && !hasUniqueConsistentSceneRole(latestScene, requiredRole, requiredSemanticKey);
+          if (latestScene && !requiresRoleRefresh && (latestScenePending || step !== lastObservedStep)) {
             latestScenePending = false;
             lastObservedStep = step;
             return latestScene;
           }
-          const refinement = requiresSendRoleRefresh
+          const refinement = requiresRoleRefresh
+            && requiredRole === "send"
             && typeof router.refineLatestScreenshotScene === "function"
             ? await router.refineLatestScreenshotScene({
-                messagingSceneIntent: "send",
                 requestContext,
+                messagingSceneIntent: "send",
               })
             : null;
           const observation = refinement ?? await router.capture({
             mode: "screenshot",
             requestContext,
-            ...(requiresSendRoleRefresh ? { messagingSceneIntent: "send" } : {}),
+            ...requiredRoleObservationCrop(latestScene, requiredRole),
+            ...(requiredRole === "send" ? { messagingSceneIntent: "send" } : {}),
           });
           latestScene = observation.scene;
           latestScenePending = false;
@@ -406,6 +408,8 @@ export async function runDeterministicMessagingTool(router, args = {}, requestCo
       startedAt,
       phase: "complete",
       history: result.history,
+      toolErrorCount: 0,
+      wrongSendCount: 0,
     });
   } catch (error) {
     if (!machine && access?.controller && !preMachineReleaseAttempted) {
@@ -556,7 +560,18 @@ function resolvePendingMessagingSelection({ args, scopeKey, applicationName, que
   return pending;
 }
 
-function messagingToolResult({ outcome, released, startedAt, phase, history, selectionToken, candidates, error }) {
+function messagingToolResult({
+  outcome,
+  released,
+  startedAt,
+  phase,
+  history,
+  selectionToken,
+  candidates,
+  error,
+  toolErrorCount,
+  wrongSendCount,
+}) {
   return {
     status: outcome,
     outcome,
@@ -567,6 +582,8 @@ function messagingToolResult({ outcome, released, startedAt, phase, history, sel
     ...(selectionToken ? { selectionToken } : {}),
     ...(Array.isArray(candidates) ? { candidates } : {}),
     ...(error ? { error } : {}),
+    ...(Number.isInteger(toolErrorCount) ? { toolErrorCount } : {}),
+    ...(Number.isInteger(wrongSendCount) ? { wrongSendCount } : {}),
   };
 }
 
@@ -596,12 +613,27 @@ function normalizeMessagingText(value) {
   return String(value ?? "").normalize("NFKC").trim().toLocaleLowerCase();
 }
 
-function hasUniqueConsistentSceneRole(scene, role) {
-  return Array.isArray(scene?.elements)
-    && scene.elements.filter((element) => (
+function hasUniqueConsistentSceneRole(scene, role, semanticKey) {
+  if (!Array.isArray(scene?.elements)) return false;
+  const matching = scene.elements.filter((element) => (
       element?.role === role
       && element.evidenceConsistency === "consistent"
-    )).length === 1;
+    ));
+  return matching.length === 1
+    && (typeof semanticKey !== "string" || matching[0].semanticKey === semanticKey);
+}
+
+function requiredRoleObservationCrop(scene, role) {
+  if (role !== "conversation-title" || !Array.isArray(scene?.elements)) return {};
+  const title = scene.elements.find((element) => element?.role === "conversation-title");
+  const parent = title
+    ? scene.elements.find((element) => element?.id === title.parentId)
+    : null;
+  const bounds = parent?.coordinate?.bounds;
+  return bounds && [bounds.x, bounds.y, bounds.width, bounds.height].every(Number.isFinite)
+    && bounds.width > 0 && bounds.height > 0
+    ? { crop: { x: bounds.x, y: bounds.y, width: bounds.width, height: bounds.height } }
+    : {};
 }
 
 function sameMessagingCandidate(left, right) {
@@ -1901,14 +1933,17 @@ export async function acquireComputer(router, args, requestContext, options = {}
     return access;
   }
   try {
+    const initialObservationMode = options.initialObservationMode === "screenshot"
+      ? "screenshot"
+      : "semantic";
     let initialObservation = await router.capture({
-      mode: "semantic",
+      mode: initialObservationMode,
       ...(requestContext === undefined ? {} : { requestContext }),
     });
-    if (
+    if (initialObservationMode === "semantic" && (
       initialObservation?.elementCount === 0
       || (Array.isArray(initialObservation?.elements) && initialObservation.elements.length === 0)
-    ) {
+    )) {
       initialObservation = await router.capture({
         mode: "screenshot",
         ...(requestContext === undefined ? {} : { requestContext }),

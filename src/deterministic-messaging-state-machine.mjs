@@ -251,6 +251,9 @@ export class DeterministicMessagingStateMachine {
         step: step.id,
         outcome: this.#inFlightMutation ? "indeterminate" : "not-applied",
       });
+      if (error.diagnostic == null && this.#lastSceneDiagnostic !== null) {
+        error.diagnostic = this.#lastSceneDiagnostic;
+      }
       this.#history.push({
         step: step.id,
         status: error.outcome,
@@ -306,7 +309,7 @@ export class DeterministicMessagingStateMachine {
   }
 
   async #focusSearch(signal) {
-    const before = await this.#observe("focus-search", signal);
+    const before = await this.#observe("focus-search", signal, { requiredRole: "search" });
     const main = requireUniqueElement(before, { type: "Window", role: "main-window", step: "focus-search" });
     const search = requireUniqueElement(before, {
       type: "Editable",
@@ -324,6 +327,7 @@ export class DeterministicMessagingStateMachine {
       step: "focus-search",
       signal,
       afterVersion: before.observationVersion,
+      requiredRole: "search",
       predicate: (scene) => findElements(scene, { type: "Editable", role: "search" })
         .some((element) => element.state?.focused === true),
     });
@@ -331,7 +335,7 @@ export class DeterministicMessagingStateMachine {
   }
 
   async #enterQuery(signal) {
-    const before = await this.#observe("enter-query", signal);
+    const before = await this.#observe("enter-query", signal, { requiredRole: "search" });
     const search = requireUniqueElement(before, {
       type: "Editable",
       role: "search",
@@ -339,12 +343,30 @@ export class DeterministicMessagingStateMachine {
       state: { focused: true },
       step: "enter-query",
     });
-    if (search.value === this.#goal.query) return;
-    await this.#act("enter-query", textAction(search.id, this.#goal.query), signal);
+    const currentResults = findUniqueElement(before, {
+      type: "TransientSurface",
+      role: "search-results",
+    });
+    const currentCandidates = currentResults
+      ? findElements(before, {
+          type: "ActionableItem",
+          role: "search-result",
+          action: "click",
+          ownerId: currentResults.id,
+        })
+      : [];
+    if (search.value === this.#goal.query && currentCandidates.length > 0) return;
+    // Text delivery can be indeterminate even when a fresh Scene can prove the
+    // exact replacement. Resolve that receipt from the postcondition below;
+    // never replay the write.
+    await this.#act("enter-query", textAction(search.id, this.#goal.query), signal, {
+      allowIndeterminatePostcondition: true,
+    });
     await this.#observeUntil({
       step: "enter-query",
       signal,
       afterVersion: before.observationVersion,
+      requiredRole: "search",
       predicate: (scene) => findElements(scene, { type: "Editable", role: "search" })
         .some((element) => element.value === this.#goal.query),
     });
@@ -354,7 +376,7 @@ export class DeterministicMessagingStateMachine {
   async #waitResultsStable(signal) {
     let previousFingerprint = null;
     while (true) {
-      const scene = await this.#observe("wait-results-stable", signal);
+      const scene = await this.#observe("wait-results-stable", signal, { requiredRole: "search-results" });
       const main = findUniqueElement(scene, { type: "Window", role: "main-window" });
       const surface = main && findUniqueElement(scene, {
         type: "TransientSurface",
@@ -380,7 +402,7 @@ export class DeterministicMessagingStateMachine {
   }
 
   async #selectResult(signal) {
-    const before = await this.#observe("select-result", signal);
+    const before = await this.#observe("select-result", signal, { requiredRole: "search-results" });
     const main = requireUniqueElement(before, { type: "Window", role: "main-window", step: "select-result" });
     const surface = requireUniqueElement(before, {
       type: "TransientSurface",
@@ -456,6 +478,8 @@ export class DeterministicMessagingStateMachine {
     const verified = await this.#observeUntil({
       step: "verify-conversation-title",
       signal,
+      requiredRole: "conversation-title",
+      requiredSemanticKey: this.#selectedIdentity,
       predicate: (scene) => {
         const conversation = findUniqueElement(scene, { type: "Container", role: "conversation" });
         if (!conversation) return false;
@@ -493,7 +517,7 @@ export class DeterministicMessagingStateMachine {
   }
 
   async #focusMessageEditor(signal) {
-    const before = await this.#observe("focus-message-editor", signal);
+    const before = await this.#observe("focus-message-editor", signal, { requiredRole: "message-editor" });
     const conversation = requireUniqueElement(before, {
       type: "Container",
       role: "conversation",
@@ -515,6 +539,7 @@ export class DeterministicMessagingStateMachine {
       step: "focus-message-editor",
       signal,
       afterVersion: before.observationVersion,
+      requiredRole: "message-editor",
       predicate: (scene) => findElements(scene, { type: "Editable", role: "message-editor" })
         .some((element) => element.state?.focused === true),
     });
@@ -522,7 +547,7 @@ export class DeterministicMessagingStateMachine {
   }
 
   async #enterMessage(signal) {
-    const before = await this.#observe("enter-message", signal);
+    const before = await this.#observe("enter-message", signal, { requiredRole: "message-editor" });
     const editor = requireUniqueElement(before, {
       type: "Editable",
       role: "message-editor",
@@ -531,11 +556,14 @@ export class DeterministicMessagingStateMachine {
       step: "enter-message",
     });
     if (editor.value === this.#goal.message) return;
-    await this.#act("enter-message", textAction(editor.id, this.#goal.message), signal);
+    await this.#act("enter-message", textAction(editor.id, this.#goal.message), signal, {
+      allowIndeterminatePostcondition: true,
+    });
     await this.#observeUntil({
       step: "enter-message",
       signal,
       afterVersion: before.observationVersion,
+      requiredRole: "message-editor",
       predicate: (scene) => findElements(scene, { type: "Editable", role: "message-editor" })
         .some((element) => element.value === this.#goal.message),
     });
@@ -591,15 +619,22 @@ export class DeterministicMessagingStateMachine {
           ownerId: conversation.id,
         });
         if (!transcript) return false;
-        return matchingSelfBubbleCount(scene, transcript.id, this.#goal.message)
-          > this.#baselineMatchingBubbleCount;
+        const matchingBubbles = matchingSelfBubbles(scene, transcript.id, this.#goal.message);
+        return matchingBubbles.length > this.#baselineMatchingBubbleCount
+          || matchingBubbles.some((element) => (
+            element.state?.latestInTranscript === true
+            && (
+              element.state?.changedSincePreviousFrame === true
+              || transcript.state?.changedSincePreviousFrame === true
+            )
+          ));
       },
     });
   }
 
-  async #observe(step, signal, { requiredRole } = {}) {
+  async #observe(step, signal, { requiredRole, requiredSemanticKey } = {}) {
     assertNotAborted(signal, step, this.#inFlightMutation);
-    const scene = await this.#host.observe({ step, signal, requiredRole });
+    const scene = await this.#host.observe({ step, signal, requiredRole, requiredSemanticKey });
     validateScene(scene, step);
     this.#lastSceneDiagnostic = workflowSceneDiagnostic(scene, {
       expectedConversationIdentity: this.#selectedIdentity,
@@ -607,9 +642,16 @@ export class DeterministicMessagingStateMachine {
     return scene;
   }
 
-  async #observeUntil({ step, signal, afterVersion = null, predicate }) {
+  async #observeUntil({
+    step,
+    signal,
+    afterVersion = null,
+    requiredRole,
+    requiredSemanticKey,
+    predicate,
+  }) {
     while (true) {
-      const scene = await this.#observe(step, signal);
+      const scene = await this.#observe(step, signal, { requiredRole, requiredSemanticKey });
       const fresh = afterVersion === null || scene.observationVersion > afterVersion;
       if (fresh && predicate(scene)) return scene;
       await abortableDelay(this.#pollIntervalMs, signal);
@@ -909,6 +951,10 @@ function workflowSceneDiagnostic(scene, { expectedConversationIdentity = null } 
 }
 
 function matchingSelfBubbleCount(scene, transcriptId, message) {
+  return matchingSelfBubbles(scene, transcriptId, message).length;
+}
+
+function matchingSelfBubbles(scene, transcriptId, message) {
   return findElements(scene, {
     type: "ActionableItem",
     role: "message-bubble",
@@ -916,7 +962,7 @@ function matchingSelfBubbleCount(scene, transcriptId, message) {
   }).filter((element) => (
     element.state?.authoredBySelf === true
     && element.value === message
-  )).length;
+  ));
 }
 
 function preconditionError(step, message) {

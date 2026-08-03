@@ -195,6 +195,7 @@ export function composeMessagingSceneElements({
   visualProposals = [],
   knownControls = [],
   focusedTarget = null,
+  changedRegion = null,
 } = {}) {
   if (!isBox(coordinateBounds)) return frozenResult([], []);
   const ocr = ocrElements.filter(isOcrElement);
@@ -286,13 +287,14 @@ export function composeMessagingSceneElements({
     ocr,
     visual,
     focusedTarget,
+    changedRegion,
   });
   elements.push(...conversation);
 
   return frozenResult(elements, uniqueKnownControls(nextKnownControls));
 }
 
-function composeConversationSceneElements({ ocr, visual, focusedTarget }) {
+function composeConversationSceneElements({ ocr, visual, focusedTarget, changedRegion }) {
   const structures = new Map();
   for (const role of CONVERSATION_STRUCTURE_ROLES) {
     const matches = visual.filter((proposal) => (
@@ -378,6 +380,10 @@ function composeConversationSceneElements({ ocr, visual, focusedTarget }) {
     actions: [],
     support: independentSupport(transcript, transcriptVisual ?? transcriptOcr),
     guessedAction: false,
+    state: {
+      changedSincePreviousFrame: isBox(changedRegion)
+        && intersectionArea(transcript.bounds, changedRegion) > 0,
+    },
   }];
   if (title) {
     const support = independentSupport(header, title);
@@ -452,11 +458,17 @@ function composeConversationSceneElements({ ocr, visual, focusedTarget }) {
       semanticKey: "send:primary",
     });
   }
-  elements.push(...composeMessageBubbles({ ocr, visual, transcript, transcriptToken }));
+  elements.push(...composeMessageBubbles({
+    ocr,
+    visual,
+    transcript,
+    transcriptToken,
+    changedRegion,
+  }));
   return elements;
 }
 
-function composeMessageBubbles({ ocr, visual, transcript, transcriptToken }) {
+function composeMessageBubbles({ ocr, visual, transcript, transcriptToken, changedRegion }) {
   const bubbles = [];
   const seenOwners = new Set();
   for (const text of ocr) {
@@ -488,9 +500,19 @@ function composeMessageBubbles({ ocr, visual, transcript, transcriptToken }) {
       support,
       guessedAction: false,
       semanticKey: `message-bubble:${authoredBySelf ? "self" : "other"}:${normalizeControlLabel(elementText(text))}`,
-      state: { authoredBySelf },
+      state: {
+        authoredBySelf,
+        changedSincePreviousFrame: isBox(changedRegion)
+          && intersectionArea(owner.bounds, changedRegion) > 0,
+      },
     });
   }
+  const latestSelfBubble = bubbles
+    .filter((bubble) => bubble.state.authoredBySelf === true)
+    .sort((left, right) => (
+      (right.bounds.y + right.bounds.height) - (left.bounds.y + left.bounds.height)
+    ))[0];
+  if (latestSelfBubble) latestSelfBubble.state.latestInTranscript = true;
   return bubbles;
 }
 

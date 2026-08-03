@@ -65,6 +65,42 @@ test("an already exact search value advances without replaying text entry", asyn
   assert.equal(host.releaseCalls, 1);
 });
 
+test("an exact retained query is re-entered when its results surface is closed", async () => {
+  const host = createFixtureHost({ initialQuery: QUERY });
+  const machine = new DeterministicMessagingStateMachine({
+    host,
+    goal: { query: QUERY, message: MESSAGE },
+    pollIntervalMs: 1,
+  });
+
+  const result = await machine.run();
+
+  assert.equal(result.status, "committed");
+  assert.equal(host.actions.filter(({ step }) => step === "enter-query").length, 1);
+  assert.equal(host.actions.filter(({ step }) => step === "select-result").length, 1);
+  assert.equal(host.releaseCalls, 1);
+});
+
+test("an indeterminate query write advances only when a fresh Scene proves the exact value", async () => {
+  const host = createFixtureHost({
+    failStep: "enter-query",
+    failOutcome: "indeterminate",
+    failStepApplied: true,
+  });
+  const machine = new DeterministicMessagingStateMachine({
+    host,
+    goal: { query: QUERY, message: MESSAGE },
+    pollIntervalMs: 1,
+  });
+
+  const result = await machine.run();
+
+  assert.equal(result.status, "committed");
+  assert.equal(host.actions.filter(({ step }) => step === "enter-query").length, 1);
+  assert.equal(host.actions.filter(({ step }) => step === "select-result").length, 1);
+  assert.equal(host.releaseCalls, 1);
+});
+
 test("an already exact message draft advances without replaying text entry", async () => {
   const host = createFixtureHost({ initialEditorValue: MESSAGE });
   const machine = new DeterministicMessagingStateMachine({
@@ -443,6 +479,34 @@ test("new-bubble verification requires a fresh self-authored bubble under the tr
   assert.equal(host.releaseCalls, 1);
 });
 
+test("repeated identical messages accept a changed latest self bubble when the viewport count is stable", async () => {
+  const host = createFixtureHost({ repeatedMessageReusesViewportSlot: true });
+  const machine = new DeterministicMessagingStateMachine({
+    host,
+    goal: { query: QUERY, message: MESSAGE },
+    pollIntervalMs: 1,
+  });
+
+  const result = await machine.run();
+  assert.equal(result.status, "committed");
+  assert.equal(result.released, true);
+  assert.equal(host.actions.filter(({ step }) => step === "send").length, 1);
+});
+
+test("repeated identical messages accept a changed transcript with an unchanged latest bubble slot", async () => {
+  const host = createFixtureHost({ repeatedMessageChangesTranscriptOnly: true });
+  const machine = new DeterministicMessagingStateMachine({
+    host,
+    goal: { query: QUERY, message: MESSAGE },
+    pollIntervalMs: 1,
+  });
+
+  const result = await machine.run();
+  assert.equal(result.status, "committed");
+  assert.equal(result.released, true);
+  assert.equal(host.actions.filter(({ step }) => step === "send").length, 1);
+});
+
 test("a failed release is reported and never compensated by a second release call", async () => {
   const host = createFixtureHost({ failRelease: true });
   const machine = new DeterministicMessagingStateMachine({
@@ -496,6 +560,8 @@ function createFixtureHost(options = {}) {
         omitSearch: options.omitSearch === true,
         wrongTitleWithMatchingBody: options.wrongTitleWithMatchingBody === true,
         placeNewBubbleOutsideTranscript: options.placeNewBubbleOutsideTranscript === true,
+        repeatedMessageReusesViewportSlot: options.repeatedMessageReusesViewportSlot === true,
+        repeatedMessageChangesTranscriptOnly: options.repeatedMessageChangesTranscriptOnly === true,
         candidateName: options.candidateName ?? QUERY,
       });
     },
@@ -515,9 +581,16 @@ function createFixtureHost(options = {}) {
         });
       }
       if (options.failStep === step) {
-        if (options.failStepApplied === true && step === "send") {
-          editorValue = "";
-          sent = true;
+        if (options.failStepApplied === true) {
+          if (step === "enter-query") {
+            query = action.value;
+            resultsVisible = true;
+          }
+          if (step === "enter-message") editorValue = action.value;
+          if (step === "send") {
+            editorValue = "";
+            sent = true;
+          }
         }
         return { outcome: options.failOutcome, status: options.failOutcome };
       }
@@ -574,6 +647,8 @@ function fixtureScene({
   omitSearch,
   wrongTitleWithMatchingBody,
   placeNewBubbleOutsideTranscript,
+  repeatedMessageReusesViewportSlot,
+  repeatedMessageChangesTranscriptOnly,
   candidateName,
 }) {
   const elements = [];
@@ -644,7 +719,13 @@ function fixtureScene({
       name: wrongTitleWithMatchingBody ? "其他会话" : candidateName,
       semanticKey: wrongTitleWithMatchingBody ? "contact:other" : "contact:fixture",
     });
-    add({ key: "transcript", type: "Container", role: "transcript", parentKey: "conversation" });
+    add({
+      key: "transcript",
+      type: "Container",
+      role: "transcript",
+      parentKey: "conversation",
+      state: { changedSincePreviousFrame: repeatedMessageChangesTranscriptOnly && sent },
+    });
     add({
       key: "old-body",
       type: "ActionableItem",
@@ -653,6 +734,20 @@ function fixtureScene({
       value: wrongTitleWithMatchingBody ? QUERY : "历史消息",
       state: { authoredBySelf: false },
     });
+    if (repeatedMessageReusesViewportSlot || repeatedMessageChangesTranscriptOnly) {
+      add({
+        key: "stable-self-slot",
+        type: "ActionableItem",
+        role: "message-bubble",
+        parentKey: "transcript",
+        value: MESSAGE,
+        state: {
+          authoredBySelf: true,
+          latestInTranscript: true,
+          changedSincePreviousFrame: repeatedMessageReusesViewportSlot && sent,
+        },
+      });
+    }
     add({
       key: "editor",
       type: "Editable",
@@ -669,7 +764,7 @@ function fixtureScene({
       parentKey: "conversation",
       actions: ["click"],
     });
-    if (sent) {
+    if (sent && !repeatedMessageReusesViewportSlot && !repeatedMessageChangesTranscriptOnly) {
       add({
         key: "new-bubble",
         type: "ActionableItem",

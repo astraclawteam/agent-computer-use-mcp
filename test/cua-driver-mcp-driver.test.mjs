@@ -2189,6 +2189,65 @@ test("CuaDriverMcpDriver projects a restorable token source for tray-only proces
   }]);
 });
 
+test("CuaDriverMcpDriver keeps driver inventory when process enrichment fails", async () => {
+  const driver = new CuaDriverMcpDriver({
+    session: "driver-inventory-fallback-session",
+    processApplicationProbe: async () => {
+      throw new Error("process probe unavailable");
+    },
+    client: {
+      async start() {},
+      async callTool(name) {
+        if (name === "list_apps") {
+          return {
+            apps: [{
+              name: "Driver App",
+              launch_path: "C:\\Program Files\\Driver App\\driver-app.exe",
+              running: true,
+              pid: 707,
+            }],
+            processes: [],
+          };
+        }
+        return { status: "ok" };
+      },
+    },
+  });
+
+  const applications = await driver.listApps();
+  assert.equal(applications.length, 1);
+  assert.equal(applications[0].name, "Driver App");
+  assert.equal(applications[0].running, true);
+});
+
+test("CuaDriverMcpDriver keeps process inventory when driver discovery fails", async () => {
+  const driver = new CuaDriverMcpDriver({
+    session: "process-inventory-fallback-session",
+    processApplicationProbe: async () => [{
+      name: "Process App",
+      kind: "desktop",
+      running: true,
+      active: false,
+      pid: 808,
+      processIds: [808],
+      lastUsed: null,
+      launchPath: "C:\\Program Files\\Process App\\process-app.exe",
+    }],
+    client: {
+      async start() {},
+      async callTool(name) {
+        if (name === "list_apps") throw new Error("driver inventory unavailable");
+        return { status: "ok" };
+      },
+    },
+  });
+
+  const applications = await driver.listApps();
+  assert.equal(applications.length, 1);
+  assert.equal(applications[0].name, "Process App");
+  assert.equal(applications[0].running, true);
+});
+
 test("CuaDriverMcpDriver merges native process evidence into an installed app", async () => {
   const driver = new CuaDriverMcpDriver({
     session: "running-installed-app-session",

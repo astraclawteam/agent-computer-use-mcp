@@ -19,9 +19,12 @@ test("computer.message owns the exact messaging sequence and controller lifecycl
 
   assert.equal(result.outcome, "committed");
   assert.equal(result.released, true);
+  assert.equal(result.toolErrorCount, 0);
+  assert.equal(result.wrongSendCount, 0);
   assert.equal(router.requestAccessCalls.length, 1);
   assert.equal(router.requestAccessCalls[0].applicationToken, "application:fixture");
   assert.equal(router.requestAccessCalls[0].activationPolicy, undefined);
+  assert.equal(router.captureArgs[0].mode, "screenshot");
   assert.deepEqual(result.history.map((entry) => entry.step), [
     "restore-main-window",
     "focus-search",
@@ -62,6 +65,50 @@ test("computer.message requests one Host-owned send-role refresh when the post-e
   assert.equal(router.actions.filter((action) => action.elementId.endsWith(":send")).length, 1);
 });
 
+test("computer.message refreshes a non-actionable initial Scene before focus-search", async () => {
+  const router = fixtureRouter({ initialSceneMissingSearch: true });
+  const result = await runDeterministicMessagingTool(router, {
+    applicationName: APP,
+    query: QUERY,
+    message: MESSAGE,
+  });
+
+  assert.equal(result.outcome, "committed");
+  assert.equal(result.released, true);
+  assert.equal(router.refineCalls, 0);
+  assert.equal(router.captureArgs.some((args) => args.mode === "screenshot"), true);
+  assert.equal(router.actions[0].elementId.endsWith(":search"), true);
+});
+
+test("computer.message takes a fresh screenshot when the query receipt omitted related results", async () => {
+  const router = fixtureRouter({ omitResultsFromQueryReceipt: true });
+  const result = await runDeterministicMessagingTool(router, {
+    applicationName: APP,
+    query: QUERY,
+    message: MESSAGE,
+  });
+
+  assert.equal(result.outcome, "committed");
+  assert.equal(result.released, true);
+  assert.equal(router.refineCalls, 0);
+  assert.equal(router.captureArgs.filter((args) => args.mode === "screenshot").length >= 2, true);
+  assert.equal(router.actions.filter((action) => action.elementId.endsWith(":candidate")).length, 1);
+});
+
+test("computer.message refreshes a partial title from its Host-owned header crop", async () => {
+  const router = fixtureRouter({ partialTitleInSelectionReceipt: true });
+  const result = await runDeterministicMessagingTool(router, {
+    applicationName: APP,
+    query: QUERY,
+    message: MESSAGE,
+  });
+
+  assert.equal(result.outcome, "committed");
+  assert.equal(result.released, true);
+  assert.equal(router.captureArgs.some((args) => args.crop?.height === 80), true);
+  assert.equal(router.actions.filter((action) => action.elementId.endsWith(":send")).length, 1);
+});
+
 test("computer.message restores a non-foreground main window inside the deterministic workflow", async () => {
   const router = fixtureRouter({ initialForeground: false });
   const result = await runDeterministicMessagingTool(router, {
@@ -73,6 +120,8 @@ test("computer.message restores a non-foreground main window inside the determin
   assert.equal(result.outcome, "committed");
   assert.equal(result.phase, "complete");
   assert.equal(result.released, true);
+  assert.equal(result.toolErrorCount, 0);
+  assert.equal(result.wrongSendCount, 0);
   assert.equal(router.actions[0].kind, "activate_window");
   assert.equal(router.cancelCalls, 1);
 
@@ -157,6 +206,9 @@ function fixtureRouter({
   hangFirstAction = false,
   onAction = () => {},
   sendRequiresIntent = false,
+  initialSceneMissingSearch = false,
+  omitResultsFromQueryReceipt = false,
+  partialTitleInSelectionReceipt = false,
   discoveredApplicationName = APP,
 } = {}) {
   let version = 0;
@@ -167,6 +219,8 @@ function fixtureRouter({
   let conversationVisible = false;
   let editorValue = "";
   let sent = false;
+  let omitResultsOnce = false;
+  let partialTitleOnce = false;
   let cancelCalls = 0;
   let captureCalls = 0;
   let refineCalls = 0;
@@ -198,21 +252,29 @@ function fixtureRouter({
       captureCalls += 1;
       captureArgs.push(structuredClone(args));
       version += 1;
+      const visibleResults = resultsVisible && !omitResultsOnce;
+      const partialTitle = partialTitleOnce;
+      omitResultsOnce = false;
+      partialTitleOnce = false;
       return { scene: scene({
         version,
         foreground,
         focusedRole,
         query,
-        resultsVisible,
+        resultsVisible: visibleResults,
         conversationVisible,
+        conversationTitle: partialTitle ? "Y" : QUERY,
+        conversationTitleSemanticKey: partialTitle ? "contact:partial" : "contact:fixture",
         editorValue,
         sent,
+        includeSearch: !(initialSceneMissingSearch && captureCalls === 1),
         includeSend: !sendRequiresIntent || args.messagingSceneIntent === "send",
       }) };
     },
     async refineLatestScreenshotScene(args = {}) {
       refineCalls += 1;
       refineArgs.push(structuredClone(args));
+      if (initialSceneMissingSearch && refineCalls === 1) return null;
       version += 1;
       return { scene: scene({
         version,
@@ -235,10 +297,12 @@ function fixtureRouter({
       else if (action.kind === "type_text" && focusedRole === "search") {
         query = action.value;
         resultsVisible = true;
+        omitResultsOnce = omitResultsFromQueryReceipt;
       } else if (action.kind === "click" && action.elementId.endsWith(":candidate")) {
         resultsVisible = false;
         conversationVisible = true;
         focusedRole = null;
+        partialTitleOnce = partialTitleInSelectionReceipt;
       } else if (action.kind === "click" && action.elementId.endsWith(":editor")) focusedRole = "message-editor";
       else if (action.kind === "type_text" && focusedRole === "message-editor") editorValue = action.value;
       else if (action.kind === "click" && action.elementId.endsWith(":send")) {
@@ -265,8 +329,11 @@ function scene({
   query,
   resultsVisible,
   conversationVisible,
+  conversationTitle = QUERY,
+  conversationTitleSemanticKey = "contact:fixture",
   editorValue,
   sent,
+  includeSearch = true,
   includeSend = true,
 }) {
   const elements = [];
@@ -283,7 +350,7 @@ function scene({
   });
   add({ key: "main", type: "Window", role: "main-window", actions: ["activate_window"], actionable: true, state: { foreground } });
   add({ key: "shell", type: "Container", role: "application", parentKey: "main" });
-  add({
+  if (includeSearch) add({
     key: "search", type: "Editable", role: "search", parentKey: "main",
     actions: ["click", "type_text"], actionable: true, value: query,
     state: { focused: focusedRole === "search" },
@@ -300,10 +367,11 @@ function scene({
     add({
       key: "conversation-header", type: "Container", role: "conversation-header",
       parentKey: "conversation",
+      coordinate: { bounds: { x: 300, y: 0, width: 660, height: 80 } },
     });
     add({
       key: "title", type: "ActionableItem", role: "conversation-title", parentKey: "conversation-header",
-      name: QUERY, semanticKey: "contact:fixture",
+      name: conversationTitle, semanticKey: conversationTitleSemanticKey,
     });
     add({ key: "transcript", type: "Container", role: "transcript", parentKey: "conversation" });
     add({

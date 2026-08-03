@@ -45,8 +45,8 @@ public static class AgentComputerUseRelatedSurfaceClick
     {
         IntPtr controller = new IntPtr(controllerId);
         IntPtr surface = new IntPtr(surfaceId);
-        if (!IsWindow(controller) || GetForegroundWindow() != controller)
-            throw new InvalidOperationException("controller_not_foreground");
+        if (!IsWindow(controller))
+            throw new InvalidOperationException("controller_unavailable");
         if (!IsWindow(surface) || !IsWindowVisible(surface))
             throw new InvalidOperationException("related_window_unavailable");
         uint processId;
@@ -56,6 +56,9 @@ public static class AgentComputerUseRelatedSurfaceClick
         IntPtr owner = GetWindow(surface, GW_OWNER);
         if (owner != controller && owner != IntPtr.Zero)
             throw new InvalidOperationException("related_window_owner_mismatch");
+        IntPtr foreground = GetForegroundWindow();
+        if (foreground != controller && foreground != surface)
+            throw new InvalidOperationException("controlled_surface_not_foreground");
         Rect rect;
         if (!GetWindowRect(surface, out rect) || x < rect.Left || x >= rect.Right || y < rect.Top || y >= rect.Bottom)
             throw new InvalidOperationException("related_window_point_outside");
@@ -125,6 +128,7 @@ function runClickBridge({ powershellPath, encoded, payload, signal, spawnProcess
       "-EncodedCommand", encoded,
     ], { windowsHide: true, stdio: ["pipe", "pipe", "pipe"] });
     let stdout = "";
+    let stderr = "";
     let settled = false;
     const finish = (error, value) => {
       if (settled) return;
@@ -146,10 +150,12 @@ function runClickBridge({ powershellPath, encoded, payload, signal, spawnProcess
     if (signal?.aborted) return onAbort();
     signal?.addEventListener("abort", onAbort, { once: true });
     child.stdout.on("data", (chunk) => { stdout += chunk.toString("utf8"); });
-    child.stderr.on("data", () => {});
+    child.stderr.on("data", (chunk) => {
+      if (stderr.length < 4_096) stderr += chunk.toString("utf8").slice(0, 4_096 - stderr.length);
+    });
     child.once("error", () => finish(relatedClickError("related_click.bridge_start_failed")));
     child.once("close", (code) => {
-      if (code !== 0) return finish(relatedClickError("related_click.bridge_failed"));
+      if (code !== 0) return finish(relatedClickError(classifyBridgeFailure(stderr)));
       try {
         finish(null, JSON.parse(stdout));
       } catch {
@@ -158,6 +164,23 @@ function runClickBridge({ powershellPath, encoded, payload, signal, spawnProcess
     });
     child.stdin.end(JSON.stringify(payload));
   });
+}
+
+const BRIDGE_FAILURE_STAGES = Object.freeze([
+  "controller_unavailable",
+  "related_window_unavailable",
+  "related_window_process_mismatch",
+  "related_window_owner_mismatch",
+  "controlled_surface_not_foreground",
+  "related_window_point_outside",
+  "related_window_point_occluded",
+  "related_window_hit_process_mismatch",
+  "set_cursor_failed",
+]);
+
+function classifyBridgeFailure(stderr) {
+  const stage = BRIDGE_FAILURE_STAGES.find((candidate) => stderr.includes(candidate));
+  return stage ? `related_click.${stage}` : "related_click.bridge_failed";
 }
 
 function positiveNativeId(value) {

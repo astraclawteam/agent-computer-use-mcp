@@ -109,11 +109,20 @@ export class CuaDriverMcpDriver {
   listApps() {
     return this.runWork(async (ticket) => {
       await this.ensureStartedResources(ticket);
-      const [result, processApplications] = await Promise.all([
+      const [driverInventory, processInventory] = await Promise.allSettled([
         this.client.callTool("list_apps", {}),
         this.processApplicationProbe(),
       ]);
       this.assertWorkTicket(ticket);
+      if (driverInventory.status === "rejected" && processInventory.status === "rejected") {
+        throw driverInventory.reason;
+      }
+      const result = driverInventory.status === "fulfilled"
+        ? driverInventory.value
+        : { apps: [], processes: [] };
+      const processApplications = processInventory.status === "fulfilled"
+        ? processInventory.value
+        : [];
       const payload = result.structuredContent ?? result;
       const processes = new Map((payload.processes ?? []).map((process) => [
         String(process.name ?? "").toLowerCase(),

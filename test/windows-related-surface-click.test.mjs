@@ -44,7 +44,7 @@ test("related-surface click binds a foreground controller to one visible owned H
     screenX: 584,
     screenY: 235,
   });
-  assert.match(script, /GetForegroundWindow\(\) != controller/u);
+  assert.match(script, /foreground != controller && foreground != surface/u);
   assert.match(script, /GetWindow\(surface, GW_OWNER\)/u);
   assert.match(script, /GetWindowThreadProcessId\(surface/u);
   assert.match(script, /GetAncestor\(hit, GA_ROOT\) != surface/u);
@@ -59,6 +59,30 @@ test("related-surface click binds a foreground controller to one visible owned H
     postcondition: "related-surface-dismissed",
     deliveryPath: "windows-related-surface-click",
   });
+});
+
+test("related-surface click reports the exact bridge validation stage", async () => {
+  const spawnProcess = () => {
+    const child = fakeChild();
+    child.stdin.end = () => {
+      queueMicrotask(() => {
+        child.stderr.emit("data", Buffer.from("controlled_surface_not_foreground"));
+        child.emit("close", 1);
+      });
+    };
+    return child;
+  };
+
+  await assert.rejects(clickWindowsRelatedSurface({
+    platform: "win32",
+    powershellPath: "powershell.exe",
+    spawnProcess,
+    controllerWindowId: "42",
+    relatedWindowId: "77",
+    processId: 1234,
+    screenX: 584,
+    screenY: 235,
+  }), (error) => error?.code === "related_click.controlled_surface_not_foreground");
 });
 
 test("related-surface click cancels an in-flight bridge", async () => {

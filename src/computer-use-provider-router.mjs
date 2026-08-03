@@ -1339,6 +1339,7 @@ export class ComputerUseProviderRouter {
           visualProposals,
           knownControls: this.messagingSceneControls,
           focusedTarget: this.activeFocusReceipt?.target ?? null,
+          changedRegion: dirtyRegion,
         });
         const groundedMessageEditor = composition.elements.find((element) => (
           element?.hostType === "Editable"
@@ -1388,6 +1389,7 @@ export class ComputerUseProviderRouter {
               visualProposals,
               knownControls: this.messagingSceneControls,
               focusedTarget: this.activeFocusReceipt?.target ?? null,
+              changedRegion: dirtyRegion,
             });
           } catch (error) {
             this.assertOperationTicket(ticket);

@@ -1212,6 +1212,16 @@ const messagingTool = {
       history: ANY_ARRAY,
       released: { type: "boolean" },
       elapsedMs: { type: "number", minimum: 0 },
+      toolErrorCount: {
+        type: "integer",
+        minimum: 0,
+        description: "Host-observed tool execution errors. Present as zero after a completed workflow.",
+      },
+      wrongSendCount: {
+        type: "integer",
+        minimum: 0,
+        description: "Host-observed sends to an unverified destination. Present as zero only after title and new-bubble verification complete.",
+      },
       selectionToken: { type: "string" },
       candidates: {
         type: "array",

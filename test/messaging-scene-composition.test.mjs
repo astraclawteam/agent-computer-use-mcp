@@ -407,6 +407,7 @@ test("owned layout separators plus header OCR and editor SOM compose one convers
     coordinateBounds: bounds,
     ocrElements: [titleOcr, bubbleOcr, sendOcr, draftOcr, editorBorderNoise],
     visualProposals: [editorSom, bubbleSom, sendSom, ...structures],
+    changedRegion: { x: 700, y: 120, width: 150, height: 60 },
   });
   const conversation = result.elements.find((element) => element.role === "conversation");
   const header = result.elements.find((element) => element.role === "conversation-header");
@@ -468,6 +469,9 @@ test("owned layout separators plus header OCR and editor SOM compose one convers
   assert.deepEqual(send.actions, ["click"]);
   assert.equal(bubble.parentElementToken, transcript.elementToken);
   assert.equal(bubble.state.authoredBySelf, true);
+  assert.equal(bubble.state.latestInTranscript, true);
+  assert.equal(bubble.state.changedSincePreviousFrame, true);
+  assert.equal(transcript.state.changedSincePreviousFrame, true);
 });
 
 test("a broad SOM region cannot masquerade as the role-owned send control", () => {
