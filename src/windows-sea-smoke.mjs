@@ -9,6 +9,7 @@ import { verifyWindowsSeaArtifactTree } from "./windows-sea-artifact.mjs";
 
 const execFileAsync = promisify(execFile);
 const EXPECTED_TOOLS = [
+  "computer.task",
   "computer.message",
   "computer.acquire",
   "computer.observe",

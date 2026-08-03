@@ -43,10 +43,11 @@ Act through a semantic element, focus receipt, or observation-bound coordinate
 Verify the outcome and release control on success, failure, or cancellation
 ```
 
-The Agent sees one task-level tool:
+The Agent sees two task-level tools:
 
 | Tool | Purpose |
 | --- | --- |
+| `computer.task` | Advance a generic non-messaging desktop goal through Host-owned observations and opaque semantic candidates; every invocation releases control before returning. |
 | `computer.message` | Run the Host-owned deterministic messaging state machine; exact targets are resolved without exposing coordinate or lifecycle decisions to the Agent. |
 
 The lifecycle tools (`computer.acquire`, `computer.observe`, `computer.act`,
@@ -71,6 +72,10 @@ inventory.
 - **Control has a lifecycle.** Leases are bound to the requesting Host session
   and are revoked on completion, cancellation, timeout, disconnect, or process
   shutdown.
+- **Task routing cannot escape the Host.** A generic task result limits the next
+  interaction step to `computer.task`; shell, raw targeting, and lifecycle
+  tools cannot replace an unresolved Host candidate. Same-package child
+  processes inherit only their proven owning-window process identity.
 - **No hidden self-update.** Startup is offline. Installation, upgrade,
   downgrade, and rollback are explicit Host or operator actions.
 

@@ -1793,6 +1793,49 @@ test("CuaDriverMcpDriver restores an existing process window before launching an
   }]);
 });
 
+test("CuaDriverMcpDriver restores a same-package owner window for a headless child process", async () => {
+  const calls = [];
+  const driver = new CuaDriverMcpDriver({
+    session: "same-package-owner-window-session",
+    foregroundWindowProbe: async () => "91",
+    client: {
+      async start() {},
+      async callTool(name, args) {
+        calls.push({ name, args });
+        if (name === "list_windows") {
+          return {
+            windows: [{
+              window_id: 91,
+              title: "Owning Desktop Shell",
+              app_name: "owner.exe",
+              pid: 700,
+              is_on_screen: true,
+              bounds: { x: 20, y: 30, width: 1000, height: 760 },
+              z_index: 1,
+            }],
+          };
+        }
+        if (name === "bring_to_front") return { landed_on_target: true, now_fg_hwnd: "91" };
+        if (name === "launch_app") throw new Error("must not launch a child process when its trusted owner window exists");
+        return { status: "ok" };
+      },
+    },
+  });
+
+  const result = await driver.launchApp({
+    launchPath: "C:\\Program Files\\Owning App\\resources\\child.exe",
+    name: "Child Surface",
+    pid: 701,
+    processIds: [701],
+    ownerProcessIds: [700],
+    running: true,
+  });
+
+  assert.equal(result.status, "restored");
+  assert.equal(result.windows[0].windowId, 91);
+  assert.equal(calls.some(({ name }) => name === "launch_app"), false);
+});
+
 test("CuaDriverMcpDriver prefers the identity-matched main window and independently verifies foreground", async () => {
   const calls = [];
   let foregroundWindowId = "999";

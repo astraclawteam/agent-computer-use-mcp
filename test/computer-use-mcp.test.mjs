@@ -2461,6 +2461,7 @@ test("agent-computer-use-mcp freezes the local MCP tool contract", () => {
 
   const toolNames = COMPUTER_USE_MCP_TOOLS.map((tool) => tool.name);
   assert.deepEqual(toolNames, [
+    "computer.task",
     "computer.message",
     "computer.acquire",
     "computer.observe",
@@ -2489,6 +2490,11 @@ test("agent-computer-use-mcp freezes the local MCP tool contract", () => {
   assert.match(message.description, /only Agent-facing path authorized/u);
   assert.deepEqual(message.inputSchema.required, ["applicationName", "query", "message"]);
   assert.equal(message._meta["xiaozhiclaw/requestTimeoutMs"], 120_000);
+
+  const task = COMPUTER_USE_MCP_TOOLS.find((tool) => tool.name === "computer.task");
+  assert.match(task.description, /Host-owned observations/u);
+  assert.deepEqual(task.inputSchema.required, ["applicationName", "goal"]);
+  assert.equal(task._meta["xiaozhiclaw/requestTimeoutMs"], 120_000);
 
   const health = COMPUTER_USE_MCP_TOOLS.find((tool) => tool.name === "computer.health");
   assert.equal(health.annotations.phase, "0.9");
@@ -2620,7 +2626,7 @@ test("agent-computer-use-mcp freezes the local MCP tool contract", () => {
     ["x", "y", "width", "height"],
   );
   assert.equal(act.inputSchema.properties.action.properties.key.type, "string");
-  const modelVisibleContractChars = [acquire, observe, act]
+  const modelVisibleContractChars = [task, message]
     .reduce((total, tool) => total + tool.description.length + JSON.stringify(tool.inputSchema).length, 0);
   assert.ok(modelVisibleContractChars <= 8500, `agent-visible Computer Use contract stays compact (${modelVisibleContractChars} chars)`);
   assert.match(observe.description, /one versioned Host Scene/u);
@@ -2636,7 +2642,7 @@ test("agent-computer-use-mcp freezes the local MCP tool contract", () => {
     assert.ok(observe.outputSchema.properties[field], `computer.observe declares ${field}`);
   }
 
-  for (const tool of COMPUTER_USE_MCP_TOOLS.slice(0, 4)) {
+  for (const tool of COMPUTER_USE_MCP_TOOLS.slice(0, 6)) {
     const capability = tool._meta?.["xiaozhiclaw/semanticCapability"];
     assert.equal(capability?.schemaVersion, 1, `${tool.name} declares a versioned semantic capability`);
     assert.equal(typeof capability?.summary, "string", `${tool.name} declares a semantic summary`);
@@ -2660,6 +2666,7 @@ test("agent-computer-use-mcp answers initialize, tools/list, and health over std
     await client.connect();
     const listed = await client.listTools();
     assert.deepEqual(listed.tools.map((tool) => tool.name), [
+      "computer.task",
       "computer.message",
       "computer.acquire",
       "computer.observe",
@@ -2670,7 +2677,7 @@ test("agent-computer-use-mcp answers initialize, tools/list, and health over std
       "computer.installation",
       "computer.repair",
     ]);
-    for (const tool of listed.tools.slice(0, 5)) {
+    for (const tool of listed.tools.slice(0, 6)) {
       assert.equal(
         tool._meta?.["xiaozhiclaw/semanticCapability"]?.schemaVersion,
         1,

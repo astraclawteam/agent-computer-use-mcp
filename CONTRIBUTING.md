@@ -33,8 +33,13 @@ instead of a public issue.
 - **Natural-language capability routing.** Tool selection is driven by semantic
   descriptions and model reasoning, never application-name keywords or regexes.
 - **Compact public surface.** Keep Agent tools task-level and bounded.
-  Messaging mutations belong to `computer.message`; lifecycle operations and
-  diagnostics remain Host-owned.
+  Generic desktop goals use `computer.task`, messaging mutations use
+  `computer.message`, and lifecycle operations and diagnostics remain
+  Host-owned.
+- **Host-owned continuation.** Keep generic task continuation on the
+  interaction-step execution-control contract. Do not reintroduce shell or
+  low-level GUI fallback after `computer.task`, and accept an owner process only
+  when process evidence proves one application family.
 - **Evidence before mutation.** Semantic elements, focus receipts, or a fresh
   observation must ground actions.
 - **No guessed coordinates.** Pixel actions stay bound to observation identity,
@@ -140,7 +145,8 @@ bytes to the same tag.
 Reviewers will ask:
 
 - Is the behavior grounded in a real user scenario?
-- Does the change preserve the four-tool Agent surface?
+- Does the change preserve the task-level Agent surface and explicit Host-only
+  lifecycle boundary?
 - Are focus, scale, truncation, execution path, and fallback evidence honest?
 - Are policy and cleanup paths tested?
 - Are released bytes reproducible from the tagged source?

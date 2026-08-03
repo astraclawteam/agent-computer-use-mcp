@@ -17,6 +17,7 @@ import {
 } from "./windows-unicode-input.mjs";
 import { verifyWindowsFocusedProcess } from "./windows-focus-verification.mjs";
 import { DeterministicMessagingStateMachine } from "./deterministic-messaging-state-machine.mjs";
+import { runGenericTaskHostContract } from "./generic-task-host-contract.mjs";
 
 const PENDING_MESSAGING_SELECTION_TTL_MS = 60_000;
 const pendingMessagingSelections = new Map();
@@ -123,6 +124,8 @@ export async function callTool(router, name, args, requestContext, options = {})
       });
     } else if (name === "computer.acquire") {
       structuredContent = await acquireComputer(router, args, requestContext);
+    } else if (name === "computer.task") {
+      structuredContent = await runGenericTaskTool(router, args, requestContext, options);
     } else if (name === "computer.message") {
       structuredContent = await runDeterministicMessagingTool(router, args, requestContext, options);
     } else if (name === "computer.observe") {
@@ -269,6 +272,21 @@ export async function callTool(router, name, args, requestContext, options = {})
     // above so agents do not abandon a healthy connector or retry mutations.
     isError: false,
   };
+}
+
+export async function runGenericTaskTool(router, args = {}, requestContext, options = {}) {
+  return runGenericTaskHostContract({
+    router,
+    args,
+    requestContext,
+    signal: options.signal,
+    acquire: (acquireArgs, acquireOptions) => acquireComputer(
+      router,
+      acquireArgs,
+      requestContext,
+      acquireOptions,
+    ),
+  });
 }
 
 export async function runDeterministicMessagingTool(router, args = {}, requestContext, options = {}) {

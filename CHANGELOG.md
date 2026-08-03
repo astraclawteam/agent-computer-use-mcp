@@ -2,6 +2,12 @@
 
 All notable changes to `agent-computer-use-mcp` are tracked here.
 
+## Unreleased
+
+- Add the Agent-facing `computer.task` Host contract for generic non-messaging desktop goals. It exposes only opaque semantic candidates and consistent parent-owned facts, revalidates every selected candidate against a fresh Scene, performs at most one action per invocation, never replays an indeterminate action, and releases control before every result.
+- Keep `computer.acquire`, `computer.observe`, `computer.act`, and `computer.release` Host-only; generic GUI tasks do not fall back to shell commands, guessed coordinates, provider element identities, or Agent-managed lifecycle operations.
+- Bind each generic task continuation to the next `computer.task` interaction step, invalidate failed application candidates, and resolve headless child processes through a same-package owner window without application-name aliases.
+
 ## 0.0.26
 
 - Restore tray-resident applications without falling through to a duplicate launcher, prefer materially restored primary surfaces, and select enabled owned modal windows when they block a disabled owner.

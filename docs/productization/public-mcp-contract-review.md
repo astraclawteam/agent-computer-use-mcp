@@ -11,6 +11,7 @@ This review records the public `computer.*` MCP contract that requires human PR 
 
 | Tool | Review Status | Compatibility | Overlay Exclusion | Desktop Control | Notes |
 | --- | --- | --- | --- | --- | --- |
+| computer.task | reviewed | compatible | overlay-free | reviewed | Additive Agent-facing generic non-messaging Host workflow; every invocation revalidates one opaque Scene candidate, applies at most one action, returns only consistent parent-owned facts, constrains the next interaction step to this tool, and releases before returning. |
 | computer.message | reviewed | compatible | overlay-free | reviewed | Agent-facing deterministic messaging workflow; the Host owns Scene coordinates, fixed step ordering, mutation verification, no-replay policy, and controller release. |
 | computer.acquire | reviewed | compatible | overlay-free | reviewed | Host workflow-internal; may start desktop control only after policy and approval requirements and an interactive input-desktop check. |
 | computer.observe | reviewed | compatible | overlay-free | reviewed | Host workflow-internal; detailed observations expose one versioned Host Scene, and raw provider elements remain evidence rather than parallel action targets. |

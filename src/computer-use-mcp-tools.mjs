@@ -864,6 +864,58 @@ const releaseLifecycleMeta = Object.freeze({
   }),
 });
 
+const GENERIC_TASK_CANDIDATE_SCHEMA = {
+  type: "object",
+  required: [
+    "candidateId",
+    "label",
+    "role",
+    "parentRole",
+    "action",
+    "inputRequired",
+    "evidenceSources",
+  ],
+  properties: {
+    candidateId: { type: "string" },
+    label: { type: "string" },
+    role: { type: "string" },
+    parentRole: { anyOf: [{ type: "string" }, { type: "null" }] },
+    action: { type: "string", enum: ["activate", "select", "edit"] },
+    inputRequired: { type: "boolean" },
+    evidenceSources: { type: "array", items: { type: "string" }, uniqueItems: true },
+  },
+  additionalProperties: false,
+};
+
+const GENERIC_TASK_FACT_SCHEMA = {
+  type: "object",
+  required: ["label", "role", "parentRole", "evidenceSources"],
+  properties: {
+    label: { type: "string" },
+    role: { type: "string" },
+    parentRole: { anyOf: [{ type: "string" }, { type: "null" }] },
+    evidenceSources: { type: "array", items: { type: "string" }, uniqueItems: true },
+  },
+  additionalProperties: false,
+};
+
+const GENERIC_TASK_EXECUTION_CONTROL_SCHEMA = {
+  type: "object",
+  required: ["status", "scope", "retryable", "allowedNextTools", "reason", "nextAction"],
+  properties: {
+    status: { const: "blocked" },
+    scope: { const: "interaction-step" },
+    retryable: { const: false },
+    allowedNextTools: {
+      type: "array",
+      const: ["computer.task"],
+    },
+    reason: { const: "generic-desktop-task-next-step-host-owned" },
+    nextAction: { type: "string" },
+  },
+  additionalProperties: false,
+};
+
 export const COMPUTER_USE_HOST_TOOLS = Object.freeze(
   ["computer.health", "computer.doctor", "computer.installation", "computer.repair"].map((name) =>
     Object.freeze({ ...byLegacyName(name), _meta: HOST_MANAGEMENT_META })),
@@ -1146,6 +1198,101 @@ const actTool = {
   }),
 };
 
+const genericTaskTool = {
+  name: "computer.task",
+  title: "Run Generic Desktop Task",
+  description: "Continue one generic non-messaging desktop task through Host-owned observations and opaque semantic candidates. Start with applicationName and goal. The Host acquires, observes one versioned Scene, performs at most one freshly revalidated candidate action, verifies its canonical receipt, and releases before every result. Continue with taskToken plus one candidateId, or finish with decision=complete, reobserve, report, or cancel. If the requested final control is not directly visible, select one reversible navigation candidate such as an account/profile/menu/navigation control that is semantically likely to reveal it; do not report merely because the final target is not yet exposed. A named product surface may be hosted by a differently labelled desktop application: when the Host returns owning-window candidates, choose the defensible semantic product relationship instead of treating a background same-name process as proof that no window exists. Never use shell commands, guessed coordinates, element ids, OCR-region assignment, or lifecycle tools for a GUI task. Messaging requests must use computer.message.",
+  _meta: {
+    ...semanticCapabilityMeta({
+      summary: "Advance a native desktop GUI goal one Host-grounded semantic action at a time without exposing coordinates or controller lifecycle decisions.",
+      scenarios: [
+        "Open a native application's settings and navigate to a requested page.",
+        "Select a visible command, tab, menu item, or editable surface in a non-messaging desktop workflow.",
+        "Read Host-owned consistent interface facts and continue until the requested visible state is reached.",
+      ],
+      prerequisites: [
+        "The user requested a non-messaging desktop GUI task.",
+        "The target application is running or recoverable in the Host application inventory.",
+      ],
+      effects: ["May perform one freshly revalidated visible interface action per invocation."],
+      modalities: ["local desktop GUI", "Host Scene", "semantic candidate selection"],
+      constraints: [
+        "Select only opaque candidates returned by the Host for the current task token.",
+        "Never call shell, SendKeys, lifecycle tools, or coordinate actions as a fallback.",
+        "Never use this path for contacts, conversations, chat input, or message sending.",
+      ],
+    }),
+    "xiaozhiclaw/requestTimeoutMs": 120_000,
+  },
+  annotations: { phase: "6.1", destructiveHint: true },
+  inputSchema: {
+    type: "object",
+    required: ["applicationName", "goal"],
+    properties: {
+      applicationName: {
+        type: "string",
+        minLength: 1,
+        maxLength: 256,
+        description: "Semantic product surface named by the user. The Host resolves fresh application and visible-window inventory; an owning desktop product may have a different label and must then be chosen from opaque candidates by semantic relationship.",
+      },
+      goal: {
+        type: "string",
+        minLength: 1,
+        maxLength: 2_000,
+        description: "Exact non-messaging desktop outcome requested by the user.",
+      },
+      taskToken: {
+        type: "string",
+        description: "Opaque Host task token returned by a prior computer.task result.",
+      },
+      candidateId: {
+        type: "string",
+        description: "One opaque application or Scene candidate from the latest result for this task token.",
+      },
+      text: {
+        type: "string",
+        maxLength: 20_000,
+        description: "Exact text to enter only when the selected candidate declares inputRequired=true.",
+      },
+      decision: {
+        type: "string",
+        enum: ["complete", "reobserve", "report", "cancel"],
+        description: "Finish, request a fresh Host observation, report inability to continue, or cancel. Never use complete before the returned facts establish the requested visible state.",
+      },
+    },
+    allOf: [{
+      if: { required: ["candidateId"] },
+      then: { required: ["taskToken"] },
+    }, {
+      if: { required: ["decision"] },
+      then: { required: ["taskToken"] },
+    }],
+    additionalProperties: false,
+  },
+  outputSchema: outputSchema({
+    status: { type: "string", enum: ["committed", "not-applied", "indeterminate"] },
+    outcome: { type: "string", enum: ["committed", "not-applied", "indeterminate"] },
+    released: { type: "boolean" },
+    elapsedMs: { type: "number", minimum: 0 },
+    executionControl: GENERIC_TASK_EXECUTION_CONTROL_SCHEMA,
+    phase: {
+      type: "string",
+      enum: ["application-selection", "decision-required", "complete", "reported", "cancelled", "failed"],
+    },
+    taskToken: { type: "string" },
+    candidates: { type: "array", items: GENERIC_TASK_CANDIDATE_SCHEMA },
+    facts: { type: "array", items: GENERIC_TASK_FACT_SCHEMA },
+    factsTruncated: { type: "boolean" },
+    action: ANY_OBJECT,
+    allowedDecisions: {
+      type: "array",
+      items: { type: "string", enum: ["complete", "reobserve", "report", "cancel"] },
+      uniqueItems: true,
+    },
+    error: ANY_OBJECT,
+  }, ["status", "outcome", "released", "elapsedMs", "executionControl", "phase"]),
+};
+
 const messagingTool = {
   name: "computer.message",
   title: "Run Deterministic Messaging Workflow",
@@ -1252,6 +1399,7 @@ const messagingTool = {
 };
 
 export const COMPUTER_USE_AGENT_TOOLS = Object.freeze([
+  Object.freeze(genericTaskTool),
   Object.freeze(messagingTool),
 ]);
 
@@ -1262,7 +1410,7 @@ export const COMPUTER_USE_WORKFLOW_INTERNAL_TOOLS = Object.freeze([
   Object.freeze(releaseTool),
 ]);
 
-/** Raw MCP inventory: one Agent tool plus eight Host-only workflow/management tools. */
+/** Raw MCP inventory: two task-level Agent tools plus eight Host-only workflow/management tools. */
 export const COMPUTER_USE_MCP_TOOLS = Object.freeze([
   ...COMPUTER_USE_AGENT_TOOLS,
   ...COMPUTER_USE_WORKFLOW_INTERNAL_TOOLS,

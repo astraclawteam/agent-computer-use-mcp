@@ -32,13 +32,40 @@ try {
 } catch {
   # Start Menu identity enrichment is best-effort; process discovery remains available.
 }
-$applications = Get-CimInstance Win32_Process -Filter "SessionId = $currentSessionId" | ForEach-Object {
+$allProcesses = @(Get-CimInstance Win32_Process -Filter "SessionId = $currentSessionId")
+$processById = @{}
+$allProcesses | ForEach-Object { $processById[[int]$_.ProcessId] = $_ }
+function Get-WindowsAppsPackageRoot([string]$path) {
+  if ([string]::IsNullOrWhiteSpace($path)) { return $null }
+  $match = [regex]::Match($path, '^(.*\\WindowsApps\\[^\\]+)\\', [System.Text.RegularExpressions.RegexOptions]::IgnoreCase)
+  if ($match.Success) { return $match.Groups[1].Value }
+  return $null
+}
+function Test-SameApplicationFamily([string]$childPath, [string]$parentPath) {
+  if ([string]::IsNullOrWhiteSpace($childPath) -or [string]::IsNullOrWhiteSpace($parentPath)) { return $false }
+  $childRoot = Get-WindowsAppsPackageRoot $childPath
+  $parentRoot = Get-WindowsAppsPackageRoot $parentPath
+  if ($childRoot -and $parentRoot) {
+    return $childRoot.Equals($parentRoot, [System.StringComparison]::OrdinalIgnoreCase)
+  }
+  return [System.IO.Path]::GetDirectoryName($childPath).Equals(
+    [System.IO.Path]::GetDirectoryName($parentPath),
+    [System.StringComparison]::OrdinalIgnoreCase
+  )
+}
+$applications = $allProcesses | ForEach-Object {
   try {
     $path = $_.ExecutablePath
     if ([string]::IsNullOrWhiteSpace($path)) { return }
     $fullPath = [System.IO.Path]::GetFullPath($path)
     if ($fullPath.StartsWith($windowsRoot, [System.StringComparison]::OrdinalIgnoreCase)) { return }
     if (-not $fullPath.EndsWith('.exe', [System.StringComparison]::OrdinalIgnoreCase)) { return }
+    $parent = $processById[[int]$_.ParentProcessId]
+    $ownerPid = $null
+    if ($parent -and -not [string]::IsNullOrWhiteSpace($parent.ExecutablePath)) {
+      $parentPath = [System.IO.Path]::GetFullPath($parent.ExecutablePath)
+      if (Test-SameApplicationFamily $fullPath $parentPath) { $ownerPid = [int]$parent.ProcessId }
+    }
     [pscustomobject]@{
       name = if ($shortcutNames.ContainsKey($fullPath)) {
         $shortcutNames[$fullPath]
@@ -46,6 +73,7 @@ $applications = Get-CimInstance Win32_Process -Filter "SessionId = $currentSessi
         [System.IO.Path]::GetFileNameWithoutExtension($fullPath)
       }
       pid = $_.ProcessId
+      ownerPid = $ownerPid
       launchPath = $fullPath
     }
   } catch {
@@ -166,8 +194,14 @@ function normalizeApplications(value) {
     const existing = applicationsByPath.get(key);
     if (existing) {
       if (!existing.processIds.includes(pid)) existing.processIds.push(pid);
+      const ownerPid = Number(application?.ownerPid);
+      if (Number.isSafeInteger(ownerPid) && ownerPid > 0) {
+        existing.ownerProcessIds ??= [];
+        if (!existing.ownerProcessIds.includes(ownerPid)) existing.ownerProcessIds.push(ownerPid);
+      }
       continue;
     }
+    const ownerPid = Number(application?.ownerPid);
     applicationsByPath.set(key, {
       name,
       kind: "desktop",
@@ -175,6 +209,7 @@ function normalizeApplications(value) {
       active: false,
       pid,
       processIds: [pid],
+      ...(Number.isSafeInteger(ownerPid) && ownerPid > 0 ? { ownerProcessIds: [ownerPid] } : {}),
       lastUsed: null,
       launchPath,
     });

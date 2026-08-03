@@ -139,6 +139,9 @@ export class CuaDriverMcpDriver {
             active: app.active === true,
             pid: Number.isInteger(app.pid) && app.pid > 0 ? app.pid : (process?.pid ?? 0),
             processIds: normalizeProcessIds(app.process_ids, app.pid, process?.pid),
+            ...(normalizeProcessIds(process?.ownerProcessIds).length > 0
+              ? { ownerProcessIds: normalizeProcessIds(process.ownerProcessIds) }
+              : {}),
             lastUsed: app.last_used ?? null,
             launchPath: app.launch_path,
           };
@@ -158,6 +161,11 @@ export class CuaDriverMcpDriver {
             existing.pid,
             ...normalizeProcessIds(processApplication.processIds, processApplication.pid),
           );
+          const mergedOwnerProcessIds = normalizeProcessIds(
+            existing.ownerProcessIds,
+            ...normalizeProcessIds(processApplication.ownerProcessIds),
+          );
+          if (mergedOwnerProcessIds.length > 0) existing.ownerProcessIds = mergedOwnerProcessIds;
           continue;
         }
         const normalizedProcessApplication = {
@@ -166,6 +174,9 @@ export class CuaDriverMcpDriver {
             processApplication.processIds,
             processApplication.pid,
           ),
+          ...(normalizeProcessIds(processApplication.ownerProcessIds).length > 0
+            ? { ownerProcessIds: normalizeProcessIds(processApplication.ownerProcessIds) }
+            : {}),
         };
         applications.push(normalizedProcessApplication);
         byExecutable.set(key, normalizedProcessApplication);
@@ -176,10 +187,12 @@ export class CuaDriverMcpDriver {
     });
   }
 
-  launchApp({ launchPath, name, pid, processIds = [], running = false }) {
+  launchApp({ launchPath, name, pid, processIds = [], ownerProcessIds = [], running = false }) {
     return this.runWork(async (ticket) => {
       await this.ensureStartedResources(ticket);
       const candidateProcessIds = new Set(normalizeProcessIds(processIds, pid));
+      const trustedOwnerProcessIds = new Set(normalizeProcessIds(ownerProcessIds));
+      for (const ownerPid of trustedOwnerProcessIds) candidateProcessIds.add(ownerPid);
       if (running === true && candidateProcessIds.size > 0) {
         const existingWindows = (await this.listWindowsResources(ticket, {
           onScreenOnly: false,
@@ -192,7 +205,7 @@ export class CuaDriverMcpDriver {
             { name },
           ));
         const identityMatchedWindows = existingWindows.filter((window) => (
-          matchesApplicationWindowIdentity(window, { name })
+          trustedOwnerProcessIds.has(window.pid) || matchesApplicationWindowIdentity(window, { name })
         ));
         const relationships = existingWindows.length > 1 && identityMatchedWindows.length > 0
           ? await this.awaitWindowRelationships(ticket, existingWindows)

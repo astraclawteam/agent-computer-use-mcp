@@ -636,6 +636,7 @@ export class ComputerUseProviderRouter {
             const processIds = new Set([
               application.pid,
               ...(Array.isArray(application.processIds) ? application.processIds : []),
+              ...(Array.isArray(application.ownerProcessIds) ? application.ownerProcessIds : []),
             ].filter((value) => Number.isSafeInteger(value) && value > 0));
             const windows = await this.awaitExternal(
               ticket,
@@ -661,6 +662,9 @@ export class ComputerUseProviderRouter {
                 pid: application.pid,
                 ...(Array.isArray(application.processIds)
                   ? { processIds: application.processIds }
+                  : {}),
+                ...(Array.isArray(application.ownerProcessIds)
+                  ? { ownerProcessIds: application.ownerProcessIds }
                   : {}),
                 running: application.running,
               }),
@@ -2431,10 +2435,13 @@ export class ComputerUseProviderRouter {
           // every model turn.
           const applicationToken = `application-${randomUUID().replaceAll("-", "").slice(0, 16)}`;
           this.applicationCatalog.set(applicationToken, application);
+          const applicationProcessIds = new Set([
+            application.pid,
+            ...(Array.isArray(application.processIds) ? application.processIds : []),
+            ...(Array.isArray(application.ownerProcessIds) ? application.ownerProcessIds : []),
+          ].filter((value) => Number.isSafeInteger(value) && value > 0));
           const visible = windows.some((window) => (
-            Number.isSafeInteger(application.pid)
-            && Number.isSafeInteger(window.pid)
-            && application.pid === window.pid
+            Number.isSafeInteger(window.pid) && applicationProcessIds.has(window.pid)
           ));
           const state = application.active
             ? "active"

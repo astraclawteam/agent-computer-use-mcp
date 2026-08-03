@@ -15,6 +15,7 @@ test("Windows process application probe returns validated opaque-token sources",
         {
           name: "Tray App",
           pid: 505,
+          ownerPid: 404,
           launchPath: "C:\\Program Files\\Tray App\\tray-app.exe",
         },
         {
@@ -46,6 +47,7 @@ test("Windows process application probe returns validated opaque-token sources",
     active: false,
     pid: 505,
     processIds: [505, 506],
+    ownerProcessIds: [404],
     lastUsed: null,
     launchPath: "C:\\Program Files\\Tray App\\tray-app.exe",
   }]);
@@ -54,6 +56,8 @@ test("Windows process application probe returns validated opaque-token sources",
   assert.match(probeSource, /GetFolderPath\('StartMenu'\)/u);
   assert.match(probeSource, /GetFolderPath\('CommonStartMenu'\)/u);
   assert.match(probeSource, /\$shortcutTarget/u);
+  assert.match(probeSource, /Test-SameApplicationFamily/u);
+  assert.match(probeSource, /ownerPid/u);
   assert.doesNotMatch(probeSource, /Weixin|微信/u);
 });
 

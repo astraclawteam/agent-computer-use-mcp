@@ -1,8 +1,10 @@
 # Computer Use Phase 5: bounded LLM interaction
 
 Status: implemented in the real MCP composition root on `main`. The
-Agent-facing `computer.message` tool accepts only the semantic application,
-query, and message slots, then runs the Phase 4 state machine inside the Host.
+Agent-facing `computer.task` tool advances generic non-messaging GUI goals
+through opaque Host candidates, while `computer.message` accepts only the
+semantic application, query, and message slots and runs the Phase 4 messaging
+state machine inside the Host.
 Exact application and conversation matches complete without another model
 decision. A non-exact application inventory match or ambiguous conversation
 is returned only as opaque IDs for a bounded follow-up selection. The Host
@@ -18,7 +20,7 @@ timeout.
 
 ## Allowed model authority
 
-The LLM has exactly four decision kinds:
+The deterministic messaging boundary has exactly four decision kinds:
 
 | Kind | Model input | Only valid output | Host validation after output |
 | --- | --- | --- | --- |
@@ -31,6 +33,13 @@ Every request has a strict output schema with `additionalProperties: false` and
 a bounded timeout. An already-cancelled Host signal prevents the model call.
 Unknown IDs, additional fields, unsupported decisions, malformed structures,
 and late results fail closed.
+
+For `computer.task`, goal understanding and opaque candidate selection follow
+the same authority limits. Between Host-released invocations the model may also
+return only `complete`, `reobserve`, `report`, or `cancel`. These values choose
+task continuation, not controller operations: the Host still acquires and
+releases internally, `reobserve` is read-only, and neither `report` nor `cancel`
+can request an action or replay.
 
 ## Information the model does not receive
 
@@ -48,6 +57,25 @@ evidence-consistent, actionable results reach this list. A model-selected ID is
 therefore a semantic choice, not an action target supplied by the model.
 
 ## Workflow composition
+
+`computer.task` is the generic Agent-facing desktop path. The model supplies an
+application name and user goal, then selects only opaque application or Scene
+candidates. The Host reacquires and observes a fresh Scene before every
+selection, requires a unique match to the prior semantic candidate, performs at
+most one action, captures the post-action Scene, returns only consistent
+parent-owned facts and fresh opaque candidates, and releases before the tool
+result. Candidate output contains no coordinate, crop, provider token,
+`elementId`, controller, or lifecycle field. `not-applied` and `indeterminate`
+actions are never replayed. Stop cancels the in-flight invocation and release
+still runs before the terminal result.
+
+Every result installs an interaction-step execution control whose only allowed
+next tool is `computer.task`. This prevents shell and low-level GUI bypass
+without incorrectly marking the whole turn terminal; the next Host result
+renews the same boundary. When an exact process has no window, the Host may
+bind an owning window only from same-application-family process evidence or
+consistent root-level `Window/Application/Document` Scene evidence. Failed
+process candidates are invalidated for that task state.
 
 `computer.message` is the only Agent-facing messaging mutation path. It owns
 acquire, current Scene observation, element-targeted actions, guarded transition
