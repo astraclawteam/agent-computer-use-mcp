@@ -56,3 +56,33 @@ test("an explicit release prevents a duplicate cleanup release", async () => {
 
   assert.deepEqual(calls, ["computer.acquire", "computer.release"]);
 });
+
+test("the live Phase 6 session forwards cancellation and exposes the SDK transport pid", async () => {
+  const calls = [];
+  const controller = new AbortController();
+  const session = createPhase6LiveSession({
+    client: {
+      async callTool(request, schema, options) {
+        calls.push({ request, schema, options });
+        return { structuredContent: { status: "ok" } };
+      },
+      async close() {},
+    },
+    transport: { pid: 4242 },
+  });
+
+  await session.callTool(
+    "computer.observe",
+    { mode: "state" },
+    { signal: controller.signal },
+  );
+  await session.close();
+
+  assert.equal(session.processId, 4242);
+  assert.deepEqual(calls[0].request, {
+    name: "computer.observe",
+    arguments: { mode: "state" },
+  });
+  assert.equal(calls[0].schema, undefined);
+  assert.equal(calls[0].options.signal, controller.signal);
+});

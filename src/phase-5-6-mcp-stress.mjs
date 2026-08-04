@@ -124,7 +124,7 @@ function createClient(name) {
   );
   const transport = new StdioClientTransport({
     command: process.execPath,
-    args: ["src/computer-use-mcp-server.mjs"],
+    args: ["src/computer-use-mcp-server.mjs", "--tool-surface=host"],
     cwd: process.cwd(),
   });
   return { name, client, transport };

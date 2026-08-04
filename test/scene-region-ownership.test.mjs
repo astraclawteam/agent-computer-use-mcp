@@ -149,7 +149,7 @@ test("Host Scene is the single versioned ownership model for semantic and OCR ev
   const editable = resolveHostSceneElement(scene, { elementToken: "search" });
   assert.equal(editable.type, "Editable");
   assert.equal(editable.evidenceConsistency, "consistent");
-  assert.deepEqual(editable.actions, ["set_value", "click"]);
+  assert.deepEqual(editable.actions, ["set_value", "click", "type_text"]);
 
   const ocr = resolveHostSceneElement(scene, { elementToken: "ocr-query" });
   assert.equal(ocr.evidenceConsistency, "insufficient");

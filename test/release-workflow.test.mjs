@@ -21,6 +21,7 @@ test("tag workflow verifies and publishes exactly one Windows GitHub Release art
   assert.match(runs, /release\.commit_not_on_main/u);
   assert.match(runs, /release\.changelog_missing/u);
   assert.match(runs, /npm test/u);
+  assert.doesNotMatch(runs, /verify:phase-6:release-evidence/u);
   assert.match(runs, /phase:1\.6/u);
   assert.match(runs, /phase:1\.7/u);
   assert.match(runs, /phase:1\.8/u);

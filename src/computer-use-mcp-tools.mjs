@@ -124,14 +124,17 @@ const COMMON_OUTPUT_PROPERTIES = {
   error: ANY_OBJECT,
 };
 
+/** Terminal status of the shared error envelope every tool can return. */
+export const ERROR_ENVELOPE_STATUS = "error";
+
 function outputSchema(properties = {}, required = []) {
   const schema = {
     type: "object",
     required: ["resultSchemaVersion", "includeUserOverlay"],
-    properties: {
+    properties: withErrorEnvelopeStatus({
       ...COMMON_OUTPUT_PROPERTIES,
       ...properties,
-    },
+    }),
     additionalProperties: false,
   };
   if (required.length > 0) {
@@ -144,7 +147,31 @@ function outputSchema(properties = {}, required = []) {
   return schema;
 }
 
-const LEGACY_COMPUTER_USE_MCP_TOOLS = [
+/**
+ * Keep a constrained status compatible with the error envelope.
+ *
+ * The `allOf` above already models the error branch as a first-class result, but
+ * a status enum listing only success outcomes contradicts it: the tool's own
+ * failure result then fails the tool's own published schema, and an official MCP
+ * client rejects the response with `-32602` instead of delivering the error to
+ * the caller. Widening the enum is the honest fix. Reusing a success status
+ * would be worse than a schema error here, because everything that reaches the
+ * generic error envelope has already failed the safe-rejection check, so calling
+ * it `not-applied` would tell an Agent that a possibly delivered mutation is
+ * safe to replay.
+ */
+function withErrorEnvelopeStatus(properties) {
+  const status = properties.status;
+  if (!Array.isArray(status?.enum) || status.enum.includes(ERROR_ENVELOPE_STATUS)) {
+    return properties;
+  }
+  return {
+    ...properties,
+    status: { ...status, enum: [...status.enum, ERROR_ENVELOPE_STATUS] },
+  };
+}
+
+const TOOL_SCHEMA_TEMPLATES = [
   {
     name: "computer.health",
     title: "Computer Use Health",
@@ -376,86 +403,6 @@ const LEGACY_COMPUTER_USE_MCP_TOOLS = [
     }, ["status", "controller"]),
   },
   {
-    name: "computer.approve",
-    title: "Approve Computer Use",
-    description: "Approve or deny a pending Gateway-managed computer control request.",
-    annotations: { phase: "1.12", destructiveHint: true },
-    inputSchema: {
-      type: "object",
-      required: ["approvalToken"],
-      properties: {
-        approvalToken: { type: "string" },
-        approved: {
-          type: "boolean",
-          description: "When true, grant the pending controller request and start the user-only overlay.",
-        },
-        denied: {
-          type: "boolean",
-          description: "When true, deny and clear the pending controller request.",
-        },
-        reason: { type: "string" },
-        leaseTtlMs: {
-          type: "number",
-          description: "Optional controller lease TTL to apply after approval.",
-        },
-      },
-      additionalProperties: false,
-    },
-    outputSchema: outputSchema({
-      status: { type: "string" },
-      approval: ANY_OBJECT,
-      controller: { anyOf: [ANY_OBJECT, { type: "null" }] },
-      overlay: { anyOf: [ANY_OBJECT, { type: "null" }] },
-      startsDesktopControl: { type: "boolean" },
-    }, ["status", "approval", "controller", "startsDesktopControl"]),
-  },
-  {
-    name: "computer.capture",
-    title: "Capture Computer Observation",
-    description: "Capture the active Gateway-managed target through the provider router.",
-    annotations: { phase: "1.3", readOnlyHint: true },
-    inputSchema: {
-      type: "object",
-      properties: {
-        mode: { type: "string", enum: ["semantic", "ocr-region", "screenshot"] },
-        crop: {
-          type: "object",
-          required: ["x", "y", "width", "height"],
-          properties: {
-            x: { type: "number" },
-            y: { type: "number" },
-            width: { type: "number" },
-            height: { type: "number" },
-          },
-          additionalProperties: false,
-        },
-        timeoutMs: { type: "number" },
-      },
-      additionalProperties: false,
-    },
-    outputSchema: outputSchema({
-      observationId: { type: "string" },
-      coordinateSpace: { type: "string", enum: ["window-local"] },
-      coordinateBounds: { anyOf: [BOX_SCHEMA, { type: "null" }] },
-      coordinateTransform: { type: "string", enum: ["identity", "scale-offset"] },
-      coordinateScale: ANY_OBJECT,
-      surfaceReceipt: ANY_OBJECT,
-      surfaceProvenance: ANY_OBJECT,
-      focusReceipt: ANY_OBJECT,
-      mutationVerification: ANY_OBJECT,
-      provider: { type: "string" },
-      source: { type: "string" },
-      mode: { type: "string" },
-      scene: HOST_SCENE_SCHEMA,
-      artifact: ANY_OBJECT,
-      capture: ANY_OBJECT,
-      window: ANY_OBJECT,
-      text: { type: "string" },
-      controllerId: { type: "string" },
-      expiresAt: { anyOf: [{ type: "string" }, { type: "null" }] },
-    }),
-  },
-  {
     name: "computer.act",
     title: "Act On Computer",
     description: "Act once on an actionable element from the latest versioned Host Scene. OCR-only or conflicting evidence cannot authorize an action. The result outcome is exactly committed, not-applied, or indeterminate; never replay an indeterminate mutation. For screenshot-grounded editable text use one atomic type_text and verify its postcondition.",
@@ -679,159 +626,10 @@ const LEGACY_COMPUTER_USE_MCP_TOOLS = [
       previousApproval: { anyOf: [ANY_OBJECT, { type: "null" }] },
     }, ["status", "previousController"]),
   },
-  {
-    name: "computer.revoke",
-    title: "Revoke Computer Use",
-    description: "Revoke the active Gateway-managed controller lease and clear module state.",
-    annotations: { phase: "1.3", destructiveHint: true },
-    inputSchema: {
-      type: "object",
-      properties: { reason: { type: "string" } },
-      additionalProperties: false,
-    },
-    outputSchema: outputSchema({
-      status: { type: "string" },
-      previousController: { anyOf: [ANY_OBJECT, { type: "null" }] },
-      previousApproval: { anyOf: [ANY_OBJECT, { type: "null" }] },
-    }, ["status", "previousController"]),
-  },
-  {
-    name: "computer.list_state",
-    title: "List Computer Use State",
-    description: "Read Computer Use state and discover desktop windows plus opaque application tokens. For an application-level request, pass the matching applicationToken to computer.acquire so the Host restores and selects the primary window even when only auxiliary windows are visible. Use foregroundWindow only to answer which window is currently frontmost. This tool never acquires control.",
-    annotations: { phase: "1.3", readOnlyHint: true },
-    inputSchema: {
-      type: "object",
-      properties: {},
-      additionalProperties: false,
-    },
-    outputSchema: outputSchema({
-      status: { type: "string" },
-      activeController: { anyOf: [ANY_OBJECT, { type: "null" }] },
-      pendingAccessApproval: { anyOf: [ANY_OBJECT, { type: "null" }] },
-      lastCapture: { anyOf: [ANY_OBJECT, { type: "null" }] },
-      pendingRepairApproval: { anyOf: [ANY_OBJECT, { type: "null" }] },
-      foregroundWindow: { anyOf: [ANY_OBJECT, { type: "null" }] },
-      windows: ANY_ARRAY,
-      windowDiscovery: ANY_OBJECT,
-      desktopState: ANY_OBJECT,
-      blocker: ANY_OBJECT,
-      auditEvents: ANY_ARRAY,
-      startsDesktopControl: { const: false },
-    }, [
-      "status",
-      "activeController",
-      "pendingAccessApproval",
-      "lastCapture",
-      "pendingRepairApproval",
-      "foregroundWindow",
-      "windows",
-      "windowDiscovery",
-      "auditEvents",
-      "startsDesktopControl",
-    ]),
-  },
-  {
-    name: "computer.capture_window",
-    title: "Capture Window",
-    description: "Capture a real OS window to a PNG artifact using a window-level capture path. Use the exact titlePart value \"*\" to capture the current foreground window.",
-    annotations: { phase: "1.0", readOnlyHint: true },
-    inputSchema: {
-      type: "object",
-      required: ["titlePart"],
-      properties: {
-        titlePart: {
-          type: "string",
-          description: "Case-insensitive literal title substring, or the exact value \"*\" for the current foreground window.",
-        },
-        outputPath: { type: "string" },
-        timeoutMs: { type: "number" },
-      },
-      additionalProperties: false,
-    },
-    outputSchema: outputSchema({
-      status: { type: "string" },
-      provider: { type: "string" },
-      source: { type: "string" },
-      capture: ANY_OBJECT,
-      artifact: ANY_OBJECT,
-    }, ["status", "provider", "source", "capture", "artifact"]),
-  },
-  {
-    name: "computer.ocr_region",
-    title: "OCR Region",
-    description: "Run the local OCR sidecar against an image path and optional crop region.",
-    annotations: { phase: "1.1", readOnlyHint: true },
-    inputSchema: {
-      type: "object",
-      properties: {
-        imagePath: { type: "string" },
-        titlePart: { type: "string" },
-        crop: {
-          type: "object",
-          required: ["x", "y", "width", "height"],
-          properties: {
-            x: { type: "number" },
-            y: { type: "number" },
-            width: { type: "number" },
-            height: { type: "number" },
-          },
-          additionalProperties: false,
-        },
-        languages: {
-          type: "array",
-          items: { type: "string" },
-        },
-        timeoutMs: { type: "number" },
-        noCache: { type: "boolean" },
-      },
-      additionalProperties: false,
-    },
-    outputSchema: outputSchema({
-      status: { type: "string" },
-      provider: { type: "string" },
-      mode: { type: "string" },
-      imagePath: { type: "string" },
-      capture: { anyOf: [ANY_OBJECT, { type: "null" }] },
-      observation: ANY_OBJECT,
-    }, ["status", "provider", "mode", "imagePath", "observation"]),
-  },
-  {
-    name: "computer.observe_diff",
-    title: "Observe Diff",
-    description: "Compare two real-window captures and OCR only the dirty region.",
-    annotations: { phase: "1.1", readOnlyHint: true },
-    inputSchema: {
-      type: "object",
-      required: ["baselinePath", "changedPath"],
-      properties: {
-        baselinePath: { type: "string" },
-        changedPath: { type: "string" },
-        threshold: { type: "number" },
-        padding: { type: "number" },
-        languages: {
-          type: "array",
-          items: { type: "string" },
-        },
-        timeoutMs: { type: "number" },
-      },
-      additionalProperties: false,
-    },
-    outputSchema: outputSchema({
-      status: { type: "string" },
-      provider: { type: "string" },
-      mode: { type: "string" },
-      baselinePath: { type: "string" },
-      changedPath: { type: "string" },
-      dirtyRegion: { anyOf: [ANY_OBJECT, { type: "null" }] },
-      ocrRegion: ANY_OBJECT,
-      observation: { anyOf: [ANY_OBJECT, { type: "null" }] },
-    }, ["status", "provider", "mode", "dirtyRegion", "observation"]),
-  },
 ];
 
-const byLegacyName = (name) => {
-  const tool = LEGACY_COMPUTER_USE_MCP_TOOLS.find((candidate) => candidate.name === name);
+const toolSchemaTemplate = (name) => {
+  const tool = TOOL_SCHEMA_TEMPLATES.find((candidate) => candidate.name === name);
   if (!tool) throw new Error(`Missing Computer Use schema: ${name}`);
   return tool;
 };
@@ -873,6 +671,7 @@ const GENERIC_TASK_CANDIDATE_SCHEMA = {
     "parentRole",
     "action",
     "inputRequired",
+    "relevance",
     "evidenceSources",
   ],
   properties: {
@@ -882,6 +681,11 @@ const GENERIC_TASK_CANDIDATE_SCHEMA = {
     parentRole: { anyOf: [{ type: "string" }, { type: "null" }] },
     action: { type: "string", enum: ["activate", "select", "edit"] },
     inputRequired: { type: "boolean" },
+    relevance: {
+      type: "string",
+      enum: ["target", "route", "context"],
+      description: "Host goal relevance. Prefer target, then reversible route; use context only when neither is available.",
+    },
     evidenceSources: { type: "array", items: { type: "string" }, uniqueItems: true },
   },
   additionalProperties: false,
@@ -899,7 +703,7 @@ const GENERIC_TASK_FACT_SCHEMA = {
   additionalProperties: false,
 };
 
-const GENERIC_TASK_NAVIGATION_RECEIPT_SCHEMA = {
+const GENERIC_TASK_INTERACTION_RECEIPT_SCHEMA = {
   type: "object",
   required: [
     "providerOutcome",
@@ -914,7 +718,10 @@ const GENERIC_TASK_NAVIGATION_RECEIPT_SCHEMA = {
     providerOutcome: { type: "string", enum: ["committed", "not-applied", "indeterminate"] },
     outcome: { type: "string", enum: ["committed", "not-applied", "indeterminate"] },
     postconditionVerified: { type: "boolean" },
-    verificationMethod: { const: "host-scene-navigation-transition" },
+    verificationMethod: {
+      type: "string",
+      enum: ["host-scene-navigation-transition", "host-exact-edit-readback"],
+    },
     evidence: {
       type: "array",
       items: {
@@ -924,6 +731,9 @@ const GENERIC_TASK_NAVIGATION_RECEIPT_SCHEMA = {
           "target-labelled-destination-added",
           "owned-actionable-transient-added",
           "target-replaced-by-owned-navigation-surface",
+          "provider-exact-value-readback",
+          "fresh-scene-exact-value-readback",
+          "current-scene-exact-value-readback",
         ],
       },
       uniqueItems: true,
@@ -943,7 +753,7 @@ const GENERIC_TASK_ACTION_SCHEMA = {
     parentRole: { anyOf: [{ type: "string" }, { type: "null" }] },
     action: { type: "string", enum: ["activate", "select", "edit"] },
     outcome: { type: "string", enum: ["committed", "not-applied", "indeterminate"] },
-    receipt: GENERIC_TASK_NAVIGATION_RECEIPT_SCHEMA,
+    receipt: GENERIC_TASK_INTERACTION_RECEIPT_SCHEMA,
   },
   additionalProperties: false,
 };
@@ -967,7 +777,7 @@ const GENERIC_TASK_EXECUTION_CONTROL_SCHEMA = {
 
 export const COMPUTER_USE_HOST_TOOLS = Object.freeze(
   ["computer.health", "computer.doctor", "computer.installation", "computer.repair"].map((name) =>
-    Object.freeze({ ...byLegacyName(name), _meta: HOST_MANAGEMENT_META })),
+    Object.freeze({ ...toolSchemaTemplate(name), _meta: HOST_MANAGEMENT_META })),
 );
 
 const semanticCapabilityMeta = ({
@@ -991,7 +801,7 @@ const semanticCapabilityMeta = ({
 });
 
 const acquireTool = {
-  ...byLegacyName("computer.request_access"),
+  ...toolSchemaTemplate("computer.request_access"),
   name: "computer.acquire",
   title: "Acquire Computer Access",
   description: "Acquire a lease and initial evidence for a generic non-messaging desktop task. Never use this tool for a request to find a contact, open a conversation, or send a message; call computer.message directly so the Host owns the entire messaging lifecycle. For other tasks, pass applicationName for an exact Host resolution, or use a fresh observed applicationToken.",
@@ -1201,7 +1011,7 @@ const observeTool = {
 };
 
 const releaseTool = {
-  ...byLegacyName("computer.cancel"),
+  ...toolSchemaTemplate("computer.cancel"),
   name: "computer.release",
   title: "Release Computer Access",
   description: "Release a generic non-messaging controller lease or pending access request. Do not use this tool around computer.message; the Host-owned messaging workflow releases itself on every terminal path.",
@@ -1223,7 +1033,7 @@ const releaseTool = {
 };
 
 const actTool = {
-  ...byLegacyName("computer.act"),
+  ...toolSchemaTemplate("computer.act"),
   description: "For generic non-messaging tasks only; never search contacts, select conversations, enter chat text, or send messages here—use computer.message. Act once on an actionable element from the latest versioned Host Scene. OCR-only or conflicting evidence cannot authorize an action. The result outcome is exactly committed, not-applied, or indeterminate; never replay an indeterminate mutation.",
   _meta: Object.freeze({
     ...semanticCapabilityMeta({
@@ -1250,17 +1060,18 @@ const actTool = {
 const genericTaskTool = {
   name: "computer.task",
   title: "Run Generic Desktop Task",
-  description: "Continue one generic non-messaging desktop task through Host-owned observations and opaque semantic candidates. Start with applicationName and goal. The Host acquires, observes one versioned Scene, performs at most one freshly revalidated candidate action, verifies its canonical receipt, and releases before every result. A navigation click is committed only when a newer consistent Scene proves an advanced target state, a target-labelled destination, or an owned actionable transient surface; provider delivery status alone is insufficient and an unproven click is never replayed. Continue with taskToken plus one candidateId, or finish with decision=complete, reobserve, report, or cancel. If the requested final control is not directly visible, select one reversible navigation candidate such as an account/profile/menu/navigation control that is semantically likely to reveal it; do not report merely because the final target is not yet exposed. A named product surface may be hosted by a differently labelled desktop application: when the Host returns owning-window candidates, choose the defensible semantic product relationship instead of treating a background same-name process as proof that no window exists. Never use shell commands, guessed coordinates, element ids, OCR-region assignment, or lifecycle tools for a GUI task. Messaging requests must use computer.message.",
+  description: "Continue one desktop navigation or non-submitting edit task through Host-owned observations and opaque semantic candidates. Use this tool to open menus/pages, read visible state, or focus, replace-all, enter, and read back text in a proven Editable when the user did not request submission or sending; this includes drafting text in a chat-shaped editor without sending it. Start with applicationName and goal. After the Host returns taskToken, continue with only taskToken plus one candidateId, or finish with taskToken plus decision=complete, reobserve, report, or cancel; do not repeat or paraphrase applicationName or goal. Prefer Host relevance=target, then relevance=route when the target is not yet visible; select relevance=context only when no target or route candidate fits the goal. Each invocation performs at most one freshly revalidated navigation or edit action and releases before returning. Navigation requires a newer Scene transition; edit requires exact-value read-back. Submit, send, contact search, conversation selection, and send controls are never exposed here. Use computer.message only when the user supplied a recipient/conversation, exact content, and requested that it be sent. Never use shell commands, guessed coordinates, element ids, OCR-region assignment, or lifecycle tools for a GUI task.",
   _meta: {
     ...semanticCapabilityMeta({
-      summary: "Advance a native desktop GUI goal one Host-grounded semantic action at a time without exposing coordinates or controller lifecycle decisions.",
+      summary: "Advance a desktop navigation or non-submitting exact edit one Host-grounded action at a time without exposing coordinates or controller lifecycle decisions.",
       scenarios: [
         "Open a native application's settings and navigate to a requested page.",
-        "Select a visible command, tab, menu item, or editable surface in a non-messaging desktop workflow.",
+        "Select a visible command, tab, or menu item.",
+        "Replace and read back text in a proven editor without submitting or sending it, including a chat-shaped draft editor.",
         "Read Host-owned consistent interface facts and continue until the requested visible state is reached.",
       ],
       prerequisites: [
-        "The user requested a non-messaging desktop GUI task.",
+        "The user requested navigation, visible-state inspection, or text editing without submit/send.",
         "The target application is running or recoverable in the Host application inventory.",
       ],
       effects: ["May perform one freshly revalidated visible interface action per invocation."],
@@ -1268,7 +1079,7 @@ const genericTaskTool = {
       constraints: [
         "Select only opaque candidates returned by the Host for the current task token.",
         "Never call shell, SendKeys, lifecycle tools, or coordinate actions as a fallback.",
-        "Never use this path for contacts, conversations, chat input, or message sending.",
+        "Never expose submit/send controls or use this path to choose a recipient, open a conversation for sending, or send content.",
       ],
     }),
     "xiaozhiclaw/requestTimeoutMs": 120_000,
@@ -1276,7 +1087,6 @@ const genericTaskTool = {
   annotations: { phase: "6.1", destructiveHint: true },
   inputSchema: {
     type: "object",
-    required: ["applicationName", "goal"],
     properties: {
       applicationName: {
         type: "string",
@@ -1288,11 +1098,11 @@ const genericTaskTool = {
         type: "string",
         minLength: 1,
         maxLength: 2_000,
-        description: "Exact non-messaging desktop outcome requested by the user.",
+        description: "Exact navigation, visible-state, or non-submitting edit outcome requested by the user. A send request belongs to computer.message.",
       },
       taskToken: {
         type: "string",
-        description: "Opaque Host task token returned by a prior computer.task result.",
+        description: "Opaque Host task token returned by a prior computer.task result. Once present, it owns the continuation scope; omit applicationName and goal.",
       },
       candidateId: {
         type: "string",
@@ -1310,6 +1120,11 @@ const genericTaskTool = {
       },
     },
     allOf: [{
+      anyOf: [
+        { required: ["applicationName", "goal"] },
+        { required: ["taskToken"] },
+      ],
+    }, {
       if: { required: ["candidateId"] },
       then: { required: ["taskToken"] },
     }, {
@@ -1322,6 +1137,9 @@ const genericTaskTool = {
     status: { type: "string", enum: ["committed", "not-applied", "indeterminate"] },
     outcome: { type: "string", enum: ["committed", "not-applied", "indeterminate"] },
     released: { type: "boolean" },
+    terminalControllerState: { type: "string", enum: ["idle", "active"] },
+    toolErrorCount: { type: "integer", minimum: 0 },
+    wrongSendCount: { type: "integer", minimum: 0 },
     elapsedMs: { type: "number", minimum: 0 },
     executionControl: GENERIC_TASK_EXECUTION_CONTROL_SCHEMA,
     phase: {
@@ -1339,13 +1157,16 @@ const genericTaskTool = {
       uniqueItems: true,
     },
     error: ANY_OBJECT,
-  }, ["status", "outcome", "released", "elapsedMs", "executionControl", "phase"]),
+  }, [
+    "status", "outcome", "released", "terminalControllerState",
+    "toolErrorCount", "wrongSendCount", "elapsedMs", "executionControl", "phase",
+  ]),
 };
 
 const messagingTool = {
   name: "computer.message",
   title: "Run Deterministic Messaging Workflow",
-  description: "Send one exact message through the Host-owned deterministic messaging state machine. The Host restores the selected running application's main window, and returns opaque application candidates when the semantic application name is not an exact inventory match. This is the only Agent-facing path authorized to mutate a messaging interface: the Host owns application selection, search, coordinates, title verification, input, send verification, cancellation, and release. Supply semantic goal slots only; never use computer.act for messaging UI.",
+  description: "Send one exact message to one explicit contact or conversation through the Host-owned deterministic messaging state machine. This is the only Agent-facing path authorized to send content. Use it only when the user requested delivery and supplied a semantic recipient/conversation plus exact content. A request to type or draft in an editor without sending belongs to computer.task. The Host owns application selection, contact search, conversation-title verification, input, send verification, cancellation, and release. Supply semantic goal slots only; never use computer.act for messaging UI.",
   _meta: {
     ...semanticCapabilityMeta({
       summary: "Complete one role-based desktop messaging workflow while the Host retains every action target and lifecycle decision.",
@@ -1400,51 +1221,49 @@ const messagingTool = {
     },
     additionalProperties: false,
   },
-  outputSchema: {
-    ...outputSchema({
-      status: { type: "string", enum: ["committed", "not-applied", "indeterminate"] },
-      outcome: { type: "string", enum: ["committed", "not-applied", "indeterminate"] },
-      phase: { type: "string" },
-      history: ANY_ARRAY,
-      released: { type: "boolean" },
-      elapsedMs: { type: "number", minimum: 0 },
-      toolErrorCount: {
-        type: "integer",
-        minimum: 0,
-        description: "Host-observed tool execution errors. Present as zero after a completed workflow.",
-      },
-      wrongSendCount: {
-        type: "integer",
-        minimum: 0,
-        description: "Host-observed sends to an unverified destination. Present as zero only after title and new-bubble verification complete.",
-      },
-      selectionToken: { type: "string" },
-      candidates: {
-        type: "array",
-        items: {
-          type: "object",
-          required: ["candidateId", "label", "role", "parentRole", "evidenceSources"],
-          properties: {
-            candidateId: { type: "string" },
-            label: { type: "string" },
-            role: { type: "string" },
-            parentRole: { type: "string" },
-            evidenceSources: { type: "array", items: { type: "string" } },
-          },
-          additionalProperties: false,
+  outputSchema: outputSchema({
+    status: { type: "string", enum: ["committed", "not-applied", "indeterminate"] },
+    outcome: { type: "string", enum: ["committed", "not-applied", "indeterminate"] },
+    phase: { type: "string" },
+    history: ANY_ARRAY,
+    released: { type: "boolean" },
+    terminalControllerState: { type: "string", enum: ["idle", "active"] },
+    replayAllowed: {
+      type: "boolean",
+      description: "True only for the explicit opaque selection continuation; false after a terminal mutation receipt.",
+    },
+    elapsedMs: { type: "number", minimum: 0 },
+    toolErrorCount: {
+      type: "integer",
+      minimum: 0,
+      description: "Host-observed tool execution errors. Present as zero after a completed workflow.",
+    },
+    wrongSendCount: {
+      type: "integer",
+      minimum: 0,
+      description: "Host-observed sends to an unverified destination. Present as zero only after title and new-bubble verification complete.",
+    },
+    selectionToken: { type: "string" },
+    candidates: {
+      type: "array",
+      items: {
+        type: "object",
+        required: ["candidateId", "label", "role", "parentRole", "evidenceSources"],
+        properties: {
+          candidateId: { type: "string" },
+          label: { type: "string" },
+          role: { type: "string" },
+          parentRole: { type: "string" },
+          evidenceSources: { type: "array", items: { type: "string" } },
         },
+        additionalProperties: false,
       },
-      error: ANY_OBJECT,
-    }),
-    required: [
-      "resultSchemaVersion",
-      "includeUserOverlay",
-      "status",
-      "outcome",
-      "released",
-      "elapsedMs",
-    ],
-  },
+    },
+    error: ANY_OBJECT,
+  // Declared through the helper's required list rather than a flat top-level
+  // override, so the error envelope stays exempt from the success fields the
+  // way every other tool is.
+  }, ["status", "outcome", "released", "terminalControllerState", "elapsedMs"]),
 };
 
 export const COMPUTER_USE_AGENT_TOOLS = Object.freeze([

@@ -2493,7 +2493,11 @@ test("agent-computer-use-mcp freezes the local MCP tool contract", () => {
 
   const task = COMPUTER_USE_MCP_TOOLS.find((tool) => tool.name === "computer.task");
   assert.match(task.description, /Host-owned observations/u);
-  assert.deepEqual(task.inputSchema.required, ["applicationName", "goal"]);
+  assert.equal(task.inputSchema.required, undefined);
+  assert.deepEqual(task.inputSchema.allOf[0].anyOf, [
+    { required: ["applicationName", "goal"] },
+    { required: ["taskToken"] },
+  ]);
   assert.equal(task._meta["xiaozhiclaw/requestTimeoutMs"], 120_000);
 
   const health = COMPUTER_USE_MCP_TOOLS.find((tool) => tool.name === "computer.health");
@@ -2660,7 +2664,7 @@ test("agent-computer-use-mcp freezes the local MCP tool contract", () => {
 });
 
 test("agent-computer-use-mcp answers initialize, tools/list, and health over stdio", async () => {
-  const client = createSdkClient("computer-use-mcp-test");
+  const client = createSdkClient("computer-use-mcp-test", { toolSurface: "host" });
 
   try {
     await client.connect();
@@ -2927,6 +2931,30 @@ test("provider router fails closed on a secure Windows input desktop", async () 
   assert.equal(state.status, "blocked");
   assert.equal(state.blocker.code, "desktop.locked");
   assert.equal(state.desktopState.inputDesktop, "Winlogon");
+  await router.close();
+});
+
+test("provider router retries one transient desktop-state probe before interaction", async () => {
+  const { ComputerUseProviderRouter } = await import("../src/computer-use-provider-router.mjs");
+  let desktopStateCalls = 0;
+  const router = new ComputerUseProviderRouter({
+    driver: {
+      async desktopState() {
+        desktopStateCalls += 1;
+        if (desktopStateCalls === 1) throw new Error("transient desktop probe failure");
+        return { status: "interactive", inputDesktop: "Default", secureDesktop: false };
+      },
+      async findWindow() {
+        return { windowId: 42, title: "Fixture", pid: 1234 };
+      },
+    },
+  });
+
+  const access = await router.requestAccess({ titlePart: "Fixture", tier: "full", agentId: "agent-1" });
+
+  assert.equal(access.status, "granted");
+  assert.equal(desktopStateCalls, 2);
+  await router.cancel({ reason: "test-complete" });
   await router.close();
 });
 
@@ -3509,11 +3537,14 @@ test("provider router rejects non-Scene messaging mutations even when a provider
   await router.cancel({ reason: "test-complete" });
 });
 
-function createSdkClient(name) {
+function createSdkClient(name, { toolSurface } = {}) {
   const client = new Client({ name, version: "0.0.1" }, { capabilities: {} });
   const transport = new StdioClientTransport({
     command: process.execPath,
-    args: ["src/computer-use-mcp-server.mjs"],
+    args: [
+      "src/computer-use-mcp-server.mjs",
+      ...(toolSurface ? [`--tool-surface=${toolSurface}`] : []),
+    ],
     cwd: process.cwd(),
   });
   return {

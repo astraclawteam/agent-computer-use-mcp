@@ -7,24 +7,24 @@ scripted adapters and mocks cannot qualify an installed application. All
 installed applications remain `unqualified` until real Codex, Claude Desktop,
 and both Xiaozhi Claw model lanes produce matching sealed Phase 10 evidence.
 
-Phase 10.0, 10.1, 10.3, 10.4, and the stable-promotion portion of 10.5 are
-implemented: the repository now freezes the four-lane contract, environment-
-only adapter boundary, canonical task pack, retry rules, seven-file privacy-
-safe evidence, and `3/3` aggregation. Windows discovery currently confirms
-Codex Desktop `26.707.3748.0`, Claude Desktop `1.20186.1.0`, and the configured
-Xiaozhi Claw page. The real qualification campaign remains blocked because no
-`qualification-host-v1` session bridge is configured for any lane. Discovery,
-contract tests, and fake bridge tests set `qualificationClaim: false` and do
-not count as Agent E2E evidence.
+The four-lane contract, environment-only adapter boundary, canonical task pack,
+retry rules, seven-file privacy-safe evidence schema, and `3/3` aggregation
+survive in `src/agent-e2e/`. The campaign driver and host discovery runners
+(`phase-10-2`, `phase-10-3`, `phase-10-4`) were removed by `11c7fc6`, so no
+qualification run can currently be executed at all — that is a stronger blocker
+than the previously recorded one, which was only that no `qualification-host-v1`
+session bridge is configured for any lane. Contract tests and fake bridge tests
+set `qualificationClaim: false` and do not count as Agent E2E evidence.
 
 ## PR7A Evidence Status
 
-The schema-v2 real application runner, adapter lifecycle, privacy-only policy
-boundary, sealed evidence output, and evidence-only matrix renderer are
-implemented. Commercial application coverage remains blocked until the
-hash-locked fixture pack is published and a full app-lab run produces verified
-evidence. Local development failures remain visible and are not release pass
-claims.
+The adapter lifecycle and privacy-only policy boundary survive in
+`src/app-adapters/`. The schema-v2 real application runner, sealed evidence
+output, matrix renderer, and the later orphaned matrix helper are absent and
+must be rebuilt as one coherent evidence pipeline. Commercial application
+coverage is therefore blocked twice over: no runner exists, and the hash-locked
+fixture pack has never been published. Local development failures remain
+visible and are not release pass claims.
 
 ## Complete
 
@@ -39,25 +39,61 @@ claims.
   elevation, or self-update.
 - Tag-only GitHub Release workflow that verifies version, main ancestry,
   changelog, tests, packaging, and exact source identity before publishing.
-- Real 900,000 ms pull-request soak with official MCP clients, fault injection,
-  Windows resource probes, immutable JSON/JSONL evidence, and fail-closed
-  checksum verification.
-- Frozen two-hour nightly and eight-hour release-candidate gates, scheduled
-  nightly evidence retention, trend comparison, and atomic RC evidence import.
-- Hash-verified quick/full perception corpus contracts, privacy scanner,
-  released-provider benchmark runner, and deterministic regression extraction.
+- Hash-verified quick/full perception corpus contracts, privacy scanner, and
+  deterministic regression extraction.
 - Shared UI OCR normalization, content-addressed bounded region cache, and
   calibrated SOM/OCR/template proposal fusion with provenance-aware action
   admission.
-- Read-only Phase 9.0 Commercial 1.0 promotion aggregation and stable `1.x`
-  release blocking on matching sealed evidence.
+- Protocol-layer tool surfaces: `tools/list` and `tools/call` both restrict a
+  default launch to `computer.task` and `computer.message`, so a third-party MCP
+  Host enforces the Host-only boundary without reading a private `_meta` key.
+
+## Withdrawn With The SEA Convergence
+
+`11c7fc6` (2026-07-21) removed the npm/platform-package distribution path and,
+with it, every evidence runner that depended on that pipeline. The retired
+runners below remain removed. Their documents describe the former pipelines
+and are not evidence that those pipelines ran. Phase 6 now has a separate
+optional source-bound qualification-evidence verifier; it does not revive or
+imply the former real-application matrix runner and is not invoked by every
+preview tag:
+
+| Gate | Removed runner | Doc still describing it |
+| --- | --- | --- |
+| PR / nightly / RC runtime soak | `src/phase-8-0-runtime-soak.mjs`, `src/runtime-soak-*.mjs`, `src/commercial-evidence*.mjs`, `.github/workflows/nightly-soak.yml` | `runtime-soak-operations.md` |
+| Real application smoke matrix | `src/phase-6-0/6-1/6-2-*.mjs`, `src/real-app-smoke-runner.mjs`, `src/real-app-catalog.mjs`, `src/app-fixture-pack.mjs`, `scripts/render-app-smoke-matrix.mjs`, `.github/workflows/real-app-smoke.yml` | `app-smoke-matrix.md` |
+| Perception corpus generation | `scripts/generate-quick-perception-corpus.mjs`, `.github/workflows/nightly-perception.yml` | this file |
+| Agent E2E qualification campaign | `src/phase-10-2-host-discovery.mjs`, `src/phase-10-3-agent-e2e-campaign.mjs`, `src/phase-10-4-agent-e2e-evidence.mjs` | this file |
+| Commercial 1.0 promotion | `src/phase-9-0-commercial-promotion.mjs`, `src/commercial-promotion.mjs` | `release-gates.md` |
+
+`npm run soak:pr`, `npm run soak:rc`, `npm run phase:8.0`, `npm run evidence:verify`,
+and `npm run soak:rc:verify` are referenced by those documents but are not
+defined in `package.json`. The surviving pieces are the contract and evidence
+schemas (`src/agent-e2e/*`, `src/perception-corpus.mjs`,
+`src/phase-6-staged-acceptance.mjs`). The current optional Phase 6
+qualification path is
+`src/phase-6-release-evidence.mjs` plus
+`scripts/verify-phase-6-release-evidence.mjs`.
 
 ## Before Public 1.0
 
+Every item below is now gated behind rebuilding a runner listed in **Withdrawn
+With The SEA Convergence**. Ordering matters: rebuild the runner, prove it on a
+prepared Windows machine, then collect evidence. No item can be closed by a
+document edit.
+
+- Complete Phase 6 staged real-application acceptance before making a formal
+  public-readiness claim. Qualification is read only from a sealed
+  `release-evidence/phase-6.json` that passes
+  `npm run verify:phase-6:release-evidence`; this roadmap does not duplicate a
+  mutable ladder score. Preview tags remain operator-decided and do not force
+  this campaign. Levels 1 to 4 require a real logged-in WeChat and a designated
+  test contact, because a passing attempt sends a real message and is scored on
+  zero mis-sends.
 - Expand real app evidence across Office, Electron, Qt, WPF, Canvas, self-drawn, editing, and industrial software.
 - Collect and retain passing two-hour nightly and eight-hour release-candidate
-  evidence on prepared Windows runners; the PR6B mechanism is implemented but
-  implementation tests do not substitute for those long runs.
+  evidence on prepared Windows runners. The PR6B mechanism was removed with the
+  SEA convergence and must be rebuilt before any long run can start.
 - Run clean-runner release rehearsals and retain failed evidence beside passing retries.
 - Retain clean install evidence for every published Windows x64 preview.
 - Evaluate additional mirrors only as separately authorized transports of the
@@ -83,5 +119,3 @@ and app-matrix validation before release.
 - Explicit physical control of a built-in preview must use canonical OS tokens and the host's shared target lease.
 - Third-party agent-native capabilities remain outside Gateway enforcement; agent-native operations MUST NOT be routed through Gateway approval, target leases, or policy enforcement.
 - End-to-end agent-native routing is a host-owned invariant; the host runtime, rather than this OS MCP package, owns its executable bypass test.
-
-

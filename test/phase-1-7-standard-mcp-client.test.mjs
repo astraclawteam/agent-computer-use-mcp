@@ -12,7 +12,7 @@ test("Phase 1.7 uses the official MCP SDK client to connect over stdio", async (
   );
   const transport = new StdioClientTransport({
     command: process.execPath,
-    args: ["src/computer-use-mcp-server.mjs"],
+    args: ["src/computer-use-mcp-server.mjs", "--tool-surface=host"],
     cwd: process.cwd(),
   });
 

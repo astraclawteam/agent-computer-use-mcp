@@ -5,7 +5,13 @@ import { fileURLToPath } from "node:url";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
-import { COMPUTER_USE_MCP_TOOLS, MCP_RESULT_SCHEMA_VERSION } from "./computer-use-mcp-tools.mjs";
+import { MCP_RESULT_SCHEMA_VERSION } from "./computer-use-mcp-tools.mjs";
+import {
+  assertToolOnSurface,
+  HOST_TOOL_SURFACE,
+  listToolsForSurface,
+  resolveToolSurface,
+} from "./computer-use-tool-surface.mjs";
 import { ComputerUseMcpError, serializeToolError } from "./computer-use-errors.mjs";
 import { getComputerUseInstallation } from "./computer-use-installation.mjs";
 import { ComputerUseProviderRouter } from "./computer-use-provider-router.mjs";
@@ -17,12 +23,21 @@ import {
 } from "./windows-unicode-input.mjs";
 import { verifyWindowsFocusedProcess } from "./windows-focus-verification.mjs";
 import { DeterministicMessagingStateMachine } from "./deterministic-messaging-state-machine.mjs";
-import { runGenericTaskHostContract } from "./generic-task-host-contract.mjs";
+import { cancelPendingTasks, runGenericTaskHostContract } from "./generic-task-host-contract.mjs";
 
 const PENDING_MESSAGING_SELECTION_TTL_MS = 60_000;
+const PENDING_MESSAGING_REPLAY_FENCE_TTL_MS = 120_000;
+const EMPTY_ACQUISITION_DISCOVERY_RETRY_MS = 250;
 const pendingMessagingSelections = new Map();
+const pendingMessagingReplayFences = new Map();
 
 export async function runComputerUseMcpServer(options = {}) {
+  // Resolved once, before any transport exists, from launch arguments the Host
+  // owns. Nothing the Agent sends can widen the surface afterwards.
+  const { surface: toolSurface } = options.toolSurface
+    ? { surface: options.toolSurface }
+    : resolveToolSurface({ argv: options.argv, env: options.env });
+
   const router = new ComputerUseProviderRouter({
     ocrSession: createPlatformOcrSession(options.platformRuntime),
     driver: new CuaDriverMcpDriver({
@@ -40,12 +55,15 @@ export async function runComputerUseMcpServer(options = {}) {
         stopGatewayManagedOverlay();
       },
     },
+    // Escape is a stop, not a pause: a task left pending would resume on the
+    // next step and take the desktop straight back.
+    onOperatorStop: () => cancelPendingTasks(),
   });
 
   const server = new Server(
     {
       name: "agent-computer-use-mcp",
-      version: "0.0.26",
+      version: "0.0.27",
     },
     {
       capabilities: {
@@ -55,7 +73,7 @@ export async function runComputerUseMcpServer(options = {}) {
   );
 
   server.setRequestHandler(ListToolsRequestSchema, async () => ({
-    tools: COMPUTER_USE_MCP_TOOLS,
+    tools: listToolsForSurface(toolSurface),
   }));
 
   server.setRequestHandler(CallToolRequestSchema, async (request, extra) => {
@@ -65,7 +83,7 @@ export async function runComputerUseMcpServer(options = {}) {
       name,
       args,
       request.params._meta?.["xiaozhiclaw/requestContext"],
-      { signal: extra.signal },
+      { signal: extra.signal, toolSurface },
     );
   });
 
@@ -107,10 +125,77 @@ export function createPlatformOcrSession(platformRuntime, options = {}) {
   });
 }
 
+/// How long the on-screen indicator outlives the last desktop-touching call.
+/// Long enough to cover a model thinking between steps, short enough that an
+/// abandoned session hands the desktop back on its own.
+const CONTROL_INDICATOR_IDLE_MS = 90_000;
+
+/// What a failed call gets instead. Long enough that a model retrying straight
+/// away does not make the indicator blink, short enough that a desktop nobody
+/// is driving any more is handed back rather than left announcing a session
+/// that has stopped.
+const CONTROL_INDICATOR_FAILURE_GRACE_MS = 8_000;
+
+/// Only the tools that actually take the desktop. A health check or an
+/// installation lookup has nothing to announce, and computer.release is the
+/// operator getting their machine back, so it takes the indicator with it.
+const DESKTOP_CONTROL_TOOLS = new Set([
+  "computer.acquire",
+  "computer.observe",
+  "computer.act",
+  "computer.task",
+  "computer.message",
+]);
+
+async function holdControlIndicatorForTool(router, name, requestContext) {
+  try {
+    if (DESKTOP_CONTROL_TOOLS.has(name)) {
+      await router?.setControlIndicatorHold?.({
+        id: requestContext?.sessionId ?? requestContext?.agentId ?? "session",
+        expiresAt: Date.now() + CONTROL_INDICATOR_IDLE_MS,
+      });
+    } else if (name === "computer.release") {
+      await router?.releaseControlIndicator?.();
+    }
+  } catch {
+    // Advisory only: never fail a tool call over what the desktop displays.
+  }
+}
+
+/// A step that ended badly gets a short grace window instead of the full idle
+/// one. Holding the desktop indicator up for a minute and a half after a
+/// failure tells the person at the desk that something is still driving their
+/// machine when nothing is.
+async function easeControlIndicatorAfterFailure(router, name, structuredContent, { threw = false } = {}) {
+  if (!DESKTOP_CONTROL_TOOLS.has(name)) return;
+  const failed = threw
+    || structuredContent?.status === "error"
+    || structuredContent?.outcome === "indeterminate"
+    || structuredContent?.phase === "failed"
+    || structuredContent?.phase === "cancelled";
+  if (!failed) return;
+  try {
+    await router?.setControlIndicatorHold?.(
+      { id: "failed-step", expiresAt: Date.now() + CONTROL_INDICATOR_FAILURE_GRACE_MS },
+      { allowShorten: true },
+    );
+  } catch {
+    // Advisory only.
+  }
+}
+
 export async function callTool(router, name, args, requestContext, options = {}) {
   if (name === "computer.act") args = normalizeComputerActArgs(args);
   let structuredContent;
   try {
+    // An unlisted tool must also be uncallable, otherwise the Agent can invoke a
+    // host-only name it already knows. Off-surface and unknown are the same error.
+    assertToolOnSurface(options.toolSurface ?? HOST_TOOL_SURFACE, name);
+    // The indicator belongs to the stretch of work, not to one tool call. A
+    // model that switches tools mid-goal - message, then task, then act - was
+    // making it blink once per switch, which reads as the Host losing its grip
+    // rather than as the deliberate per-step release it is.
+    await holdControlIndicatorForTool(router, name, requestContext);
     if (name === "computer.health") {
       structuredContent = await router.health(args);
     } else if (name === "computer.doctor") {
@@ -137,7 +222,12 @@ export async function callTool(router, name, args, requestContext, options = {})
     } else {
       throw new Error(`tool_not_found: ${name}`);
     }
+    await easeControlIndicatorAfterFailure(router, name, structuredContent);
   } catch (error) {
+    // A throw means nothing is in flight any more. Whatever the caller does
+    // next, it will announce itself; the desktop should not keep claiming a
+    // session that just ended.
+    await easeControlIndicatorAfterFailure(router, name, null, { threw: true });
     const toolError = serializeToolError(error);
     if (name === "computer.observe" && toolError?.code === "observation.step_budget_exhausted") {
       const blocked = withResultContract({
@@ -290,16 +380,19 @@ export async function runGenericTaskTool(router, args = {}, requestContext, opti
 }
 
 export async function runDeterministicMessagingTool(router, args = {}, requestContext, options = {}) {
-  const startedAt = Date.now();
+  let startedAt = Date.now();
   let machine;
   let access;
   let preMachineReleaseAttempted = false;
+  let replayFenceKey = null;
   try {
     const applicationName = requiredMessagingInput(args.applicationName, "applicationName", 256);
     const query = requiredMessagingInput(args.query, "query", 512);
     const message = requiredMessagingInput(args.message, "message", 20_000);
     const scopeKey = messagingSelectionScopeKey(requestContext);
     prunePendingMessagingSelections(startedAt);
+    prunePendingMessagingReplayFences(startedAt);
+    replayFenceKey = messagingReplayFenceKey({ scopeKey, applicationName, query, message });
     const pendingSelection = resolvePendingMessagingSelection({
       args,
       scopeKey,
@@ -308,6 +401,23 @@ export async function runDeterministicMessagingTool(router, args = {}, requestCo
       message,
       now: startedAt,
     });
+    if (Number.isFinite(pendingSelection?.startedAt)) startedAt = pendingSelection.startedAt;
+    const replayFence = pendingSelection === null
+      ? pendingMessagingReplayFences.get(replayFenceKey)
+      : null;
+    if (replayFence?.expiresAt > Date.now()) {
+      return messagingToolResult({
+        outcome: "not-applied",
+        released: true,
+        startedAt,
+        phase: "replay-blocked",
+        replayAllowed: false,
+        error: {
+          code: "workflow.indeterminate_replay_blocked",
+          message: "The Host blocked replay of an identical messaging goal after an indeterminate action. Report or reobserve in a new user task; do not retry this mutation.",
+        },
+      });
+    }
     const applicationSelection = pendingSelection?.kind === "application"
       ? resolveSelectedMessagingApplication(args, pendingSelection)
       : await createMessagingApplicationSelection({
@@ -316,6 +426,7 @@ export async function runDeterministicMessagingTool(router, args = {}, requestCo
           applicationName,
           query,
           message,
+          startedAt,
         });
     if (applicationSelection.selection) {
       return messagingToolResult({
@@ -323,6 +434,7 @@ export async function runDeterministicMessagingTool(router, args = {}, requestCo
         released: true,
         startedAt,
         phase: "selection-required",
+        replayAllowed: true,
         selectionToken: applicationSelection.selection.selectionToken,
         candidates: applicationSelection.selection.candidates,
         error: {
@@ -359,6 +471,7 @@ export async function runDeterministicMessagingTool(router, args = {}, requestCo
       applicationName,
       query,
       message,
+      startedAt,
     });
     let latestScene = access.initialObservation?.scene ?? null;
     let latestScenePending = latestScene !== null;
@@ -398,6 +511,7 @@ export async function runDeterministicMessagingTool(router, args = {}, requestCo
           const receipt = await router.act({
             action: { ...action, captureAfter: true },
             requestContext,
+            signal,
           });
           if (receipt?.capture?.scene) {
             latestScene = receipt.capture.scene;
@@ -425,6 +539,7 @@ export async function runDeterministicMessagingTool(router, args = {}, requestCo
       released: result.released === true,
       startedAt,
       phase: "complete",
+      replayAllowed: false,
       history: result.history,
       toolErrorCount: 0,
       wrongSendCount: 0,
@@ -441,6 +556,7 @@ export async function runDeterministicMessagingTool(router, args = {}, requestCo
         released: snapshot?.released === true,
         startedAt,
         phase: "selection-required",
+        replayAllowed: true,
         history: error.history,
         selectionToken: error.selection.selectionToken,
         candidates: error.selection.candidates,
@@ -448,11 +564,17 @@ export async function runDeterministicMessagingTool(router, args = {}, requestCo
       });
     }
     const outcome = canonicalActionOutcome(error?.outcome ?? "not-applied");
+    if (outcome === "indeterminate" && replayFenceKey !== null) {
+      pendingMessagingReplayFences.set(replayFenceKey, Object.freeze({
+        expiresAt: Date.now() + PENDING_MESSAGING_REPLAY_FENCE_TTL_MS,
+      }));
+    }
     return messagingToolResult({
       outcome,
       released: snapshot?.released === true || access?.controller == null,
       startedAt,
       phase: error?.step ?? "failed",
+      replayAllowed: false,
       history: error?.history,
       error: {
         code: error?.code ?? "workflow.host_failure",
@@ -463,7 +585,15 @@ export async function runDeterministicMessagingTool(router, args = {}, requestCo
   }
 }
 
-function createMessagingDecisionPort({ args, pendingSelection, scopeKey, applicationName, query, message }) {
+function createMessagingDecisionPort({
+  args,
+  pendingSelection,
+  scopeKey,
+  applicationName,
+  query,
+  message,
+  startedAt,
+}) {
   return {
     async selectCandidate({ candidates }) {
       const exact = candidates.filter((candidate) => normalizeMessagingText(candidate.label) === normalizeMessagingText(query));
@@ -492,6 +622,7 @@ function createMessagingDecisionPort({ args, pendingSelection, scopeKey, applica
         applicationName,
         query,
         message,
+        startedAt,
         expiresAt: Date.now() + PENDING_MESSAGING_SELECTION_TTL_MS,
         candidates: Object.freeze(publicCandidates),
       }));
@@ -508,7 +639,14 @@ function createMessagingDecisionPort({ args, pendingSelection, scopeKey, applica
   };
 }
 
-async function createMessagingApplicationSelection({ router, scopeKey, applicationName, query, message }) {
+async function createMessagingApplicationSelection({
+  router,
+  scopeKey,
+  applicationName,
+  query,
+  message,
+  startedAt,
+}) {
   const discovery = await freshAcquisitionTargets(router);
   const normalizedApplicationName = normalizeMessagingText(applicationName);
   const exact = discovery.applications.filter((application) => (
@@ -541,6 +679,7 @@ async function createMessagingApplicationSelection({ router, scopeKey, applicati
     applicationName,
     query,
     message,
+    startedAt,
     expiresAt: Date.now() + PENDING_MESSAGING_SELECTION_TTL_MS,
     candidates: Object.freeze(privateCandidates),
   }));
@@ -589,11 +728,14 @@ function messagingToolResult({
   error,
   toolErrorCount,
   wrongSendCount,
+  replayAllowed,
 }) {
   return {
     status: outcome,
     outcome,
     released: released === true,
+    terminalControllerState: released === true ? "idle" : "active",
+    ...(typeof replayAllowed === "boolean" ? { replayAllowed } : {}),
     elapsedMs: Math.max(0, Date.now() - startedAt),
     ...(phase ? { phase } : {}),
     ...(Array.isArray(history) ? { history } : {}),
@@ -624,6 +766,16 @@ function messagingSelectionScopeKey(requestContext) {
 function prunePendingMessagingSelections(now) {
   for (const [token, pending] of pendingMessagingSelections) {
     if (pending.expiresAt <= now) pendingMessagingSelections.delete(token);
+  }
+}
+
+function messagingReplayFenceKey({ scopeKey, applicationName, query, message }) {
+  return JSON.stringify([scopeKey, applicationName, query, message]);
+}
+
+function prunePendingMessagingReplayFences(now) {
+  for (const [key, fence] of pendingMessagingReplayFences) {
+    if (fence.expiresAt <= now) pendingMessagingReplayFences.delete(key);
   }
 }
 
@@ -2004,7 +2156,12 @@ async function freshAcquisitionTargets(router) {
       { retryable: true, nextTool: "computer.observe" },
     );
   }
-  const state = await router.listState({ includeInstalled: false });
+  let state = await router.listState({ includeInstalled: false });
+  const applications = Array.isArray(state?.applications) ? state.applications : [];
+  if (applications.length === 0 && state?.desktopState?.status !== "locked") {
+    await new Promise((resolvePromise) => setTimeout(resolvePromise, EMPTY_ACQUISITION_DISCOVERY_RETRY_MS));
+    state = await router.listState({ includeInstalled: false });
+  }
   return {
     status: "target_required",
     approval: null,

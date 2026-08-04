@@ -3,8 +3,9 @@
 Status: implemented on `main`; MCP result schema `6.0`.
 
 This contract replaces provider-shaped observations and heterogeneous action
-receipts at the Agent boundary. Provider output remains internal evidence. The
-Host Scene and the three-state action outcome are the only public authorities.
+receipts at the Host boundary. Provider output remains internal evidence. The
+Host Scene and the three-state action outcome are the only authorities exposed
+by the Host interaction surface.
 
 ## Scene ownership
 
@@ -29,9 +30,12 @@ Every Scene element contains:
 - executable `actions` and `actionable`;
 - explicit `invalidatesOn` conditions.
 
-`elementId` is the Agent-facing target. Provider tokens are kept only in the
-Scene binding used by the Host driver. A new observation invalidates the old
-Scene ids. The Router no longer resolves stale semantic aliases.
+`elementId` is Host-internal and is accepted only by the Host workflow-internal
+`computer.act` surface. The Agent-facing `computer.task` contract exposes an
+opaque `candidateId`; the Host resolves it against the current Scene before
+acting. Provider tokens remain private to the Host driver binding. A new
+observation invalidates old Scene ids and candidate ids. The Router no longer
+resolves stale semantic aliases.
 
 OCR-only evidence has `evidenceConsistency: "insufficient"` and no actions.
 Any provider-declared structure/OCR/visual conflict has

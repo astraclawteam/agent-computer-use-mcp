@@ -35,3 +35,20 @@ test("Windows SEA smoke defaults to the current package version and releases con
   assert.match(source, /name: "computer\.release"/u);
   assert.doesNotMatch(source, /name: "computer\.revoke"/u);
 });
+
+test("Windows SEA smoke proves the released executable defaults to the Agent surface", async () => {
+  const source = await readFile(new URL("../src/windows-sea-smoke.mjs", import.meta.url), "utf8");
+  assert.match(source, /const HOST_SURFACE_ARGS = \["--tool-surface=host"\]/u);
+  assert.match(
+    source,
+    /const EXPECTED_AGENT_SURFACE_TOOLS = \["computer\.task", "computer\.message"\]/u,
+  );
+  assert.match(source, /await assertReleasedAgentSurface\(executablePath, launchRoot, options\.environment\)/u);
+  assert.match(source, /sea_smoke\.agent_surface_invalid/u);
+  assert.match(source, /sea_smoke\.agent_surface_callable/u);
+  // The retained evidence must record what the gate proved, not only that it did not throw.
+  assert.match(source, /hostOnlyToolRejectedAs: hidden\.error\.code/u);
+  assert.match(source, /^\s+agentSurface,$/mu);
+  // The lifecycle checks below it must run on an explicitly opted-in surface.
+  assert.match(source, /createMcpConnection\(executablePath, launchRoot, options\.environment, HOST_SURFACE_ARGS\)/u);
+});

@@ -35,6 +35,22 @@ try {
 $allProcesses = @(Get-CimInstance Win32_Process -Filter "SessionId = $currentSessionId")
 $processById = @{}
 $allProcesses | ForEach-Object { $processById[[int]$_.ProcessId] = $_ }
+# A process under the Windows directory is normally OS machinery, but the same
+# directory also holds user-facing applications: a packaged app runs inside a
+# generic host process shipped with the OS, and the shell, stock editors, and
+# viewers live there too. Owning a top-level window is what separates the two.
+# Window presence and window title are separate facts: a minimized or tray
+# surface can keep a valid HWND while temporarily exposing an empty title.
+$windowHandleByPid = @{}
+$windowTitleByPid = @{}
+try {
+  Get-Process | Where-Object { $_.MainWindowHandle -ne 0 } | ForEach-Object {
+    $windowHandleByPid[[int]$_.Id] = [int64]$_.MainWindowHandle
+    $windowTitleByPid[[int]$_.Id] = $_.MainWindowTitle
+  }
+} catch {
+  # Window enumeration is best-effort; process discovery remains available.
+}
 function Get-WindowsAppsPackageRoot([string]$path) {
   if ([string]::IsNullOrWhiteSpace($path)) { return $null }
   $match = [regex]::Match($path, '^(.*\\WindowsApps\\[^\\]+)\\', [System.Text.RegularExpressions.RegexOptions]::IgnoreCase)
@@ -58,7 +74,9 @@ $applications = $allProcesses | ForEach-Object {
     $path = $_.ExecutablePath
     if ([string]::IsNullOrWhiteSpace($path)) { return }
     $fullPath = [System.IO.Path]::GetFullPath($path)
-    if ($fullPath.StartsWith($windowsRoot, [System.StringComparison]::OrdinalIgnoreCase)) { return }
+    $windowTitle = $windowTitleByPid[[int]$_.ProcessId]
+    $hasWindow = $windowHandleByPid.ContainsKey([int]$_.ProcessId)
+    if ($fullPath.StartsWith($windowsRoot, [System.StringComparison]::OrdinalIgnoreCase) -and -not $hasWindow) { return }
     if (-not $fullPath.EndsWith('.exe', [System.StringComparison]::OrdinalIgnoreCase)) { return }
     $parent = $processById[[int]$_.ParentProcessId]
     $ownerPid = $null
@@ -67,8 +85,13 @@ $applications = $allProcesses | ForEach-Object {
       if (Test-SameApplicationFamily $fullPath $parentPath) { $ownerPid = [int]$parent.ProcessId }
     }
     [pscustomobject]@{
+      # A Start Menu shortcut is the most stable identity; a packaged app hosted
+      # by a generic executable has none, and its window title carries the name
+      # the user would say. The executable name is the last resort.
       name = if ($shortcutNames.ContainsKey($fullPath)) {
         $shortcutNames[$fullPath]
+      } elseif (-not [string]::IsNullOrWhiteSpace($windowTitle) -and $fullPath.StartsWith($windowsRoot, [System.StringComparison]::OrdinalIgnoreCase)) {
+        $windowTitle
       } else {
         [System.IO.Path]::GetFileNameWithoutExtension($fullPath)
       }

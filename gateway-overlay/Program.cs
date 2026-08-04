@@ -107,6 +107,7 @@ internal sealed class OverlayForm : Form
     private readonly Stopwatch _animationClock = Stopwatch.StartNew();
     private readonly LayeredWindowPresenter _presenter = new();
     private readonly string? _targetRectFile;
+    private OperatorStopWatcher? _stopWatcher;
     private string? _lastTargetRectPayload;
     private RectangleF? _targetRect;
 
@@ -150,6 +151,9 @@ internal sealed class OverlayForm : Form
         NativeMethods.SetWindowPos(Handle, NativeMethods.HWND_TOPMOST, Left, Top, Width, Height, NativeMethods.SWP_NOACTIVATE);
         SyncTargetRect();
         PresentFrame();
+        // Installed before readiness is announced, so the Host never reports an
+        // indicator the operator cannot escape from.
+        _stopWatcher = OperatorStopWatcher.StartFromEnvironment();
         OverlayReadinessMarker.WriteFromEnvironment();
         _animationTimer.Start();
         _targetRectTimer.Start();
@@ -161,6 +165,7 @@ internal sealed class OverlayForm : Form
         {
             _animationTimer.Dispose();
             _targetRectTimer.Dispose();
+            _stopWatcher?.Dispose();
         }
 
         base.Dispose(disposing);
@@ -171,7 +176,7 @@ internal sealed class OverlayForm : Form
         if (!IsHandleCreated || IsDisposed) return;
 
         var phase = OverlayTheme.PhaseAtElapsedMilliseconds(_animationClock.Elapsed.TotalMilliseconds);
-        using var frame = OverlayRenderer.Render(ClientSize, phase, _targetRect);
+        using var frame = OverlayRenderer.Render(ClientSize, phase, _targetRect, _stopWatcher is not null);
         _presenter.Present(this, frame, new Point(Left, Top));
     }
 

@@ -47,6 +47,12 @@ instead of a public issue.
   consistently owned Host Scene showing the target state, destination, or
   actionable transient; unrelated dynamic text never qualifies. One forced
   related-surface observation is permitted, but the click is never replayed.
+- **Choose delivery before mutation.** A Host navigation step may select one
+  foreground pointer delivery from current same-window semantic bounds. Never
+  add a coordinate fallback after an uncertain invoke receipt. Compose an
+  in-window navigation transient only from independently agreeing OCR and
+  anchor-local pixel structure, whether that structure is a fresh changed
+  region or a stable flat popup surface.
 - **No guessed coordinates.** Pixel actions stay bound to observation identity,
   bounds, scale, confidence, and expiry.
 - **Fail closed.** Uncertain targeting, policy violations, corrupt artifacts,

@@ -1,6 +1,7 @@
 import { setTimeout as delay } from "node:timers/promises";
 
 const DEFAULT_TIMEOUT_MS = 15_000;
+const TEXT_MUTATION_TIMEOUT_MS = 25_000;
 const RELEASE_TIMEOUT_MS = 2_000;
 const FAILURE_DECISION_TIMEOUT_MS = 2_000;
 const FAILURE_REOBSERVE_TIMEOUT_MS = 2_000;
@@ -35,6 +36,7 @@ const STEP_DEFINITIONS = [
     id: "enter-query",
     preconditions: ["the search Editable is focused and accepts type_text"],
     postconditions: ["the search Editable value exactly equals the requested query"],
+    timeoutMs: TEXT_MUTATION_TIMEOUT_MS,
   },
   {
     id: "wait-results-stable",
@@ -63,6 +65,7 @@ const STEP_DEFINITIONS = [
     id: "enter-message",
     preconditions: ["the message-editor Editable is focused and accepts type_text"],
     postconditions: ["the message-editor value exactly equals the requested message"],
+    timeoutMs: TEXT_MUTATION_TIMEOUT_MS,
   },
   {
     id: "send",
@@ -72,7 +75,7 @@ const STEP_DEFINITIONS = [
   {
     id: "verify-new-bubble",
     preconditions: ["one transcript Container belongs to the conversation Container"],
-    postconditions: ["a fresh self-authored bubble with the exact message appears under the transcript"],
+    postconditions: ["the same verified conversation shows a fresh exact self bubble, or corroborates a committed send with editor clear and the exact latest self bubble"],
   },
   {
     id: "release",
@@ -111,13 +114,20 @@ export class DeterministicMessagingStateMachine {
   #released = false;
   #releaseAttempted = false;
   #inFlightMutation = false;
+  #unverifiedSendEffect = false;
   #selectedIdentity = null;
   #selectedLabel = null;
   #stableCandidateKeys = [];
   #baselineMatchingBubbleCount = 0;
   #sendObservationVersion = null;
+  #postSendBubbleVerified = false;
+  #postSendTranscriptChanged = false;
+  #postSendEditorCleared = false;
+  #sendActionCommitted = false;
+  #sendActionOutcome = null;
   #decisionPort = null;
   #lastSceneDiagnostic = null;
+  #lastActionDiagnostic = null;
 
   constructor({
     host,
@@ -233,7 +243,7 @@ export class DeterministicMessagingStateMachine {
     } catch (caught) {
       const error = asWorkflowError(caught, {
         step: this.#currentStep,
-        outcome: this.#inFlightMutation ? "indeterminate" : "not-applied",
+        outcome: this.#hasUnverifiedMutation() ? "indeterminate" : "not-applied",
       });
       this.#status = error.code === "workflow.cancelled" ? "cancelled" : "failed";
       if (this.#canAskForFailureDecision(error)) {
@@ -269,7 +279,7 @@ export class DeterministicMessagingStateMachine {
     } catch (caught) {
       const error = asWorkflowError(caught, {
         step: step.id,
-        outcome: this.#inFlightMutation ? "indeterminate" : "not-applied",
+        outcome: this.#hasUnverifiedMutation() ? "indeterminate" : "not-applied",
       });
       if (error.diagnostic == null && this.#lastSceneDiagnostic !== null) {
         error.diagnostic = this.#lastSceneDiagnostic;
@@ -331,14 +341,43 @@ export class DeterministicMessagingStateMachine {
   }
 
   async #resolveTarget(signal) {
-    const scene = await this.#observe("resolve-target", signal);
+    let scene = await this.#observe("resolve-target", signal);
+    // Restoring a tray application can expose the native window one frame
+    // before its conversation header has rendered. Do not turn that transient
+    // absence into authority to search. Observe fresh Host Scenes within this
+    // step's existing timeout. If the header disappears, the normal search
+    // path remains available. While
+    // the header remains present, wait for its owned title instead of making a
+    // routing decision from a partially rendered conversation.
+    if (!conversationTitle(scene)) {
+      scene = await this.#observeUntil({
+        step: "resolve-target",
+        signal,
+        afterVersion: scene.observationVersion,
+        predicate: () => true,
+      });
+    }
+    if (!conversationTitle(scene)
+      && findElements(scene, { type: "Container", role: "conversation-header" }).length === 1) {
+      scene = await this.#observeUntil({
+        step: "resolve-target",
+        signal,
+        afterVersion: scene.observationVersion,
+        requiredRole: "conversation-title",
+        predicate: (current) => conversationTitle(current) !== null
+          || findElements(current, {
+            type: "Container",
+            role: "conversation-header",
+          }).length !== 1,
+      });
+    }
     const main = requireUniqueElement(scene, {
       type: "Window",
       role: "main-window",
       step: "resolve-target",
     });
     const currentTitle = conversationTitle(scene);
-    if (currentTitle && normalizeText(elementText(currentTitle)) === normalizeText(this.#goal.query)) {
+    if (currentTitle && sameTargetIdentity(elementText(currentTitle), this.#goal.query)) {
       this.#selectedIdentity = currentTitle.semanticKey ?? null;
       this.#selectedLabel = elementText(currentTitle);
       return "verify-conversation-title";
@@ -356,7 +395,7 @@ export class DeterministicMessagingStateMachine {
           action: "click",
           ownerId: targetList.id,
         }).filter((candidate) => (
-          normalizeText(elementText(candidate)) === normalizeText(this.#goal.query)
+          sameTargetIdentity(elementText(candidate), this.#goal.query)
         ))
       : [];
     if (matching.length === 1) {
@@ -473,7 +512,9 @@ export class DeterministicMessagingStateMachine {
     // Text delivery can be indeterminate even when a fresh Scene can prove the
     // exact replacement. Resolve that receipt from the postcondition below;
     // never replay the write.
-    await this.#act("enter-query", textAction(search.id, this.#goal.query), signal, {
+    await this.#act("enter-query", textAction(search.id, this.#goal.query, {
+      inputBehavior: "incremental",
+    }), signal, {
       allowIndeterminatePostcondition: true,
     });
     await this.#observeUntil({
@@ -704,54 +745,158 @@ export class DeterministicMessagingStateMachine {
       step: "send",
     });
     this.#sendObservationVersion = before.observationVersion;
-    await this.#act("send", {
+    const receipt = await this.#act("send", {
       kind: "click",
       elementId: send.id,
       interactionIntent: "activate-control",
     }, signal, { allowIndeterminatePostcondition: true });
-    await this.#observeUntil({
+    this.#sendActionOutcome = receipt?.outcome ?? receipt?.status ?? null;
+    this.#sendActionCommitted = this.#sendActionOutcome === "committed";
+    this.#unverifiedSendEffect = true;
+    const postActionScene = receipt?.capture?.scene;
+    if (postActionScene !== undefined) {
+      validateScene(postActionScene, "send");
+      const fresh = postActionScene.observationVersion > before.observationVersion;
+      const editorCleared = fresh && findElements(postActionScene, {
+        type: "Editable",
+        role: "message-editor",
+      }).some((element) => element.value === "");
+      if (editorCleared) {
+        this.#postSendEditorCleared = true;
+        this.#lastSceneDiagnostic = Object.freeze({
+          ...workflowSceneDiagnostic(postActionScene, {
+            expectedConversationIdentity: this.#selectedIdentity,
+          }),
+          ...(this.#lastActionDiagnostic ? { lastAction: this.#lastActionDiagnostic } : {}),
+        });
+        this.#recordPostSendTranscriptChange(postActionScene);
+        this.#postSendBubbleVerified = this.#newBubbleProven(postActionScene);
+        this.#inFlightMutation = false;
+        return;
+      }
+    }
+    const clearedScene = await this.#observeUntil({
       step: "send",
       signal,
       afterVersion: before.observationVersion,
       predicate: (scene) => findElements(scene, { type: "Editable", role: "message-editor" })
         .some((element) => element.value === ""),
     });
+    this.#postSendEditorCleared = true;
+    this.#recordPostSendTranscriptChange(clearedScene);
+    this.#postSendBubbleVerified = this.#newBubbleProven(clearedScene);
     this.#inFlightMutation = false;
   }
 
   async #verifyNewBubble(signal) {
+    if (this.#postSendBubbleVerified) {
+      this.#unverifiedSendEffect = false;
+      return;
+    }
     await this.#observeUntil({
       step: "verify-new-bubble",
       signal,
       afterVersion: this.#sendObservationVersion,
       predicate: (scene) => {
-        const conversation = findUniqueElement(scene, { type: "Container", role: "conversation" });
-        if (!conversation) return false;
-        const transcript = findUniqueElement(scene, {
-          type: "Container",
-          role: "transcript",
-          ownerId: conversation.id,
-        });
-        if (!transcript) return false;
-        const matchingBubbles = matchingSelfBubbles(scene, transcript.id, this.#goal.message);
-        return matchingBubbles.length > this.#baselineMatchingBubbleCount
-          || matchingBubbles.some((element) => (
-            element.state?.latestInTranscript === true
-            && (
-              element.state?.changedSincePreviousFrame === true
-              || transcript.state?.changedSincePreviousFrame === true
-            )
-          ));
+        this.#recordPostSendTranscriptChange(scene);
+        return this.#newBubbleProven(scene);
       },
     });
+    this.#unverifiedSendEffect = false;
+  }
+
+  #recordPostSendTranscriptChange(scene) {
+    const conversation = findUniqueElement(scene, { type: "Container", role: "conversation" });
+    if (!conversation) return;
+    const editorCleared = findElements(scene, {
+      type: "Editable",
+      role: "message-editor",
+      ownerId: conversation.id,
+    }).some((element) => element.value === "");
+    if (!editorCleared) return;
+    const transcript = findUniqueElement(scene, {
+      type: "Container",
+      role: "transcript",
+      ownerId: conversation.id,
+    });
+    if (transcript?.state?.changedSincePreviousFrame === true) {
+      this.#postSendTranscriptChanged = true;
+    }
+  }
+
+  #newBubbleProven(scene) {
+    const conversation = findUniqueElement(scene, { type: "Container", role: "conversation" });
+    if (!conversation) return false;
+    const header = findUniqueElement(scene, {
+      type: "Container",
+      role: "conversation-header",
+      ownerId: conversation.id,
+    });
+    const title = header && findUniqueElement(scene, {
+      role: "conversation-title",
+      ownerId: header.id,
+    });
+    const sameConversation = title && (
+      this.#selectedIdentity !== null
+        ? title.semanticKey === this.#selectedIdentity
+        : normalizeText(elementText(title)) === normalizeText(this.#selectedLabel)
+    );
+    if (!sameConversation) return false;
+    const transcript = findUniqueElement(scene, {
+      type: "Container",
+      role: "transcript",
+      ownerId: conversation.id,
+    });
+    if (!transcript) return false;
+    const matchingBubbles = matchingSelfBubbles(scene, transcript.id, this.#goal.message);
+    const currentEditorCleared = findElements(scene, {
+      type: "Editable",
+      role: "message-editor",
+      ownerId: conversation.id,
+    }).some((element) => element.value === "");
+    const exactLatestBubbles = matchingBubbles.filter(
+      (element) => element.state?.latestInTranscript === true,
+    );
+    this.#lastSceneDiagnostic = Object.freeze({
+      ...(this.#lastSceneDiagnostic ?? {}),
+      sendProof: Object.freeze({
+        sameConversation: sameConversation === true,
+        sendActionOutcome: this.#sendActionOutcome,
+        sendActionCommitted: this.#sendActionCommitted,
+        editorClearProven: this.#postSendEditorCleared,
+        currentEditorCleared,
+        baselineMatchingSelfBubbleCount: this.#baselineMatchingBubbleCount,
+        matchingSelfBubbleCount: matchingBubbles.length,
+        exactLatestSelfBubbleCount: exactLatestBubbles.length,
+        transcriptChanged: transcript.state?.changedSincePreviousFrame === true,
+        rememberedTranscriptChange: this.#postSendTranscriptChanged,
+      }),
+    });
+    const visuallyFresh = matchingBubbles.length > this.#baselineMatchingBubbleCount
+      || matchingBubbles.some((element) => (
+        element.state?.latestInTranscript === true
+        && (
+          element.state?.changedSincePreviousFrame === true
+          || transcript.state?.changedSincePreviousFrame === true
+          || this.#postSendTranscriptChanged
+        )
+    ));
+    if (visuallyFresh) return true;
+    return ACTION_OUTCOMES.has(this.#sendActionOutcome)
+      && this.#sendActionOutcome !== "not-applied"
+      && (currentEditorCleared || this.#postSendEditorCleared)
+      && exactLatestBubbles.length === 1;
   }
 
   async #observe(step, signal, { requiredRole, requiredSemanticKey } = {}) {
-    assertNotAborted(signal, step, this.#inFlightMutation);
+    assertNotAborted(signal, step, this.#hasUnverifiedMutation());
     const scene = await this.#host.observe({ step, signal, requiredRole, requiredSemanticKey });
     validateScene(scene, step);
-    this.#lastSceneDiagnostic = workflowSceneDiagnostic(scene, {
-      expectedConversationIdentity: this.#selectedIdentity,
+    this.#lastSceneDiagnostic = Object.freeze({
+      ...workflowSceneDiagnostic(scene, {
+        expectedConversationIdentity: this.#selectedIdentity,
+      }),
+      ...(this.#lastActionDiagnostic ? { lastAction: this.#lastActionDiagnostic } : {}),
     });
     return scene;
   }
@@ -777,6 +922,7 @@ export class DeterministicMessagingStateMachine {
     this.#inFlightMutation = true;
     const receipt = await this.#host.act({ step, action: Object.freeze({ ...action }), signal });
     const outcome = receipt?.outcome ?? receipt?.status;
+    this.#lastActionDiagnostic = workflowActionDiagnostic(step, receipt);
     if (!ACTION_OUTCOMES.has(outcome)) {
       throw workflowError({
         code: "workflow.invalid_action_receipt",
@@ -800,6 +946,10 @@ export class DeterministicMessagingStateMachine {
     return receipt;
   }
 
+  #hasUnverifiedMutation() {
+    return this.#inFlightMutation || this.#unverifiedSendEffect;
+  }
+
   async #withStepTimeout(step, operation) {
     const timeoutMs = this.#stepTimeouts[step.id] ?? step.timeoutMs;
     const controller = new AbortController();
@@ -820,7 +970,7 @@ export class DeterministicMessagingStateMachine {
           code: "workflow.step_timeout",
           message: `Deterministic workflow step ${step.id} timed out after ${timeoutMs} ms.`,
           step: step.id,
-          outcome: this.#inFlightMutation ? "indeterminate" : "not-applied",
+          outcome: this.#hasUnverifiedMutation() ? "indeterminate" : "not-applied",
         });
         error.diagnostic = this.#lastSceneDiagnostic;
         reject(error);
@@ -837,7 +987,7 @@ export class DeterministicMessagingStateMachine {
           code: "workflow.cancelled",
           message: `Deterministic workflow was cancelled during ${step.id}.`,
           step: step.id,
-          outcome: this.#inFlightMutation ? "indeterminate" : "not-applied",
+          outcome: this.#hasUnverifiedMutation() ? "indeterminate" : "not-applied",
         });
       }
       throw caught;
@@ -931,13 +1081,13 @@ export class DeterministicMessagingStateMachine {
   }
 }
 
-function textAction(elementId, value) {
+function textAction(elementId, value, { inputBehavior = "commit" } = {}) {
   return {
     kind: "type_text",
     elementId,
     value,
     textMode: "replace-all",
-    inputBehavior: "commit",
+    inputBehavior,
   };
 }
 
@@ -1054,6 +1204,12 @@ function normalizeText(value) {
   return String(value ?? "").normalize("NFKC").trim().toLocaleLowerCase();
 }
 
+function sameTargetIdentity(left, right) {
+  const normalizeIdentity = (value) => normalizeText(value).replace(/[\p{P}\p{Z}\s]+/gu, "");
+  const normalizedLeft = normalizeIdentity(left);
+  return normalizedLeft !== "" && normalizedLeft === normalizeIdentity(right);
+}
+
 function workflowSceneDiagnostic(scene, { expectedConversationIdentity = null } = {}) {
   const observedRoles = {};
   for (const element of scene.elements) {
@@ -1073,6 +1229,27 @@ function workflowSceneDiagnostic(scene, { expectedConversationIdentity = null } 
     expectedConversationIdentity,
     observedRoles: Object.freeze(observedRoles),
     conversationTitles: Object.freeze(conversationTitles.map((title) => Object.freeze(title))),
+  });
+}
+
+function workflowActionDiagnostic(step, receipt) {
+  const result = receipt?.result && typeof receipt.result === "object" ? receipt.result : {};
+  const execution = receipt?.execution && typeof receipt.execution === "object" ? receipt.execution : {};
+  const outcome = receipt?.outcome ?? receipt?.status ?? null;
+  return Object.freeze({
+    step,
+    outcome,
+    applied: typeof result.applied === "boolean" ? result.applied : null,
+    mayHaveSideEffects: result.mayHaveSideEffects === true,
+    postconditionVerified: result.postconditionVerified === true || result.verified === true,
+    providerStatus: result.providerStatus ?? result.status ?? null,
+    deliveryMode: receipt?.effectiveDeliveryMode ?? execution.deliveryMode ?? null,
+    providerPath: execution.providerPath ?? result.providerPath ?? result.deliveryPath ?? null,
+    focusVerified: result.focusVerified === true || receipt?.focusReceipt?.status === "verified",
+    changeSignalDelivered: result.changeSignalDelivered === true,
+    readBackStatus: result.readBackStatus ?? null,
+    readBackComparison: result.readBackComparison ?? null,
+    errorCode: receipt?.error?.code ?? result.error?.code ?? null,
   });
 }
 

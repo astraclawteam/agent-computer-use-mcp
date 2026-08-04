@@ -60,6 +60,11 @@ test("Phase 1.6 exposes a stable local module installation manifest", () => {
     "XIAOZHICLAW_COMPUTER_USE_ARTIFACT_ROOT",
     "XIAOZHICLAW_OCR_MODEL_ROOT",
   ]);
+
+  assert.equal(manifest.toolSurface.default, "agent");
+  assert.deepEqual(manifest.toolSurface.agentTools, ["computer.task", "computer.message"]);
+  assert.deepEqual(manifest.toolSurface.host.args, ["--tool-surface=host"]);
+  assert.deepEqual(manifest.toolSurface.host.env, { AGENT_COMPUTER_USE_TOOL_SURFACE: "host" });
 });
 
 test("Phase 1.6 builds Codex and Claude Desktop MCP client configs", () => {
@@ -95,7 +100,7 @@ test("computer.installation answers over stdio with config templates", async () 
   );
   const transport = new StdioClientTransport({
     command: process.execPath,
-    args: ["src/computer-use-mcp-server.mjs"],
+    args: ["src/computer-use-mcp-server.mjs", "--tool-surface=host"],
     cwd: process.cwd(),
   });
 

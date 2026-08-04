@@ -266,6 +266,42 @@ test("pixel actions reject missing provenance expiry low confidence and guessed 
   }
 });
 
+test("every refusal states which requirement failed", () => {
+  // One code covers many distinct refusals, so without a reason a caller cannot
+  // tell a malformed request from a target that lacks the evidence to be acted
+  // on, and neither can anyone debugging a stuck workflow.
+  const refusals = [
+    ["no action", { observation: observation(), element: fusedElement(), action: undefined }, /no action/iu],
+    ["no observation", { observation: undefined, element: fusedElement(), action: action() }, /observation/iu],
+    ["unoffered action", {
+      observation: observation(),
+      element: fusedElement({ actions: ["press_key"] }),
+      action: action(),
+    }, /does not offer/iu],
+    ["missing provenance", {
+      observation: observation(),
+      element: fusedElement({ proposalId: undefined }),
+      action: action(),
+    }, /source region|proposal id/iu],
+    ["low confidence", {
+      observation: observation(),
+      element: fusedElement({ confidence: 0.5 }),
+      action: action(),
+    }, /confidence/iu],
+    ["neither template nor fusion", {
+      observation: observation(),
+      element: fusedElement({ source: "som" }),
+      action: action(),
+    }, /template match|two independent providers/iu],
+  ];
+  for (const [label, args, expected] of refusals) {
+    const decision = admitPerceptionAction({ ...args, now: 100 });
+    assert.equal(decision.allowed, false, `${label} is refused`);
+    assert.equal(decision.code, "observation.insufficient", `${label} keeps the published code`);
+    assert.match(String(decision.reason ?? ""), expected, `${label} explains itself`);
+  }
+});
+
 test("OCR-only and single-source SOM evidence fail closed regardless of confidence", () => {
   assert.equal(admitPerceptionAction({
     observation: observation({ source: "ocr" }),
@@ -1278,6 +1314,135 @@ test("semantic clicks with no immediate state transition are delivered once and 
   assert.deepEqual(calls, ["click", "capture"]);
 });
 
+test("Host navigation clicks use one foreground pointer delivery grounded by the current semantic bounds", async (t) => {
+  const calls = [];
+  const captureArgs = [];
+  const stableElements = [{
+    elementToken: "profile-menu",
+    role: "button",
+    name: "Open profile menu",
+    actions: ["click"],
+    source: "cua-driver",
+    bounds: { x: 240, y: 40, width: 48, height: 40 },
+  }];
+  const router = new ComputerUseProviderRouter({
+    driver: {
+      async click(args) {
+        calls.push({ method: "click", args });
+        return { status: "ok", effect: "unverifiable", verified: false };
+      },
+      async capture() {
+        calls.push({ method: "capture" });
+        return {
+          observationId: "navigation-after",
+          source: "cua-driver",
+          coordinateSpace: "window-local",
+          coordinateBounds: { x: 0, y: 0, width: 640, height: 480 },
+          window: {
+            id: "window-1",
+            bounds: { x: 100, y: 80, width: 640, height: 480 },
+          },
+          elements: stableElements.map((element) => ({
+            ...element,
+            elementToken: "profile-menu-after",
+          })),
+          includeUserOverlay: false,
+        };
+      },
+      async captureScreenshot(args) {
+        calls.push({ method: "captureScreenshot" });
+        await writeFile(args.outputPath, Buffer.from(
+          "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M/wHwAF/gL+Xh9GAAAAAElFTkSuQmCC",
+          "base64",
+        ));
+        return {
+          status: "ok",
+          source: "cua-driver-window-state",
+          title: "Fixture",
+          path: args.outputPath,
+          method: "cua-driver-get_window_state",
+          hwnd: 1,
+          x: 100,
+          y: 80,
+          width: 640,
+          height: 480,
+          window: {
+            id: "window-1",
+            title: "Fixture",
+            pid: 100,
+            bounds: { x: 100, y: 80, width: 640, height: 480 },
+          },
+        };
+      },
+    },
+  });
+  t.after(() => router.close());
+  router.activeController = {
+    controllerId: "controller-1",
+    tier: "full",
+    window: {
+      id: "window-1",
+      windowId: "window-1",
+      title: "Fixture",
+      pid: 100,
+      bounds: { x: 100, y: 80, width: 640, height: 480 },
+    },
+    expiresAt: new Date(Date.now() + 10_000).toISOString(),
+    expiresAtMs: Date.now() + 10_000,
+  };
+  router.lastCapture = {
+    ...router.createActionObservation({
+      observationId: "navigation-before",
+      source: "cua-driver",
+      coordinateSpace: "window-local",
+      coordinateBounds: { x: 0, y: 0, width: 640, height: 480 },
+      window: {
+        id: "window-1",
+        bounds: { x: 100, y: 80, width: 640, height: 480 },
+      },
+      elements: stableElements,
+      includeUserOverlay: false,
+    }),
+    controllerId: "controller-1",
+  };
+  const captureOperation = router.captureOperation.bind(router);
+  router.prioritizeLocalScreenshotPerception = async (screenshot) => screenshot;
+  router.captureOperation = async (args, ticket) => {
+    captureArgs.push(args);
+    return captureOperation(args, ticket);
+  };
+
+  const clicked = await router.act({
+    action: {
+      kind: "click",
+      elementToken: "profile-menu",
+      interactionIntent: "activate-control",
+      targetRole: "button",
+      hostDeliveryIntent: "navigation",
+      captureAfter: true,
+    },
+  });
+
+  assert.equal(clicked.status, "indeterminate");
+  assert.equal(clicked.effectiveDeliveryMode, "foreground");
+  assert.equal(clicked.execution.targetPath, "semantic-element-coordinate");
+  assert.equal(clicked.execution.selectionReason, "host-grounded-navigation-pointer");
+  assert.deepEqual(
+    calls.map((call) => call.method),
+    ["click", "capture", "captureScreenshot"],
+  );
+  assert.equal(calls[0].args.elementToken, undefined);
+  assert.equal(calls[0].args.elementIndex, undefined);
+  assert.equal(calls[0].args.x, 264);
+  assert.equal(calls[0].args.y, 60);
+  assert.equal(calls[0].args.deliveryMode, "foreground");
+  const navigationCapture = captureArgs.find((args) => args.forceScreenshotSurfaceCapture === true);
+  assert.deepEqual(navigationCapture.relatedSurfaceAnchor, {
+    role: "button",
+    bounds: { x: 240, y: 40, width: 48, height: 40 },
+  });
+});
+
 test("queued actions cannot reuse a target invalidated by a newer Scene observation", async (t) => {
   const clickedTokens = [];
   let captureCount = 0;
@@ -1477,7 +1642,7 @@ test("screenshot requests stay on the low-latency semantic path when actionable 
   assert.deepEqual(calls, ["capture"]);
 });
 
-test("forced navigation receipt observations bypass sufficient semantic coverage and preserve semantic elements", async (t) => {
+test("forced navigation receipt observations preserve the popup by skipping semantic focus probes", async (t) => {
   const calls = [];
   const semanticElements = ["Profile", "Settings", "Usage", "Help"].map((name, index) => ({
     elementToken: `button-${index}`,
@@ -1539,11 +1704,20 @@ test("forced navigation receipt observations bypass sufficient semantic coverage
     expiresAt: new Date(Date.now() + 10_000).toISOString(),
     expiresAtMs: Date.now() + 10_000,
   };
+  const actionObservation = router.createActionObservation({
+    observationId: "semantic-action-observation",
+    source: "cua-driver",
+    mode: "semantic",
+    elements: semanticElements,
+    includeUserOverlay: false,
+  });
+  router.lastCapture = actionObservation;
 
   const captured = await router.capture({
     mode: "screenshot",
     forceScreenshotSurfaceCapture: true,
     includeRelatedSurfaces: true,
+    preserveActionObservation: true,
     relatedSurfaceAnchor: {
       role: "navigation-item",
       bounds: { x: 500, y: 20, width: 80, height: 40 },
@@ -1552,8 +1726,9 @@ test("forced navigation receipt observations bypass sufficient semantic coverage
 
   assert.equal(captured.requestedMode, undefined);
   assert.equal(captured.source, "cua-driver-window-state");
-  assert.deepEqual(captured.elements, semanticElements);
-  assert.deepEqual(calls, ["capture", "captureScreenshot"]);
+  assert.deepEqual(captured.elements, []);
+  assert.deepEqual(calls, ["captureScreenshot"]);
+  assert.equal(router.lastCapture, actionObservation);
 });
 
 test("provider router keeps action observations fresh for one real Agent reasoning turn", async (t) => {
@@ -1698,10 +1873,10 @@ test("active-controller screenshots and pixel actions share the cua-driver coord
     expiresAtMs: Date.now() + 10_000,
   };
 
-  const observation = await router.captureWindow({
+  const observation = await router.runOperation((ticket) => router.captureWindowOperation({
     titlePart: "微信",
     outputPath: "C:\\controlled\\window.png",
-  });
+  }, ticket));
 
   assert.deepEqual(calls, [{
     window: router.activeController.window,
@@ -3048,7 +3223,7 @@ test("idempotent replace-all accepts a fresh exact postcondition that existed be
   });
 });
 
-test("native read-back commits an exact replace-all value into the same returned Host Scene", async (t) => {
+test("native read-back commits an exact replace-all value into a generic Editable Scene element", async (t) => {
   const query = "Y-大风";
   const searchBounds = { x: 60, y: 40, width: 200, height: 40 };
   const router = new ComputerUseProviderRouter({
@@ -3087,7 +3262,7 @@ test("native read-back commits an exact replace-all value into the same returned
     elements: [fusedElement({
       hostType: "Editable",
       elementToken: "native-read-back-search-before",
-      role: "search",
+      role: "edit",
       bounds: searchBounds,
       sourceRegion: searchBounds,
       actions: ["click", "type_text"],
@@ -3095,7 +3270,7 @@ test("native read-back commits an exact replace-all value into the same returned
       state: { focused: true },
     })],
   });
-  const search = router.lastCapture.scene.elements.find((element) => element.role === "search");
+  const search = router.lastCapture.scene.elements.find((element) => element.role === "edit");
   router.captureOperation = async () => router.createActionObservation({
     ...observation({
       observationId: "native-read-back-after",
@@ -3109,7 +3284,7 @@ test("native read-back commits an exact replace-all value into the same returned
       elements: [fusedElement({
         hostType: "Editable",
         elementToken: "native-read-back-search-after",
-        role: "search",
+        role: "edit",
         bounds: searchBounds,
         sourceRegion: searchBounds,
         actions: ["click", "type_text"],
@@ -3132,7 +3307,7 @@ test("native read-back commits an exact replace-all value into the same returned
 
   assert.equal(typed.outcome, "committed");
   const returnedSearch = typed.capture.scene.elements.filter((element) => (
-    element.type === "Editable" && element.role === "search"
+    element.type === "Editable" && element.role === "edit"
   ));
   assert.equal(returnedSearch.length, 1);
   assert.equal(returnedSearch[0].value, query);

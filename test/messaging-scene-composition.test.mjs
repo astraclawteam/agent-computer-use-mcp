@@ -1546,6 +1546,82 @@ test("the production screenshot path merges a proven related navigation surface 
   assert.equal(result.coordinate.windowId, "77");
 });
 
+test("the production screenshot path composes a stable same-window navigation popup from pixel structure", async (t) => {
+  const settingsOcr = {
+    elementToken: "ocr-settings",
+    role: "text",
+    name: "Settings",
+    value: "Settings",
+    bounds: { x: 28, y: 552, width: 78, height: 22 },
+    confidence: 0.99,
+    source: "ocr",
+    proposalId: "ocr-settings",
+  };
+  let detectionCalls = 0;
+  const ocrCrops = [];
+  const router = new ComputerUseProviderRouter({
+    messagingVisualProposalOperation: async () => [],
+    sameWindowNavigationSurfaceOperation: async ({ navigationControl, ocrElements, knownSurfaceBounds }) => {
+      detectionCalls += 1;
+      assert.deepEqual(navigationControl.bounds, { x: 24, y: 650, width: 42, height: 42 });
+      assert.deepEqual(knownSurfaceBounds, { x: 8, y: 450, width: 238, height: 190 });
+      assert.equal(ocrElements.some((element) => element.name === "Settings"), true);
+      return {
+        bounds: { x: 8, y: 450, width: 238, height: 190 },
+        ocrElements: [settingsOcr],
+        visualProposals: [{
+          proposalId: "stable-settings-row",
+          role: "navigation-row",
+          source: "visual-structure",
+          confidence: 0.96,
+          bounds: { x: 12, y: 540, width: 226, height: 44 },
+        }],
+      };
+    },
+  });
+  t.after(() => router.close());
+  router.activeController = {
+    controllerId: "controller-1",
+    tier: "full",
+    window: { id: "42", windowId: "42", title: "Fixture", bounds: { ...bounds, x: 452, y: 100 } },
+    expiresAtMs: Date.now() + 60_000,
+  };
+  router.readOwnedArtifact = async () => Buffer.from("fixture-pixels");
+  router.ocrRegionOperation = async ({ crop }) => {
+    ocrCrops.push(crop);
+    return { observation: { source: "ocr", elements: [settingsOcr] } };
+  };
+
+  const observation = await router.runOperation((ticket) => (
+    router.prioritizeLocalScreenshotPerception({
+      observationId: "shot-same-window-navigation",
+      artifact: { path: "C:\\owned\\shot.png" },
+      capture: { hwnd: "42", x: 452, y: 100, width: bounds.width, height: bounds.height },
+      coordinateSpace: "window-local",
+      coordinateBounds: bounds,
+      window: { id: "42", bounds: { ...bounds, x: 452, y: 100 } },
+      includeUserOverlay: false,
+    }, {
+      relatedSurfaceAnchor: {
+        role: "button",
+        bounds: { x: 24, y: 650, width: 42, height: 42 },
+        surfaceBounds: { x: 8, y: 450, width: 238, height: 190 },
+      },
+    }, ticket)
+  ));
+  const actionObservation = router.createActionObservation(observation);
+  const surfaceElement = actionObservation.scene.elements.find((element) => element.role === "navigation-surface");
+  const result = actionObservation.scene.elements.find((element) => element.role === "navigation-item");
+
+  assert.equal(detectionCalls, 1);
+  assert.deepEqual(ocrCrops, [{ x: 8, y: 330, width: 336, height: 378 }]);
+  assert.equal(surfaceElement.parentId, actionObservation.scene.rootId);
+  assert.equal(result.parentId, surfaceElement.id);
+  assert.equal(result.name, "Settings");
+  assert.deepEqual(result.actions, ["click"]);
+  assert.equal(result.evidenceConsistency, "consistent");
+});
+
 function structuralProposal(role, proposalBounds) {
   return {
     proposalId: `visual-${role}`,

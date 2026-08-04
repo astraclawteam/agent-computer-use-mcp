@@ -9,9 +9,30 @@
 
 This review records the public `computer.*` MCP contract that requires human PR review before release. The executable Phase 5.7 gate checks that every public tool is represented here, that each result contract remains versioned, and that overlay/desktop-control risk has been reviewed without starting desktop control.
 
+## Tool Surface
+
+Host-only status is enforced by the advertised inventory, not by the private `xiaozhiclaw/visibility` `_meta` key. The server resolves one surface per process from launch arguments or environment before any transport exists:
+
+| Surface | Selected by | `tools/list` |
+| --- | --- | --- |
+| `agent` (default) | any launch without an explicit signal | `computer.task`, `computer.message` |
+| `host` | `--tool-surface=host`, `--host-control`, or `AGENT_COMPUTER_USE_TOOL_SURFACE=host` | all ten tools |
+
+`tools/call` applies the same gate. A name the active surface did not advertise returns the `tool_not_found` error a genuinely unknown name returns, with no detail distinguishing the two, so the error cannot confirm which hidden tools exist. The `_meta` key remains advisory for Hosts that already read it, and `computer.installation` publishes the surface contract under `manifest.toolSurface`.
+
+Rows marked Host-only below are therefore absent from a default-launch inventory rather than merely annotated.
+
+## Error Envelope
+
+Every tool can terminate with the shared envelope `{ resultSchemaVersion, includeUserOverlay, status: "error", error }`. Each `outputSchema` models this as a first-class branch: the top-level `required` list holds only `resultSchemaVersion` and `includeUserOverlay`, and an `allOf` requires the tool's success fields only when `error` is absent.
+
+A tool that constrains `status` with an enum must therefore admit `"error"` as well. `computer.task`, `computer.message`, and `computer.act` are the tools that constrain it today; the shared schema builder adds `"error"` to any such enum so a new tool cannot reintroduce the gap. Omitting it makes a tool's own failure result fail the tool's own published schema, and an official MCP SDK client answers `-32602` instead of delivering the error.
+
+`"error"` is never folded into a terminal outcome such as `not-applied`. Results that are genuinely not applied are converted earlier by the safe-rejection path with `applied: false` and `mayHaveSideEffects: false`; anything that reaches the shared envelope has already failed that check, so reusing a terminal outcome would report a possibly delivered mutation as replay-safe.
+
 | Tool | Review Status | Compatibility | Overlay Exclusion | Desktop Control | Notes |
 | --- | --- | --- | --- | --- | --- |
-| computer.task | reviewed | compatible | overlay-free | reviewed | Additive Agent-facing generic non-messaging Host workflow; every invocation revalidates one opaque Scene candidate, applies at most one action, commits navigation only from a newer consistent Scene postcondition, returns a compact Host verification receipt and parent-owned facts, constrains the next interaction step to this tool, and releases before returning. |
+| computer.task | reviewed | compatible | overlay-free | reviewed | Additive Agent-facing generic non-messaging Host workflow; the initial call accepts application and goal while continuation is owned by the opaque Host token. Every invocation revalidates one opaque Scene candidate, excludes messaging-only controls and facts without rejecting a mixed-layout application shell, chooses one Host-grounded delivery route before mutation, applies at most one action, composes same-window transients only when OCR rows agree with anchor-local changed-region or stable flat-surface pixel structure, commits navigation only from a newer consistent Scene postcondition, returns a compact Host verification receipt and parent-owned facts, constrains the next interaction step to this tool, and releases before returning. |
 | computer.message | reviewed | compatible | overlay-free | reviewed | Agent-facing deterministic messaging workflow; the Host owns Scene coordinates, fixed step ordering, mutation verification, no-replay policy, and controller release. |
 | computer.acquire | reviewed | compatible | overlay-free | reviewed | Host workflow-internal; may start desktop control only after policy and approval requirements and an interactive input-desktop check. |
 | computer.observe | reviewed | compatible | overlay-free | reviewed | Host workflow-internal; detailed observations expose one versioned Host Scene, and raw provider elements remain evidence rather than parallel action targets. |

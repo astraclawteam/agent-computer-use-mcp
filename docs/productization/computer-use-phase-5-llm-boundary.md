@@ -76,15 +76,38 @@ output contains no coordinate, crop, provider token,
 actions are never replayed. Stop cancels the in-flight invocation and release
 still runs before the terminal result.
 
+Navigation delivery is also Host-owned. When the selected element has fresh,
+same-window semantic bounds, the Host plans one foreground pointer action at
+the owned rectangle center before mutation. This replaces the unreliable
+background-invoke route for that step; it is not a post-failure fallback, and
+the model never receives or chooses the coordinate. That action's first
+post-action screenshot retains the Host anchor. A popup painted inside the
+controlled window enters the Scene as a navigation transient only when the
+OCR rows agree with anchor-local pixel structure: either a fresh changed region
+or a stable flat popup surface. OCR-only text, one-row surfaces, unrelated
+panes, and unrelated frame changes remain non-actionable.
+
 Every result installs an interaction-step execution control whose only allowed
 next tool is `computer.task`. This prevents shell and low-level GUI bypass
 without incorrectly marking the whole turn terminal; the next Host result
-renews the same boundary. When an exact process has no window, the Host may
+renews the same boundary. The initial call supplies `applicationName` and
+`goal`; later calls use the opaque `taskToken` as their sole scope authority and
+do not repeat natural-language goal text. The Host retains the original
+application, goal, owner, agent, project, session, and expiry binding. When an
+exact process has no window, the Host may
 bind an owning window only from same-application-family process evidence or
 consistent root-level `Window/Application/Document` Scene evidence. Failed
 process candidates are invalidated for that task state.
 
-`computer.message` is the only Agent-facing messaging mutation path. It owns
+The tool boundary is based on requested side effects, not layout vocabulary.
+`computer.task` owns navigation and non-submitting edit: a consistently owned
+`Editable` may be offered as one atomic replace-all/read-back candidate even in
+a chat-shaped shell, while send controls, recipient/conversation targets,
+transcripts, and message bodies remain hidden. `computer.message` is selected
+only for an explicit recipient/conversation plus exact content and a request to
+send it.
+
+`computer.message` is the only Agent-facing send-message path. It owns
 acquire, current Scene observation, element-targeted actions, guarded transition
 selection, canonical receipts, Stop propagation, and release. Raw coordinate or
 provider-token mutations are rejected once the Host Scene is recognized as a

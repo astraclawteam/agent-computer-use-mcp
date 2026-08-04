@@ -1,4 +1,11 @@
 import { resolveCuaDriverCandidate } from "./driver-health.mjs";
+import {
+  AGENT_TOOL_SURFACE,
+  COMPUTER_USE_AGENT_TOOL_NAMES,
+  HOST_TOOL_SURFACE,
+  hostToolSurfaceArgs,
+  hostToolSurfaceEnv,
+} from "./computer-use-tool-surface.mjs";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 
@@ -55,6 +62,21 @@ export function getComputerUseInstallationManifest(options = {}) {
     envOverrides: {
       required: [],
       optional: OPTIONAL_ENV_OVERRIDES,
+    },
+    // The advertised inventory, not a private _meta key, is what keeps
+    // lifecycle and management tools out of a third-party Host's model
+    // inventory. A Host that owns approval and projection opts into the full
+    // surface at launch; every other client keeps the Agent surface.
+    toolSurface: {
+      schemaVersion: 1,
+      default: AGENT_TOOL_SURFACE,
+      agentTools: [...COMPUTER_USE_AGENT_TOOL_NAMES],
+      host: {
+        surface: HOST_TOOL_SURFACE,
+        args: hostToolSurfaceArgs(),
+        env: hostToolSurfaceEnv(),
+        requires: "A Host that owns user approval, controller lifecycle, and tool projection.",
+      },
     },
     observation: {
       includeUserOverlay: false,

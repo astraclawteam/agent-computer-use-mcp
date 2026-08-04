@@ -7,7 +7,13 @@ export function admitPerceptionAction({
   recentEditableTarget,
   now = Date.now(),
 } = {}) {
-  if (!isRecord(action)) return denied("observation.insufficient");
+  // One code covers every admission refusal because callers switch on it, so
+  // each site carries the reason that actually applies. Without that, a refusal
+  // says only "insufficient" and the caller cannot tell a malformed request from
+  // a target that lacks the evidence to be acted on.
+  if (!isRecord(action)) {
+    return denied("observation.insufficient", { reason: "No action was supplied." });
+  }
   if (action.kind === "activate_window") return allowed(false);
   if ((action.kind === "press_key" || action.kind === "type_text") && !hasPixelCoordinates(action)
     && action.elementToken === undefined && action.elementIndex === undefined) {
@@ -16,7 +22,9 @@ export function admitPerceptionAction({
     }
     return allowed(false);
   }
-  if (!isRecord(observation)) return denied("observation.insufficient");
+  if (!isRecord(observation)) {
+    return denied("observation.insufficient", { reason: "No observation accompanied the action." });
+  }
   if (observation.includeUserOverlay !== false) return denied("observation.overlay_contaminated");
   if (Number.isFinite(observation.expiresAt) && observation.expiresAt <= now) return denied("observation.expired");
   if (observation.window?.id && action.windowId && String(observation.window.id) !== String(action.windowId)) {
@@ -27,9 +35,20 @@ export function admitPerceptionAction({
   }
   if (hasPixelCoordinates(action)) {
     if (action.observationId !== observation.observationId) return denied("observation.identity_mismatch");
-    if (!["click", "type_text", "press_key"].includes(action.kind)) return denied("observation.insufficient");
-    if (action.guessedAction === true || !coordinatesWithinObservation(action, observation)) {
-      return denied("observation.insufficient");
+    if (!["click", "type_text", "press_key"].includes(action.kind)) {
+      return denied("observation.insufficient", {
+        reason: `Pixel coordinates cannot target a ${action.kind} action.`,
+        actionKind: action.kind,
+      });
+    }
+    if (action.guessedAction === true) {
+      return denied("observation.insufficient", { reason: "A guessed action cannot be admitted." });
+    }
+    if (!coordinatesWithinObservation(action, observation)) {
+      return denied("observation.insufficient", {
+        reason: "The point lies outside the observation it claims to come from.",
+        nextAction: "Capture a fresh screenshot and use a point inside its coordinate space.",
+      });
     }
     if (action.kind === "click" && action.targetRole === "editable"
       && action.interactionIntent !== "focus-editable") {
@@ -102,24 +121,47 @@ export function admitPerceptionAction({
     }
     return allowed(true);
   }
-  if (!isRecord(element)) return denied("observation.insufficient");
-  if (!Array.isArray(element.actions) || !element.actions.includes(action.kind)) return denied("observation.insufficient");
+  if (!isRecord(element)) {
+    return denied("observation.insufficient", { reason: "The action names no element from the observation." });
+  }
+  if (!Array.isArray(element.actions) || !element.actions.includes(action.kind)) {
+    return denied("observation.insufficient", {
+      reason: `The element does not offer a ${action.kind} action.`,
+      offeredActions: Array.isArray(element.actions) ? [...element.actions] : [],
+    });
+  }
 
   const pixelLimitedAction = element.pixelLimitedAction === true;
   if (!pixelLimitedAction && SEMANTIC_SOURCES.has(element.source ?? observation.source)) {
     return allowed(false);
   }
-  if (!pixelLimitedAction) return denied("observation.insufficient");
+  if (!pixelLimitedAction) {
+    return denied("observation.insufficient", {
+      reason: "The element comes from neither a semantic provider nor a grounded pixel proposal.",
+      elementSource: element.source ?? observation.source ?? null,
+    });
+  }
   if (element.passwordRegion === true || element.paymentRegion === true || element.privateRegion === true) {
     return denied("policy.sensitive_region");
   }
   if (!isBox(element.sourceRegion) || !isRecord(element.modelIdentity)
     || typeof element.modelIdentity.provider !== "string"
     || typeof element.proposalId !== "string" || element.proposalId.trim() === "") {
-    return denied("observation.insufficient");
+    return denied("observation.insufficient", {
+      reason: "A pixel-derived target must carry its source region, producing model identity, and proposal id.",
+      missing: [
+        isBox(element.sourceRegion) ? null : "sourceRegion",
+        isRecord(element.modelIdentity) && typeof element.modelIdentity.provider === "string" ? null : "modelIdentity.provider",
+        typeof element.proposalId === "string" && element.proposalId.trim() !== "" ? null : "proposalId",
+      ].filter(Boolean),
+    });
   }
   if (!Number.isFinite(element.confidence) || element.confidence < 0.98 || element.guessedAction === true) {
-    return denied("observation.insufficient");
+    return denied("observation.insufficient", {
+      reason: "A pixel-derived target must be recognized with at least 0.98 confidence and must not be guessed.",
+      confidence: Number.isFinite(element.confidence) ? element.confidence : null,
+      requiredConfidence: 0.98,
+    });
   }
   const support = Array.isArray(element.support) ? element.support : [];
   const providers = new Set(support
@@ -130,7 +172,13 @@ export function admitPerceptionAction({
     && element.approvedActionLabel === true
     && providers.has("template");
   const fused = element.source === "local-proposal-fusion" && providers.size >= 2;
-  return exactTemplate || fused ? allowed(true) : denied("observation.insufficient");
+  if (exactTemplate || fused) return allowed(true);
+  return denied("observation.insufficient", {
+    reason: "A pixel-derived target may be acted on only as an exact template match or as a fusion of at least two independent providers.",
+    elementSource: element.source ?? null,
+    supportingProviders: [...providers],
+    nextAction: "Ground the target through a semantic provider, or produce it as a fused proposal carrying its supporting providers.",
+  });
 }
 
 function allowed(pixelLimitedAction) {
@@ -138,7 +186,10 @@ function allowed(pixelLimitedAction) {
 }
 
 function denied(code, detail = {}) {
-  return Object.freeze({ allowed: false, code, pixelLimitedAction: false, ...detail });
+  // Admission runs before the action reaches any provider, so a refusal here
+  // proves nothing was delivered. Callers need that to distinguish a target
+  // they may safely reconsider from an action that might already be in flight.
+  return Object.freeze({ allowed: false, code, pixelLimitedAction: false, delivered: false, ...detail });
 }
 
 function isOcrTextGeometry(observation) {

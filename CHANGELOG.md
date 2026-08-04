@@ -4,10 +4,136 @@ All notable changes to `agent-computer-use-mcp` are tracked here.
 
 ## Unreleased
 
+## 0.0.27
+
+- Restore a tray application's main window before considering same-process
+  auxiliaries. A duplicated owner PID had promoted a visible full-size helper
+  window to application identity, so a tray messaging task could compose and
+  edit the helper instead of restoring the hidden main window. Owner-process
+  identity now applies only to a distinct same-package owner of a headless
+  child; an application's own PID cannot make all of its windows authoritative.
+- Unify coordinate Unicode editing on one IME-neutral `KEYEVENTF_UNICODE`
+  transaction. `incremental` and `commit` remain distinct Host task semantics,
+  but neither switches to clipboard paste or submits the field; an exact Scene
+  read-back remains the only authority that can commit a text mutation.
+- Add an optional source-bound verifier for the ordered seven-level real
+  Windows acceptance campaign. Maintainers can seal 70 privacy-safe Host
+  receipts (ten consecutive passes at every level, no tool errors or wrong
+  sends, no uncertain replays, and verified terminal release) against an exact
+  source identity when formal qualification is requested. Preview tags do not
+  force a live desktop campaign; the operator owns the release decision.
+- Complete generic non-submitting edits across both screenshot-grounded and
+  native semantic controls. The Host still prefers its exact replace-all text
+  primitive when an Editable has current pixel provenance; when a proven
+  semantic Editable exposes ValuePattern but cannot be located in the screenshot,
+  it selects `set_value` before mutation, refreshes semantic authority, verifies
+  exact read-back, and never falls back after an uncertain action.
+- Expose official MCP request cancellation and the SDK-owned connector process
+  identity to the real lifecycle acceptance harness, enabling controlled Stop,
+  connector fault, clean restart, and immediate reacquire proof without adding
+  a second controller or production fault-injection path.
+- Classify desktop work by side effect instead of application shape. Generic
+  tasks now expose consistently owned editors as non-submitting `edit`
+  candidates, including Electron `ValuePattern` editors and chat-shaped draft
+  boxes, but never expose send/submit or conversation-selection controls. Each
+  edit is screenshot-grounded, uses replace-all without a commit key, and is
+  committed only after exact-value read-back; explicit recipient-plus-send
+  requests remain exclusive to `computer.message`.
+- Make packaged and shell applications reachable by name. Application discovery
+  excluded every process under the Windows directory, which is where a packaged
+  app's generic host process lives, so those applications could never match an
+  exact `applicationName` and the Host fell back to asking the Agent to pick
+  from the full running-process list. A process under that directory is now
+  admitted when it owns a visible top-level window, and named by its Start Menu
+  shortcut where one exists, otherwise by its window title. No
+  application-specific rules were added.
+- Require a navigation surface to be anchored to the control that was clicked.
+  "The control's own surface is already open" and the
+  `owned-actionable-transient-added` post-action evidence class both accepted
+  any newly seen transient surface anywhere in the frame, so an unrelated
+  application's window — flat panels, clean OCR rows, parent `main-window`, and
+  structurally indistinguishable from an in-window menu — could suppress the
+  requested click or confirm a navigation that never happened. Both now require
+  the surface to be geometrically local to the clicked control, scaled by that
+  control rather than by a pixel constant, and fail closed when either lacks
+  geometry.
+- Report a click the Host decided not to deliver. The pre-action path returned
+  an ordinary `decision-required` with no error and no action, leaving the Agent
+  unable to tell that its selection had been dropped; it now returns
+  `task.navigation_surface_already_open`.
+- Require a comparable baseline before calling a surface new. The pre-action
+  capture reports surfaces derived from pixels and OCR that a semantic
+  observation never contains, so comparing the two marked panels that were on
+  screen all along as newly opened. When the baseline cannot support the
+  comparison the Host delivers the click and proves the outcome afterwards.
+- Continue on a surface the previous step opened. The Host remembers the anchor
+  of a surface its own click opened and captures the next Scene the way that
+  surface was found; a plain observation cannot see an in-window popup, so every
+  item just offered would revalidate as stale. Control is still released between
+  steps exactly as before.
+- Let an item the Host offered actually be acted on. A navigation row composed
+  from a same-window popup carries a full fused proposal — two independent
+  providers, its own source region, proposal id, and a fused confidence above the
+  pixel-target bar — but the composition stripped its `pixelLimitedAction`
+  marker, leaving an element that advertised a click no admission path could
+  accept. Selecting it always failed as ungrounded even though its evidence was
+  intact. The marker is retained, so the row is admitted on the evidence it
+  actually has and the click is reported as pixel-limited rather than semantic.
+- Recognise a surface that has stopped changing. Overlapping the changed region
+  is how a surface proves it just appeared; a popup stops changing the moment it
+  finishes opening, so requiring that proof on every frame erased an open menu
+  from the Scene while it was still on screen. A surface already proven open is
+  not asked to prove it again, and the anchor-relative gates that assume the
+  anchor sits outside the surface no longer reject it once the target is one of
+  its own rows.
+- Report a pre-delivery refusal as not applied. Every failure from the action
+  path was marked as an effect that might have landed, including refusals raised
+  before the action reached any provider. That claimed a possible mutation where
+  nothing was delivered and, because an indeterminate effect must not be
+  replayed, blocked the Agent from reconsidering the target. Refusals that prove
+  non-delivery are now `not-applied`; everything else stays indeterminate.
+- Say which requirement an admission refusal failed. One code covered malformed
+  requests, unoffered actions, missing provenance, low confidence, and
+  ungrounded targets alike, so neither an Agent nor anyone debugging a stuck
+  workflow could tell them apart. The code is unchanged and each refusal now
+  carries its reason, which `computer.task` surfaces as the underlying cause
+  instead of replacing it with a generic sentence.
+- Fix the shared error envelope failing the output schema of the tool that
+  emits it. `computer.act`, `computer.task`, and `computer.message` constrained
+  `status` to `committed`, `not-applied`, and `indeterminate`, while every hard
+  failure returns `status: "error"`. An official MCP SDK client validates
+  `structuredContent` before delivering it, so the caller received
+  `-32602 Structured content does not match the tool's output schema` and never
+  saw the underlying error. The status enum now admits `error` for any tool that
+  constrains it, applied once in the shared schema builder so a new tool cannot
+  reintroduce the gap. `computer.message` also declared its success fields in a
+  flat top-level `required` list that overrode the builder's error branch; it now
+  goes through the builder like every other tool. This widens the published
+  contract to describe results the server already produced, so
+  `resultSchemaVersion` stays `6.0`. The error status is not folded into
+  `not-applied`: everything reaching the shared envelope has already failed the
+  safe-rejection check, so reusing a terminal outcome would tell an Agent that a
+  possibly delivered mutation is safe to replay.
+- Move the Host-only tool boundary from the private `xiaozhiclaw/visibility`
+  `_meta` key into the advertised MCP contract. `tools/list` now returns only
+  `computer.task` and `computer.message` unless the process was launched with
+  `--tool-surface=host` or `AGENT_COMPUTER_USE_TOOL_SURFACE=host`, and
+  `tools/call` rejects any name the active surface did not advertise with the
+  same error as a tool that does not exist, so knowing a hidden name is not
+  enough to invoke it. A third-party MCP Host no longer needs vendor knowledge
+  to keep lifecycle and management tools out of the model's inventory. The
+  surface is resolved once from launch arguments or environment, both owned by
+  whoever spawns the server; an unrecognized value fails at startup instead of
+  degrading to a working launch. The `_meta` key is retained as advisory
+  compatibility, and `computer.installation` now publishes the surface contract
+  so a Host can discover how to opt in.
 - Add the Agent-facing `computer.task` Host contract for generic non-messaging desktop goals. It exposes only opaque semantic candidates and consistent parent-owned facts, revalidates every selected candidate against a fresh Scene, performs at most one action per invocation, never replays an indeterminate action, and releases control before every result.
 - Keep `computer.acquire`, `computer.observe`, `computer.act`, and `computer.release` Host-only; generic GUI tasks do not fall back to shell commands, guessed coordinates, provider element identities, or Agent-managed lifecycle operations.
 - Bind each generic task continuation to the next `computer.task` interaction step, invalidate failed application candidates, and resolve headless child processes through a same-package owner window without application-name aliases.
 - Verify generic navigation clicks against a newer consistently owned Host Scene. A target state advance, target-labelled destination, or owned actionable transient can resolve an uncertain provider receipt; a provider-only success or unrelated dynamic text cannot. An inconclusive first observation permits one read-only related-surface capture, while every unproven click closes without replay.
+- Deliver Host-selected navigation controls once through a foreground pointer point derived from the current semantic element bounds. This is an action-time route selection, not a retry or coordinate guess; controls without same-window bounded geometry retain the semantic provider path. The first post-action screenshot carries the clicked anchor, and an in-window popup becomes an actionable `TransientSurface` only when OCR rows agree with an anchor-local changed region or independently detected flat pixel surface. This also recognizes an already-open popup without clicking its toggle again.
+- Make the opaque `taskToken` the sole continuation authority after a generic task starts. Continuations no longer require the model to repeat mutable natural-language goal text, while the Host still binds the token to its original application, goal, owner, agent, project, session, and expiry.
+- Keep non-messaging navigation available in desktop shells that also contain chat-like panes. `computer.task` removes message editors, send controls, conversation targets, transcripts, and their descendants from its candidates and facts instead of rejecting the whole application Scene; actual messaging remains exclusive to `computer.message`.
 
 ## 0.0.26
 

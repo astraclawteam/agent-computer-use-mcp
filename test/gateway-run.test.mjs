@@ -44,7 +44,7 @@ test("Desktop gateway overlay freezes the layered native rendering contract", as
   assert.doesNotMatch(program, /SystemInformation\.VirtualScreen/);
   assert.match(program, /ShowWithoutActivation => true/);
   assert.match(program, /OverlayTheme\.PhaseAtElapsedMilliseconds\(_animationClock\.Elapsed\.TotalMilliseconds\)/);
-  assert.match(program, /OverlayRenderer\.Render\(ClientSize, phase, _targetRect\)/);
+  assert.match(program, /OverlayRenderer\.Render\(ClientSize, phase, _targetRect, _stopWatcher is not null\)/);
   assert.match(program, /_presenter\.Present\(this, frame, new Point\(Left, Top\)\)/);
   assert.doesNotMatch(program, /TransparencyKey/);
   assert.doesNotMatch(program, /BackColor/);
@@ -57,7 +57,10 @@ test("Desktop gateway overlay freezes the layered native rendering contract", as
   assert.match(renderer, /PixelFormat\.Format32bppPArgb/);
   assert.match(renderer, /graphics\.Clear\(Color\.Transparent\)/);
   assert.match(renderer, /WithAlpha\(OverlayTheme\.RiverFill, state\.FillAlpha\)/);
-  assert.equal((renderer.match(/graphics\.FillPath/g) ?? []).length, 1);
+  // The river stays a single filled path, and the status banner is the only
+  // other fill the overlay is allowed to carry.
+  assert.equal((renderer.match(/graphics\.FillPath\(fill, river\)/g) ?? []).length, 1);
+  assert.equal((renderer.match(/graphics\.FillPath/g) ?? []).length, 2);
   assert.match(renderer, /Math\.Clamp\(state\.BaseThickness \+ localWave \* 6, 24, 48\)/);
   assert.doesNotMatch(renderer, /LinearGradientBrush/);
   assert.match(renderer, /DrawInnerRim/);

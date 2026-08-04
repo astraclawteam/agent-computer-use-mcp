@@ -397,6 +397,59 @@ test("CuaDriverMcpDriver maps request/capture/action to cua-driver MCP tools", a
   ]);
 });
 
+test("CuaDriverMcpDriver projects proven screen-space semantic bounds into the controller window", async () => {
+  const window = {
+    windowId: 42,
+    title: "Desktop app",
+    pid: 1234,
+    bounds: { x: 420, y: 109, width: 1378, height: 820 },
+  };
+  const driver = new CuaDriverMcpDriver({
+    session: "screen-bounds-session",
+    client: {
+      async start() {},
+      async callTool(name) {
+        if (name !== "get_window_state") return { status: "ok" };
+        return {
+          window: { id: 42, title: "Desktop app", pid: 1234, bounds: window.bounds },
+          elements: [
+            {
+              element_index: 0,
+              role: "Document",
+              label: "Desktop app",
+              bounds: { ...window.bounds },
+            },
+            {
+              element_index: 1,
+              parent_element_index: 0,
+              role: "Button",
+              label: "Usage",
+              bounds: { x: 428, y: 531, width: 244, height: 29 },
+            },
+            {
+              element_index: 2,
+              role: "Button",
+              label: "Other window action",
+              bounds: { x: 763, y: 27, width: 244, height: 29 },
+            },
+          ],
+        };
+      },
+      async close() {},
+    },
+  });
+
+  const observation = await driver.capture({ window, mode: "semantic" });
+
+  assert.equal(observation.coordinateSpace, "window-local");
+  assert.deepEqual(observation.elements[0].bounds, { x: 0, y: 0, width: 1378, height: 820 });
+  assert.deepEqual(observation.elements[1].bounds, { x: 8, y: 422, width: 244, height: 29 });
+  assert.deepEqual(observation.elements[2].actions, []);
+  assert.equal(observation.elements[2].evidenceConsistency, "conflict");
+  assert.deepEqual(observation.elements[2].conflicts, ["semantic-bounds-outside-controller-window"]);
+  await driver.close();
+});
+
 test("CuaDriverMcpDriver fails closed when coordinate replace-all lacks the native text primitive", async () => {
   const calls = [];
   const driver = new CuaDriverMcpDriver({
@@ -611,7 +664,7 @@ test("CuaDriverMcpDriver commits coordinate Unicode text after exact native read
   const calls = [];
   const unicodeCalls = [];
   const driver = new CuaDriverMcpDriver({
-    session: "coordinate-unicode-clipboard-session",
+    session: "coordinate-unicode-native-session",
     foregroundWindowProbe: async () => "42",
     unicodeInput: async (args) => {
       unicodeCalls.push(args);
@@ -622,7 +675,7 @@ test("CuaDriverMcpDriver commits coordinate Unicode text after exact native read
         changeSignalDelivered: true,
         focusVerified: true,
         exactValueVerified: true,
-        deliveryPath: "windows_clipboard_transaction",
+        deliveryPath: "windows_sendinput_unicode_ime_neutral",
       };
     },
     client: {
@@ -650,7 +703,7 @@ test("CuaDriverMcpDriver commits coordinate Unicode text after exact native read
   assert.equal(unicodeCalls.length, 1);
   assert.equal(unicodeCalls[0].inputBehavior, "commit");
   assert.equal(unicodeCalls[0].replaceAll, true);
-  assert.equal(result.providerPath, "windows_clipboard_transaction");
+  assert.equal(result.providerPath, "windows_sendinput_unicode_ime_neutral");
   assert.equal(result.changeSignalDelivered, true);
   assert.equal(result.focusVerified, true);
   assert.equal(result.verified, true);
@@ -700,7 +753,7 @@ test("CuaDriverMcpDriver uses foreground cua-driver typing for coordinate Unicod
   assert.equal(result.focusVerified, true);
 });
 
-test("CuaDriverMcpDriver uses the native clipboard transaction for coordinate ASCII replace-all", async () => {
+test("CuaDriverMcpDriver refocuses the approved coordinate before native replace-all", async () => {
   const calls = [];
   const nativeInputCalls = [];
   const driver = new CuaDriverMcpDriver({
@@ -740,7 +793,14 @@ test("CuaDriverMcpDriver uses the native clipboard transaction for coordinate AS
   assert.equal(nativeInputCalls[0].text, "message-123");
   assert.equal(nativeInputCalls[0].replaceAll, true);
   assert.equal(result.providerPath, "windows_sendinput_unicode_ime_neutral");
-  assert.deepEqual(calls.filter((call) => call.name === "click"), []);
+  assert.deepEqual(calls.filter((call) => call.name === "click").map((call) => call.args), [{
+    pid: 1234,
+    window_id: 42,
+    x: 102,
+    y: 56,
+    delivery_mode: "foreground",
+    session: "coordinate-ascii-replace-all-session",
+  }]);
   assert.deepEqual(calls.filter((call) => call.name === "press_key"), []);
   assert.deepEqual(calls.filter((call) => call.name === "type_text"), []);
 });
@@ -2044,6 +2104,67 @@ test("CuaDriverMcpDriver ignores an open auxiliary window until tray restoration
   assert.equal(calls.some(({ name }) => name === "launch_app"), false);
 });
 
+test("CuaDriverMcpDriver does not promote a same-process auxiliary through a duplicate owner pid", async () => {
+  const calls = [];
+  let trayInvoked = false;
+  const driver = new CuaDriverMcpDriver({
+    session: "tray-duplicate-owner-pid-session",
+    trayApplicationActivator: async ({ name }) => {
+      assert.equal(name, "Tray App");
+      trayInvoked = true;
+      return { status: "invoked" };
+    },
+    client: {
+      async start() {},
+      async callTool(name, args) {
+        calls.push({ name, args });
+        if (name === "list_windows") {
+          return {
+            windows: [
+              {
+                window_id: 90,
+                title: "Auxiliary History",
+                app_name: "tray-app.exe",
+                pid: 505,
+                is_on_screen: true,
+                bounds: { x: 10, y: 20, width: 1200, height: 900 },
+                z_index: 2,
+              },
+              ...(trayInvoked ? [{
+                window_id: 91,
+                title: "Tray App",
+                app_name: "tray-app.exe",
+                pid: 505,
+                is_on_screen: true,
+                bounds: { x: 30, y: 40, width: 900, height: 700 },
+                z_index: 1,
+              }] : []),
+            ],
+          };
+        }
+        if (name === "bring_to_front") throw new Error("must not activate an auxiliary window");
+        if (name === "launch_app") throw new Error("must not launch a restored tray process");
+        return { status: "ok" };
+      },
+    },
+  });
+
+  const result = await driver.launchApp({
+    launchPath: "C:\\Program Files\\Tray App\\tray-app.exe",
+    name: "Tray App",
+    pid: 505,
+    processIds: [505],
+    ownerProcessIds: [505],
+    running: true,
+  });
+
+  assert.equal(result.status, "restored");
+  assert.equal(result.method, "tray-accessibility-invoke");
+  assert.equal(result.windows[0].windowId, 91);
+  assert.equal(calls.some(({ name }) => name === "bring_to_front"), false);
+  assert.equal(calls.some(({ name }) => name === "launch_app"), false);
+});
+
 test("CuaDriverMcpDriver selects an enabled owned modal before its disabled application window", async () => {
   const calls = [];
   let foregroundWindowId = "999";
@@ -2230,6 +2351,61 @@ test("CuaDriverMcpDriver projects a restorable token source for tray-only proces
     lastUsed: null,
     launchPath: "C:\\Program Files\\Tray App\\tray-app.exe",
   }]);
+});
+
+test("CuaDriverMcpDriver retries transient process discovery without losing a tray application", async () => {
+  let probeCalls = 0;
+  const driver = new CuaDriverMcpDriver({
+    session: "tray-process-discovery-retry-session",
+    processApplicationProbe: async () => {
+      probeCalls += 1;
+      if (probeCalls === 1) throw new Error("cold process probe unavailable");
+      return [{
+        name: "Tray App",
+        kind: "desktop",
+        running: true,
+        active: false,
+        pid: 505,
+        processIds: [505],
+        lastUsed: null,
+        launchPath: "C:\\Program Files\\Tray App\\tray-app.exe",
+      }];
+    },
+    client: {
+      async start() {},
+      async callTool(name) {
+        if (name === "list_apps") return { apps: [], processes: [] };
+        return { status: "ok" };
+      },
+    },
+  });
+
+  const applications = await driver.listApps();
+  assert.equal(probeCalls, 2);
+  assert.equal(applications.length, 1);
+  assert.equal(applications[0].name, "Tray App");
+  assert.equal(applications[0].running, true);
+});
+
+test("CuaDriverMcpDriver does not report an authoritative empty inventory when process discovery failed", async () => {
+  let probeCalls = 0;
+  const driver = new CuaDriverMcpDriver({
+    session: "tray-process-discovery-failed-session",
+    processApplicationProbe: async () => {
+      probeCalls += 1;
+      throw new Error("process probe unavailable");
+    },
+    client: {
+      async start() {},
+      async callTool(name) {
+        if (name === "list_apps") return { apps: [], processes: [] };
+        return { status: "ok" };
+      },
+    },
+  });
+
+  await assert.rejects(() => driver.listApps(), /process probe unavailable/u);
+  assert.equal(probeCalls, 2);
 });
 
 test("CuaDriverMcpDriver keeps driver inventory when process enrichment fails", async () => {

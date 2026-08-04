@@ -19,6 +19,7 @@ test("computer.message owns the exact messaging sequence and controller lifecycl
 
   assert.equal(result.outcome, "committed");
   assert.equal(result.released, true);
+  assert.equal(result.terminalControllerState, "idle");
   assert.equal(result.toolErrorCount, 0);
   assert.equal(result.wrongSendCount, 0);
   assert.equal(router.requestAccessCalls.length, 1);
@@ -44,11 +45,41 @@ test("computer.message owns the exact messaging sequence and controller lifecycl
   assert.equal(router.actions.every((action) => action.captureAfter === true), true);
   assert.equal(router.actions.every((action) => typeof action.elementId === "string"), true);
   assert.equal(router.actions.every((action) => action.x === undefined && action.y === undefined), true);
-  assert.equal(router.captureCalls, 8);
+  assert.equal(router.captureCalls, 9);
   assert.deepEqual(router.actions.filter((action) => action.kind === "type_text").map((action) => action.value), [
     QUERY,
     MESSAGE,
   ]);
+});
+
+test("computer.message reobserves one transiently empty application inventory before acquisition", async () => {
+  const router = fixtureRouter({ emptyApplicationDiscoveries: 1 });
+  const result = await runDeterministicMessagingTool(router, {
+    applicationName: APP,
+    query: QUERY,
+    message: MESSAGE,
+  });
+
+  assert.equal(result.outcome, "committed");
+  assert.equal(result.released, true);
+  assert.equal(router.listStateCalls, 2);
+  assert.equal(router.requestAccessCalls.length, 1);
+  assert.equal(router.requestAccessCalls[0].applicationToken, "application:fixture");
+});
+
+test("computer.message stops after one repeated empty application inventory", async () => {
+  const router = fixtureRouter({ emptyApplicationDiscoveries: 2 });
+  const result = await runDeterministicMessagingTool(router, {
+    applicationName: APP,
+    query: QUERY,
+    message: MESSAGE,
+  });
+
+  assert.equal(result.outcome, "not-applied");
+  assert.equal(result.released, true);
+  assert.equal(result.error.code, "workflow.application_not_found");
+  assert.equal(router.listStateCalls, 2);
+  assert.equal(router.requestAccessCalls.length, 0);
 });
 
 test("computer.message requests one Host-owned send-role refresh when the post-entry Scene lacks send", async () => {
@@ -60,7 +91,7 @@ test("computer.message requests one Host-owned send-role refresh when the post-e
   });
 
   assert.equal(result.outcome, "committed");
-  assert.equal(router.captureCalls, 8);
+  assert.equal(router.captureCalls, 9);
   assert.equal(router.refineCalls, 1);
   assert.equal(router.refineArgs.filter((args) => args.messagingSceneIntent === "send").length, 1);
   assert.equal(router.actions.filter((action) => action.elementId.endsWith(":send")).length, 1);
@@ -173,6 +204,7 @@ test("computer.message returns Host application candidates and accepts one opaqu
   }]);
   assert.equal(router.requestAccessCalls.length, 0);
 
+  await new Promise((resolve) => setTimeout(resolve, 25));
   const second = await runDeterministicMessagingTool(router, {
     applicationName: APP,
     query: QUERY,
@@ -183,6 +215,7 @@ test("computer.message returns Host application candidates and accepts one opaqu
 
   assert.equal(second.outcome, "committed");
   assert.equal(second.released, true);
+  assert.ok(second.elapsedMs >= 20, "the final receipt keeps the original selection start time");
   assert.equal(router.requestAccessCalls.length, 1);
   assert.equal(router.requestAccessCalls[0].applicationToken, "application:fixture");
   assert.equal(router.requestAccessCalls[0].activationPolicy, undefined);
@@ -218,6 +251,38 @@ test("computer.message binds MCP cancellation to Stop and releases without later
   assert.equal(router.actions.length, 1);
 });
 
+test("computer.message fences an identical same-task replay after an indeterminate action", async () => {
+  const context = { agentId: "fixture-agent", sessionId: "indeterminate-replay-session" };
+  const controller = new AbortController();
+  let actionStarted;
+  const started = new Promise((resolve) => { actionStarted = resolve; });
+  const firstRouter = fixtureRouter({ hangFirstAction: true, onAction: actionStarted });
+  const firstRun = runDeterministicMessagingTool(firstRouter, {
+    applicationName: APP,
+    query: "indeterminate-recipient",
+    message: MESSAGE,
+  }, context, { signal: controller.signal });
+
+  await started;
+  controller.abort("operator-stop");
+  const first = await firstRun;
+  assert.equal(first.outcome, "indeterminate");
+
+  const retryRouter = fixtureRouter();
+  const retry = await runDeterministicMessagingTool(retryRouter, {
+    applicationName: APP,
+    query: "indeterminate-recipient",
+    message: MESSAGE,
+  }, context);
+
+  assert.equal(retry.outcome, "not-applied");
+  assert.equal(retry.phase, "replay-blocked");
+  assert.equal(retry.error.code, "workflow.indeterminate_replay_blocked");
+  assert.equal(retry.released, true);
+  assert.equal(retryRouter.requestAccessCalls.length, 0);
+  assert.equal(retryRouter.actions.length, 0);
+});
+
 function fixtureRouter({
   initialForeground = true,
   hangFirstAction = false,
@@ -228,6 +293,7 @@ function fixtureRouter({
   partialTitleInSelectionReceipt = false,
   discoveredApplicationName = APP,
   visibleTargets = [],
+  emptyApplicationDiscoveries = 0,
 } = {}) {
   let version = 0;
   let foreground = initialForeground;
@@ -242,6 +308,7 @@ function fixtureRouter({
   let cancelCalls = 0;
   let captureCalls = 0;
   let refineCalls = 0;
+  let listStateCalls = 0;
   const captureArgs = [];
   const refineArgs = [];
   const requestAccessCalls = [];
@@ -252,10 +319,20 @@ function fixtureRouter({
     get cancelCalls() { return cancelCalls; },
     get captureCalls() { return captureCalls; },
     get refineCalls() { return refineCalls; },
+    get listStateCalls() { return listStateCalls; },
     captureArgs,
     refineArgs,
     requestAccessCalls,
     async listState() {
+      listStateCalls += 1;
+      if (listStateCalls <= emptyApplicationDiscoveries) {
+        return {
+          foregroundWindow: null,
+          windows: [],
+          applications: [],
+          desktopState: { status: "ready" },
+        };
+      }
       return {
         foregroundWindow: { id: "window:fixture", title: APP },
         windows: [{ id: "window:fixture", title: APP }],

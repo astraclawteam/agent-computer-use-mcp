@@ -14,6 +14,7 @@ export function createGatewayOverlaySessionHost(dependencies = {}) {
   const removeRuntimeDirectory = dependencies.removeRuntimeDirectory
     ?? ((path) => rmSync(path, { recursive: true, force: true }));
   const markerExists = dependencies.markerExists ?? existsSync;
+  const stopRequestPollIntervalMs = dependencies.stopRequestPollIntervalMs ?? 80;
 
   return {
     async start(options = {}) {
@@ -25,6 +26,10 @@ export function createGatewayOverlaySessionHost(dependencies = {}) {
         return {
           visible: false,
           disabled: true,
+          retarget() {},
+          // With no indicator on screen there is no banner promising Escape,
+          // so there is nothing to honour.
+          onStopRequested() {},
           stop() {},
         };
       }
@@ -33,6 +38,7 @@ export function createGatewayOverlaySessionHost(dependencies = {}) {
       const overlayRuntimeDir = createRuntimeDirectory();
       const targetRectFile = join(overlayRuntimeDir, "target-rect.json");
       const readinessMarker = join(overlayRuntimeDir, "ready");
+      const stopRequestFile = join(overlayRuntimeDir, "stop-request");
 
       let processHandle;
       try {
@@ -43,6 +49,8 @@ export function createGatewayOverlaySessionHost(dependencies = {}) {
           XIAOZHICLAW_CUA_OVERLAY_TARGET_RECT_FILE: targetRectFile,
           AGENT_COMPUTER_USE_OVERLAY_READY_FILE: readinessMarker,
           XIAOZHICLAW_CUA_OVERLAY_READY_FILE: readinessMarker,
+          AGENT_COMPUTER_USE_OVERLAY_STOP_REQUEST_FILE: stopRequestFile,
+          XIAOZHICLAW_CUA_OVERLAY_STOP_REQUEST_FILE: stopRequestFile,
         };
         processHandle = spawnOverlay({ env: childEnvironment, executablePath: options.executablePath });
         await waitForOverlayReadiness(processHandle, readinessMarker, {
@@ -61,13 +69,44 @@ export function createGatewayOverlaySessionHost(dependencies = {}) {
       }
 
       let stopped = false;
+      let stopRequestPoll;
       return {
         visible: true,
         targetRectFile,
+        stopRequestFile,
         processId: processHandle.pid,
+        /// The operator pressing Escape is the one signal that travels from the
+        /// desktop back to the Host. It is polled rather than watched because a
+        /// missed filesystem event here means an operator's stop is ignored,
+        /// and that is not a failure mode worth trading for a few timer ticks.
+        onStopRequested(callback) {
+          if (stopped || stopRequestPoll) return;
+          const tick = () => {
+            if (stopped) return;
+            if (markerExists(stopRequestFile)) {
+              clearInterval(stopRequestPoll);
+              stopRequestPoll = undefined;
+              callback();
+              return;
+            }
+          };
+          stopRequestPoll = setInterval(tick, stopRequestPollIntervalMs);
+          // Never a reason for the Host to stay alive on its own.
+          stopRequestPoll.unref?.();
+        },
+        /// The overlay re-reads this file on its own timer, so aiming it
+        /// somewhere new never costs a restart.
+        retarget(targetRect) {
+          if (stopped) return;
+          writeFileSync(targetRectFile, JSON.stringify(targetRect ?? null), "utf8");
+        },
         stop() {
           if (stopped) return;
           stopped = true;
+          if (stopRequestPoll) {
+            clearInterval(stopRequestPoll);
+            stopRequestPoll = undefined;
+          }
           stopGatewayManagedOverlay(processHandle);
           removeRuntimeDirectory(overlayRuntimeDir);
         },

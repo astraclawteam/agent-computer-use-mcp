@@ -3,10 +3,11 @@ import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js"
 
 const READ_ONLY_CALLS = ["computer.health", "computer.installation"];
 const STATE_CHANGING_TOOLS = new Set([
-  "computer.request_access",
+  "computer.task",
+  "computer.message",
+  "computer.acquire",
   "computer.act",
-  "computer.cancel",
-  "computer.revoke",
+  "computer.release",
   "computer.repair",
 ]);
 
@@ -16,7 +17,7 @@ const client = new Client(
 );
 const transport = new StdioClientTransport({
   command: process.execPath,
-  args: ["src/computer-use-mcp-server.mjs"],
+  args: ["src/computer-use-mcp-server.mjs", "--tool-surface=host"],
   cwd: process.cwd(),
 });
 const calledTools = [];

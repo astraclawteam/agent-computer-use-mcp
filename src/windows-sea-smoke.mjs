@@ -8,6 +8,8 @@ import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js"
 import { verifyWindowsSeaArtifactTree } from "./windows-sea-artifact.mjs";
 
 const execFileAsync = promisify(execFile);
+const HOST_SURFACE_ARGS = ["--tool-surface=host"];
+const EXPECTED_AGENT_SURFACE_TOOLS = ["computer.task", "computer.message"];
 const EXPECTED_TOOLS = [
   "computer.task",
   "computer.message",
@@ -47,7 +49,11 @@ export async function runWindowsSeaSmoke(options = {}) {
     await wait(700);
 
     const executablePath = join(artifactRoot, ...manifest.entrypoint.split("/"));
-    connection = createMcpConnection(executablePath, launchRoot, options.environment);
+    // The released executable must keep lifecycle and management tools out of a
+    // default launch, so a third-party Host cannot project them by accident.
+    const agentSurface = await assertReleasedAgentSurface(executablePath, launchRoot, options.environment);
+
+    connection = createMcpConnection(executablePath, launchRoot, options.environment, HOST_SURFACE_ARGS);
     await connection.connect();
     const tools = await connection.listTools();
     assertExactTools(tools);
@@ -137,6 +143,7 @@ export async function runWindowsSeaSmoke(options = {}) {
       layer: "A",
       target: manifest.target,
       toolCount: tools.length,
+      agentSurface,
       health: { status: health.status, driver: health.driver.status, ocr: health.ocr.status },
       nativeLab: {
         status: "passed",
@@ -157,11 +164,11 @@ export async function runWindowsSeaSmoke(options = {}) {
   }
 }
 
-function createMcpConnection(executablePath, cwd, environment = {}) {
+function createMcpConnection(executablePath, cwd, environment = {}, args = []) {
   const client = new Client({ name: "windows-sea-layer-a", version: "0.0.1" }, { capabilities: {} });
   const transport = new StdioClientTransport({
     command: executablePath,
-    args: [],
+    args,
     cwd,
     env: {
       ...process.env,
@@ -235,12 +242,35 @@ function assertExactTools(actual) {
   }
 }
 
+async function assertReleasedAgentSurface(executablePath, cwd, environment) {
+  const probe = createMcpConnection(executablePath, cwd, environment);
+  try {
+    await probe.connect();
+    const advertised = await probe.listTools();
+    if (JSON.stringify(advertised) !== JSON.stringify(EXPECTED_AGENT_SURFACE_TOOLS)) {
+      throw smokeError("sea_smoke.agent_surface_invalid", JSON.stringify(advertised));
+    }
+    const hidden = await probe.call("computer.act", {}, { allowToolError: true });
+    if (hidden?.error?.code !== "tool_not_found") {
+      throw smokeError("sea_smoke.agent_surface_callable", JSON.stringify(hidden?.error ?? hidden));
+    }
+    // Reported so the retained evidence records what the gate proved, not just
+    // that it did not throw.
+    return {
+      advertised,
+      hostOnlyToolRejectedAs: hidden.error.code,
+      requiresExplicitOptIn: HOST_SURFACE_ARGS,
+    };
+  } finally {
+    await probe.close().catch(() => {});
+  }
+}
+
 function findElement(capture, name) {
   const element = capture.scene?.elements?.find((candidate) => candidate.name === name);
   if (!element) {
     throw smokeError("sea_smoke.element_missing", JSON.stringify({
       expected: name,
-      legacyElements: capture.elements?.map(summarizeElement) ?? [],
       sceneElements: capture.scene?.elements?.map(summarizeElement) ?? [],
       sceneStatus: capture.scene?.status,
     }));

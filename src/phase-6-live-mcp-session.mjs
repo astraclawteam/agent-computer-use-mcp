@@ -44,7 +44,7 @@ export async function openPhase6LiveMcpSession({
   });
   const transport = new StdioClientTransport({
     command: nodeExecutable,
-    args: [resolve(root, "src/computer-use-mcp-server.mjs")],
+    args: [resolve(root, "src/computer-use-mcp-server.mjs"), "--tool-surface=host"],
     cwd: root,
     env: createPhase14ServerEnvironment(effectiveEnv, driver.path),
     stderr: "pipe",
@@ -54,7 +54,12 @@ export async function openPhase6LiveMcpSession({
     stderr += chunk.toString("utf8");
   });
   await client.connect(transport);
-  return createPhase6LiveSession({ client, driver, stderrText: () => stderr });
+  return createPhase6LiveSession({
+    client,
+    driver,
+    transport,
+    stderrText: () => stderr,
+  });
 }
 
 async function verifyExplicitDriver(path, expectedSha256) {
@@ -72,7 +77,12 @@ async function verifyExplicitDriver(path, expectedSha256) {
   };
 }
 
-export function createPhase6LiveSession({ client, driver = null, stderrText = () => "" } = {}) {
+export function createPhase6LiveSession({
+  client,
+  driver = null,
+  transport = null,
+  stderrText = () => "",
+} = {}) {
   if (!client || typeof client.callTool !== "function" || typeof client.close !== "function") {
     throw new TypeError("A connected official MCP client is required.");
   }
@@ -81,10 +91,11 @@ export function createPhase6LiveSession({ client, driver = null, stderrText = ()
 
   return Object.freeze({
     driver,
+    processId: Number.isInteger(transport?.pid) ? transport.pid : null,
     stderrText,
-    async callTool(name, args = {}) {
+    async callTool(name, args = {}, requestOptions) {
       if (closed) throw new Error("phase6.live_session_closed");
-      const result = await callClientTool(client, name, args);
+      const result = await callClientTool(client, name, args, requestOptions);
       const value = result.structuredContent ?? result;
       acquired = updateAcquiredState(acquired, name, value);
       return value;
@@ -104,8 +115,8 @@ export function createPhase6LiveSession({ client, driver = null, stderrText = ()
   });
 }
 
-function callClientTool(client, name, args) {
-  return client.callTool({ name, arguments: args });
+function callClientTool(client, name, args, requestOptions) {
+  return client.callTool({ name, arguments: args }, undefined, requestOptions);
 }
 
 function updateAcquiredState(acquired, name, value) {

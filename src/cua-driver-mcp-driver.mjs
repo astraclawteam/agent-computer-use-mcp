@@ -19,6 +19,7 @@ const RUNTIME_ENV = globalThis.process?.env ?? {};
 const DEFAULT_DRIVER_PATH = `${RUNTIME_ENV.LOCALAPPDATA}\\Programs\\Cua\\cua-driver\\bin\\cua-driver.exe`;
 const DEFAULT_SCREENSHOT_TIMEOUT_MS = 8_000;
 const RELATED_SURFACE_RELEASE_SETTLE_MS = 200;
+const TEXT_REFOCUS_SETTLE_MS = 75;
 
 export class CuaDriverMcpDriver {
   constructor(options = {}) {
@@ -111,7 +112,7 @@ export class CuaDriverMcpDriver {
       await this.ensureStartedResources(ticket);
       const [driverInventory, processInventory] = await Promise.allSettled([
         this.client.callTool("list_apps", {}),
-        this.processApplicationProbe(),
+        this.probeProcessApplications(ticket),
       ]);
       this.assertWorkTicket(ticket);
       if (driverInventory.status === "rejected" && processInventory.status === "rejected") {
@@ -181,16 +182,36 @@ export class CuaDriverMcpDriver {
         applications.push(normalizedProcessApplication);
         byExecutable.set(key, normalizedProcessApplication);
       }
+      if (applications.length === 0) {
+        if (processInventory.status === "rejected") throw processInventory.reason;
+        if (driverInventory.status === "rejected") throw driverInventory.reason;
+      }
       return applications
         .sort(compareApplications)
         .slice(0, 64);
     });
   }
 
+  async probeProcessApplications(ticket, attempts = 2) {
+    let lastError;
+    for (let attempt = 0; attempt < attempts; attempt += 1) {
+      try {
+        const applications = await this.processApplicationProbe();
+        this.assertWorkTicket(ticket);
+        return applications;
+      } catch (error) {
+        this.assertWorkTicket(ticket);
+        lastError = error;
+      }
+    }
+    throw lastError;
+  }
+
   launchApp({ launchPath, name, pid, processIds = [], ownerProcessIds = [], running = false }) {
     return this.runWork(async (ticket) => {
       await this.ensureStartedResources(ticket);
-      const candidateProcessIds = new Set(normalizeProcessIds(processIds, pid));
+      const primaryProcessIds = new Set(normalizeProcessIds(processIds, pid));
+      const candidateProcessIds = new Set(primaryProcessIds);
       const trustedOwnerProcessIds = new Set(normalizeProcessIds(ownerProcessIds));
       for (const ownerPid of trustedOwnerProcessIds) candidateProcessIds.add(ownerPid);
       if (running === true && candidateProcessIds.size > 0) {
@@ -205,7 +226,12 @@ export class CuaDriverMcpDriver {
             { name },
           ));
         const identityMatchedWindows = existingWindows.filter((window) => (
-          trustedOwnerProcessIds.has(window.pid) || matchesApplicationWindowIdentity(window, { name })
+          matchesApplicationWindowIdentity(window, { name })
+          // A distinct same-package owner can provide the real application
+          // window for a headless child process. The application's own PID is
+          // not equivalent evidence: every auxiliary window shares it and an
+          // open auxiliary must not pre-empt restoration of a tray main window.
+          || (trustedOwnerProcessIds.has(window.pid) && !primaryProcessIds.has(window.pid))
         ));
         const relationships = existingWindows.length > 1 && identityMatchedWindows.length > 0
           ? await this.awaitWindowRelationships(ticket, existingWindows)
@@ -478,7 +504,7 @@ export class CuaDriverMcpDriver {
         maxDepth: 20,
       });
       return {
-        ...observation,
+        ...normalizeSemanticBoundsToWindow(observation),
         surfaceProvenance,
       };
     });
@@ -824,7 +850,12 @@ export class CuaDriverMcpDriver {
       if (deliveryMode === "foreground" && coordinateGrounded) {
         const activation = await this.ensureForegroundActionResources(ticket, window);
         if (!activation) return foregroundActionNotApplied("type_text");
-        if (!coordinateFocusVerified) {
+        // A focus receipt proves the preceding focus step, but replace-all may
+        // run after capture/OCR work has moved native focus within a custom
+        // window. Re-click the already approved editable point immediately
+        // before the atomic text transaction; Ctrl+A makes the caret position
+        // irrelevant and the click cannot broaden the target.
+        if (!coordinateFocusVerified || textMode === "replace-all") {
           const focusClick = await this.client.callTool("click", {
             pid: window.pid,
             window_id: window.windowId,
@@ -836,6 +867,10 @@ export class CuaDriverMcpDriver {
           this.assertWorkTicket(ticket);
           coordinateFocusVerified = focusClick?.status !== "error"
             && focusClick?.effect !== "not-applied";
+          if (coordinateFocusVerified) {
+            await new Promise((resolve) => setTimeout(resolve, TEXT_REFOCUS_SETTLE_MS));
+            this.assertWorkTicket(ticket);
+          }
         }
       }
       if (coordinateGrounded && textMode === "replace-all") {
@@ -1363,6 +1398,61 @@ function reconcileReportedWindow(requestedWindow, reportedWindow) {
       ? (normalizeBounds(reportedWindow.bounds) ?? requestedWindow?.bounds)
       : requestedWindow?.bounds,
   };
+}
+
+function normalizeSemanticBoundsToWindow(observation) {
+  const windowBounds = normalizeBounds(observation?.window?.bounds);
+  if (!windowBounds || (windowBounds.x === 0 && windowBounds.y === 0)) return observation;
+  const elements = Array.isArray(observation?.elements) ? observation.elements : [];
+  const screenSpaceProven = elements.some((element) => (
+    sameBounds(element?.bounds, windowBounds)
+  ));
+  if (!screenSpaceProven) return observation;
+  const outsideWindow = new Set();
+  for (let index = 0; index < elements.length; index += 1) {
+    const element = elements[index];
+    if ((element?.bounds && !boundsContain(windowBounds, element.bounds))
+      || (Number.isSafeInteger(element?.parentElementIndex)
+        && outsideWindow.has(element.parentElementIndex))) {
+      outsideWindow.add(index);
+    }
+  }
+  return {
+    ...observation,
+    coordinateSpace: "window-local",
+    elements: elements.map((element, index) => ({
+      ...element,
+      ...(element?.bounds ? {
+        bounds: {
+          ...element.bounds,
+          x: element.bounds.x - windowBounds.x,
+          y: element.bounds.y - windowBounds.y,
+        },
+      } : {}),
+      ...(outsideWindow.has(index) ? {
+        actions: [],
+        evidenceConsistency: "conflict",
+        conflicts: ["semantic-bounds-outside-controller-window"],
+      } : {}),
+    })),
+  };
+}
+
+function sameBounds(left, right, tolerance = 2) {
+  return left && right
+    && ["x", "y", "width", "height"].every((key) => (
+      Number.isFinite(left[key])
+      && Number.isFinite(right[key])
+      && Math.abs(left[key] - right[key]) <= tolerance
+    ));
+}
+
+function boundsContain(outer, inner, tolerance = 2) {
+  return outer && inner
+    && inner.x >= outer.x - tolerance
+    && inner.y >= outer.y - tolerance
+    && inner.x + inner.width <= outer.x + outer.width + tolerance
+    && inner.y + inner.height <= outer.y + outer.height + tolerance;
 }
 
 function createCoordinateScaleMetadata({ screenshot, nativeWindowBounds }) {

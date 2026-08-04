@@ -50,6 +50,8 @@ If a host product provides a stricter instruction, follow the stricter rule.
 - Prefer text-first and semantic observations before pixel/coordinate actions.
 - Coordinate/pixel actions must be marked as `pixelLimitedAction=true`.
 - Keep `AGENT_COMPUTER_USE_*` environment variables as the public names. `XIAOZHICLAW_*` aliases are compatibility-only.
+- Every tool can return the shared `status: "error"` envelope, so a tool that constrains `status` with an enum must admit `"error"`, and its success fields belong on the schema builder's error branch rather than a flat top-level `required` list. A result that fails its own published `outputSchema` is not a cosmetic bug: the official MCP SDK answers `-32602` and the caller never sees the error.
+- Tool visibility is a protocol-layer contract. A tool is hidden from a client by not advertising it in `tools/list` for the active surface and by rejecting it in `tools/call`; never rely on a private `_meta` key alone, because no third-party MCP Host reads it. The surface must stay resolvable only from launch arguments or environment.
 - Asset manifest, signature, trust keyring, offline bundle, program root, and data root are host-owned configuration. Never add them to public MCP tool inputs.
 - Do not commit generated artifacts: `node_modules/`, `.NET bin/obj`, OCR model packs, captures, logs, or temp files.
 - The source workspace is never published to npm. Build, smoke, and pack only `artifacts/npm-release/package` through the protected release scripts.

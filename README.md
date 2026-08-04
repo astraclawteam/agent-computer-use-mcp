@@ -47,13 +47,30 @@ The Agent sees two task-level tools:
 
 | Tool | Purpose |
 | --- | --- |
-| `computer.task` | Advance a generic non-messaging desktop goal through Host-owned observations and opaque semantic candidates; every invocation releases control before returning. |
-| `computer.message` | Run the Host-owned deterministic messaging state machine; exact targets are resolved without exposing coordinate or lifecycle decisions to the Agent. |
+| `computer.task` | Navigate or perform a non-submitting exact edit through Host-owned observations and opaque semantic candidates; every invocation releases control before returning. |
+| `computer.message` | Send exact content to an explicit contact or conversation through the Host-owned deterministic messaging state machine. |
 
 The lifecycle tools (`computer.acquire`, `computer.observe`, `computer.act`,
 and `computer.release`) are workflow-internal. Health, doctor, installation,
-and repair are also Host-only. None are projected into the Agent's normal tool
-inventory.
+and repair are also Host-only.
+
+That boundary is carried by the advertised MCP contract, not by a vendor
+convention. `tools/list` returns exactly `computer.task` and `computer.message`
+unless the process was launched in host mode, and `tools/call` rejects every
+name the surface did not advertise with the same error as a tool that does not
+exist. A standard MCP Host therefore enforces the boundary without knowing
+anything about this implementation:
+
+```text
+default launch          → computer.task, computer.message
+--tool-surface=host     → the full ten-tool Host surface
+```
+
+Host mode is selected only from launch arguments or the
+`AGENT_COMPUTER_USE_TOOL_SURFACE` environment variable, both owned by whoever
+spawns the process. Nothing the Agent sends over the transport can widen its own
+inventory. An unrecognized surface value fails at startup rather than quietly
+falling back.
 
 ## Why this implementation
 
@@ -68,6 +85,20 @@ inventory.
   turn an unobserved click into success. When the first post-action Scene is
   inconclusive, the Host may perform one read-only related-surface capture; it
   never replays the click.
+- **Editing never implies submission.** `computer.task` exposes a proven
+  `Editable` as one atomic replace-all action, grounds it in the current
+  screenshot, and commits only after exact-value read-back. It never exposes a
+  send/submit control or presses a commit key. Contact selection, conversation
+  verification, sending, and new-bubble proof remain exclusive to
+  `computer.message`.
+- **Navigation delivery is grounded before mutation.** For a Host-selected
+  navigation control with current same-window semantic bounds, the Host chooses
+  one foreground pointer delivery inside that owned rectangle. It does not
+  invoke first and then retry by coordinate. The first post-action screenshot
+  carries the control anchor; an in-window popup is merged into the Scene only
+  when its OCR rows agree with an anchor-local changed region or an
+  independently detected flat pixel surface. An already-open popup can
+  therefore expose its owned navigation items without replaying its toggle.
 - **Chinese input is a first-class path.** Coordinate-grounded Unicode entry
   uses verified native delivery, while semantic fields remain on the driver
   path.
@@ -81,7 +112,13 @@ inventory.
   tools cannot replace an unresolved Host candidate. Same-package child
   processes inherit only their proven owning-window process identity. A
   navigation click whose Scene postcondition is not proven closes without
-  replay, even if the provider reported delivery.
+  replay, even if the provider reported delivery. Once issued, the opaque task
+  token owns continuation scope; the model does not restate or paraphrase the
+  application and goal on later steps. A mixed-layout application may contain
+  a chat-like pane while the goal is ordinary navigation; `computer.task`
+  may expose its proven editor only as a non-submitting `edit` candidate while
+  hiding send controls, conversation targets, transcript, and descendants.
+  Only an explicit recipient-plus-send request uses `computer.message`.
 - **No hidden self-update.** Startup is offline. Installation, upgrade,
   downgrade, and rollback are explicit Host or operator actions.
 
@@ -116,6 +153,12 @@ Example MCP configuration:
 }
 ```
 
+That configuration gets the Agent surface: two task-level tools, no lifecycle or
+management tools in the model's inventory. Only add
+`"args": ["--tool-surface=host"]` if your Host itself owns user approval,
+controller lifecycle, and tool projection — it hands the model eight more tools,
+including direct desktop mutation and repair.
+
 The release contains the exact Windows x64 driver, native overlay, ONNX runtime,
 PP-OCRv6 model pack, inventory, checksums, licenses, and SBOM used by CI. It
 requires no npm install and performs no network access at startup.
@@ -125,6 +168,8 @@ requires no npm install and performs no network access at startup.
 Computer Use is intentionally visible and bounded:
 
 - the Host owns approval, process lifecycle, installation, and media assets;
+- the tool surface is chosen at launch and defaults to the Agent surface, so an
+  unconfigured Host cannot expose lifecycle or management tools by accident;
 - the Agent cannot acquire another Host session's lease;
 - password, payment, credential, private, and denied-window policies fail closed;
 - the branded frame and cursor are excluded from screenshots, OCR, observations,

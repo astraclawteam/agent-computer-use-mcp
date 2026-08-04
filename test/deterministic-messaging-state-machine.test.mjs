@@ -55,7 +55,7 @@ test("the Host-driven workflow commits the fixed role-based sequence and release
   );
   const textActions = host.actions.filter(({ action }) => action.kind === "type_text");
   assert.deepEqual(textActions.map(({ action }) => action.textMode), ["replace-all", "replace-all"]);
-  assert.deepEqual(textActions.map(({ action }) => action.inputBehavior), ["commit", "commit"]);
+  assert.deepEqual(textActions.map(({ action }) => action.inputBehavior), ["incremental", "commit"]);
   assert.equal(host.actions.every(({ action }) => action.x === undefined && action.y === undefined), true);
 });
 
@@ -75,6 +75,48 @@ test("an already active exact target skips visible selection and search", async 
   assert.equal(host.actions.some(({ step }) => step === "enter-query"), false);
   assert.equal(host.actions.some(({ step }) => step === "select-result"), false);
   assert.equal(host.actions.filter(({ step }) => step === "send").length, 1);
+  assert.equal(host.releaseCalls, 1);
+});
+
+test("an active target that differs only by punctuation skips search", async () => {
+  const host = createFixtureHost({
+    initialConversationVisible: true,
+    candidateName: "Y-Wind",
+  });
+  const machine = new DeterministicMessagingStateMachine({
+    host,
+    goal: { query: "YWind", message: MESSAGE },
+    pollIntervalMs: 1,
+  });
+
+  const result = await machine.run();
+
+  assert.equal(result.status, "committed");
+  assert.equal(host.actions.some(({ step }) => step === "focus-search"), false);
+  assert.equal(host.actions.some(({ step }) => step === "enter-query"), false);
+  assert.equal(host.actions.some(({ step }) => step === "select-result"), false);
+  assert.equal(host.actions.filter(({ step }) => step === "send").length, 1);
+  assert.equal(host.releaseCalls, 1);
+});
+
+test("target resolution refreshes one tray-restore frame before falling back to search", async () => {
+  const host = createFixtureHost({
+    initialConversationVisible: true,
+    omitConversationTitleOnFirstResolve: true,
+    candidateName: "Y-Wind",
+  });
+  const machine = new DeterministicMessagingStateMachine({
+    host,
+    goal: { query: "YWind", message: MESSAGE },
+    pollIntervalMs: 1,
+  });
+
+  const result = await machine.run();
+
+  assert.equal(result.status, "committed");
+  assert.equal(host.observedSteps.filter((step) => step === "resolve-target").length, 2);
+  assert.equal(host.actions.some(({ step }) => step === "focus-search"), false);
+  assert.equal(host.actions.some(({ step }) => step === "enter-query"), false);
   assert.equal(host.releaseCalls, 1);
 });
 
@@ -274,7 +316,7 @@ test("an indeterminate send commits only when fresh postconditions prove its eff
 
   assert.equal(result.status, "committed");
   assert.equal(host.actions.filter(({ step }) => step === "send").length, 1);
-  assert.equal(host.observedSteps.includes("verify-new-bubble"), true);
+  assert.equal(result.history.some((entry) => entry.step === "verify-new-bubble"), true);
   assert.equal(host.releaseCalls, 1);
 });
 
@@ -425,6 +467,14 @@ test("every step publishes explicit conditions, timeout, and guarded successors"
   }
 });
 
+test("text mutation steps reserve bounded native input and read-back time inside the 60-second campaign SLA", () => {
+  const byId = new Map(DETERMINISTIC_MESSAGING_STEPS.map((step) => [step.id, step]));
+  assert.equal(byId.get("enter-query").timeoutMs, 25_000);
+  assert.equal(byId.get("enter-message").timeoutMs, 25_000);
+  assert.ok(byId.get("enter-query").timeoutMs < 60_000);
+  assert.ok(byId.get("enter-message").timeoutMs < 60_000);
+});
+
 test("an unmet precondition fails at its owning step without clicking ahead", async () => {
   const host = createFixtureHost({ omitSearch: true });
   const machine = new DeterministicMessagingStateMachine({
@@ -552,6 +602,7 @@ test("new-bubble verification requires a fresh self-authored bubble under the tr
   await assert.rejects(machine.run(), (error) => {
     assert.equal(error.code, "workflow.step_timeout");
     assert.equal(error.step, "verify-new-bubble");
+    assert.equal(error.outcome, "indeterminate");
     return true;
   });
   assert.equal(host.actions.filter(({ step }) => step === "send").length, 1);
@@ -578,6 +629,100 @@ test("repeated identical messages accept a changed transcript with an unchanged 
     host,
     goal: { query: QUERY, message: MESSAGE },
     pollIntervalMs: 1,
+  });
+
+  const result = await machine.run();
+  assert.equal(result.status, "committed");
+  assert.equal(result.released, true);
+  assert.equal(host.actions.filter(({ step }) => step === "send").length, 1);
+});
+
+test("repeated identical messages accept a committed send corroborated by editor clear and the exact latest self bubble", async () => {
+  const host = createFixtureHost({ repeatedMessageStableViewport: true });
+  const machine = new DeterministicMessagingStateMachine({
+    host,
+    goal: { query: QUERY, message: MESSAGE },
+    pollIntervalMs: 1,
+  });
+
+  const result = await machine.run();
+  assert.equal(result.status, "committed");
+  assert.equal(result.released, true);
+  assert.equal(host.actions.filter(({ step }) => step === "send").length, 1);
+});
+
+test("an indeterminate send cannot commit without an exact latest self bubble under the transcript", async () => {
+  const host = createFixtureHost({
+    placeNewBubbleOutsideTranscript: true,
+    failStep: "send",
+    failOutcome: "indeterminate",
+    failStepApplied: true,
+  });
+  const machine = new DeterministicMessagingStateMachine({
+    host,
+    goal: { query: QUERY, message: MESSAGE },
+    pollIntervalMs: 1,
+    stepTimeouts: { "verify-new-bubble": 20 },
+  });
+
+  await assert.rejects(machine.run(), (error) => {
+    assert.equal(error.code, "workflow.step_timeout");
+    assert.equal(error.step, "verify-new-bubble");
+    assert.equal(error.outcome, "indeterminate");
+    return true;
+  });
+  assert.equal(host.actions.filter(({ step }) => step === "send").length, 1);
+  assert.equal(host.releaseCalls, 1);
+});
+
+test("committed send combines an earlier editor-clear receipt with a later exact latest self bubble", async () => {
+  const host = createFixtureHost({
+    repeatedMessageStableViewport: true,
+    sendPostActionEditorClearThenStableBubbleWithStaleEditor: true,
+  });
+  const machine = new DeterministicMessagingStateMachine({
+    host,
+    goal: { query: QUERY, message: MESSAGE },
+    pollIntervalMs: 1,
+    stepTimeouts: { "verify-new-bubble": 20 },
+  });
+
+  const result = await machine.run();
+  assert.equal(result.status, "committed");
+  assert.equal(result.released, true);
+  assert.equal(host.actions.filter(({ step }) => step === "send").length, 1);
+  assert.equal(host.observedSteps.includes("verify-new-bubble"), true);
+});
+
+test("new-bubble verification consumes the Host post-action Scene before a stable follow-up frame", async () => {
+  const host = createFixtureHost({
+    repeatedMessageReusesViewportSlot: true,
+    sendPostActionCaptureOnlyChange: true,
+  });
+  const machine = new DeterministicMessagingStateMachine({
+    host,
+    goal: { query: QUERY, message: MESSAGE },
+    pollIntervalMs: 1,
+    stepTimeouts: { "verify-new-bubble": 20 },
+  });
+
+  const result = await machine.run();
+  assert.equal(result.status, "committed");
+  assert.equal(result.released, true);
+  assert.equal(host.actions.filter(({ step }) => step === "send").length, 1);
+  assert.equal(host.observedSteps.includes("verify-new-bubble"), false);
+});
+
+test("new-bubble verification combines post-action transcript change with a stable exact bubble", async () => {
+  const host = createFixtureHost({
+    repeatedMessageReusesViewportSlot: true,
+    sendPostActionCaptureTranscriptOnlyThenStableBubble: true,
+  });
+  const machine = new DeterministicMessagingStateMachine({
+    host,
+    goal: { query: QUERY, message: MESSAGE },
+    pollIntervalMs: 1,
+    stepTimeouts: { "verify-new-bubble": 20 },
   });
 
   const result = await machine.run();
@@ -617,6 +762,7 @@ function createFixtureHost(options = {}) {
   const actions = [];
   let releaseCalls = 0;
   let abortedActions = 0;
+  let resolveTargetObservations = 0;
   const observedSteps = [];
 
   return {
@@ -627,6 +773,7 @@ function createFixtureHost(options = {}) {
 
     async observe({ step } = {}) {
       observedSteps.push(step ?? "unspecified");
+      if (step === "resolve-target") resolveTargetObservations += 1;
       version += 1;
       return fixtureScene({
         version,
@@ -639,9 +786,18 @@ function createFixtureHost(options = {}) {
         sent,
         omitSearch: options.omitSearch === true,
         wrongTitleWithMatchingBody: options.wrongTitleWithMatchingBody === true,
+        omitConversationTitle: options.omitConversationTitleOnFirstResolve === true
+          && step === "resolve-target"
+          && resolveTargetObservations === 1,
         placeNewBubbleOutsideTranscript: options.placeNewBubbleOutsideTranscript === true,
         repeatedMessageReusesViewportSlot: options.repeatedMessageReusesViewportSlot === true,
         repeatedMessageChangesTranscriptOnly: options.repeatedMessageChangesTranscriptOnly === true,
+        repeatedMessageStableViewport: options.repeatedMessageStableViewport === true,
+        bubbleChanged: options.sendPostActionCaptureOnlyChange === true
+          || options.sendPostActionCaptureTranscriptOnlyThenStableBubble === true
+          || options.repeatedMessageStableViewport === true
+          ? false
+          : sent,
         candidateName: options.candidateName ?? QUERY,
         visibleTarget,
       });
@@ -707,6 +863,93 @@ function createFixtureHost(options = {}) {
           },
         };
       }
+      if (step === "send" && options.sendPostActionCaptureOnlyChange === true) {
+        version += 1;
+        return {
+          outcome: "committed",
+          status: "committed",
+          capture: {
+            scene: fixtureScene({
+              version,
+              foreground,
+              focusedRole,
+              query,
+              resultsVisible,
+              conversationVisible,
+              editorValue,
+              sent,
+              omitSearch: options.omitSearch === true,
+              wrongTitleWithMatchingBody: options.wrongTitleWithMatchingBody === true,
+              placeNewBubbleOutsideTranscript: options.placeNewBubbleOutsideTranscript === true,
+              repeatedMessageReusesViewportSlot: true,
+              repeatedMessageChangesTranscriptOnly: false,
+              repeatedMessageStableViewport: false,
+              bubbleChanged: true,
+              candidateName: options.candidateName ?? QUERY,
+              visibleTarget,
+            }),
+          },
+        };
+      }
+      if (step === "send" && options.sendPostActionCaptureTranscriptOnlyThenStableBubble === true) {
+        version += 1;
+        return {
+          outcome: "committed",
+          status: "committed",
+          capture: {
+            scene: fixtureScene({
+              version,
+              foreground,
+              focusedRole,
+              query,
+              resultsVisible,
+              conversationVisible,
+              editorValue,
+              sent,
+              omitSearch: options.omitSearch === true,
+              wrongTitleWithMatchingBody: options.wrongTitleWithMatchingBody === true,
+              placeNewBubbleOutsideTranscript: options.placeNewBubbleOutsideTranscript === true,
+              repeatedMessageReusesViewportSlot: false,
+              repeatedMessageChangesTranscriptOnly: true,
+              repeatedMessageStableViewport: false,
+              bubbleChanged: true,
+              omitMatchingBubble: true,
+              candidateName: options.candidateName ?? QUERY,
+              visibleTarget,
+            }),
+          },
+        };
+      }
+      if (step === "send" && options.sendPostActionEditorClearThenStableBubbleWithStaleEditor === true) {
+        version += 1;
+        editorValue = MESSAGE;
+        return {
+          outcome: "committed",
+          status: "committed",
+          capture: {
+            scene: fixtureScene({
+              version,
+              foreground,
+              focusedRole,
+              query,
+              resultsVisible,
+              conversationVisible,
+              editorValue: "",
+              sent,
+              omitSearch: options.omitSearch === true,
+              wrongTitleWithMatchingBody: options.wrongTitleWithMatchingBody === true,
+              placeNewBubbleOutsideTranscript: options.placeNewBubbleOutsideTranscript === true,
+              repeatedMessageReusesViewportSlot: false,
+              repeatedMessageChangesTranscriptOnly: false,
+              repeatedMessageStableViewport: true,
+              bubbleChanged: false,
+              omitMatchingBubble: true,
+              candidateName: options.candidateName ?? QUERY,
+              visibleTarget,
+            }),
+          },
+        };
+      }
       return { outcome: "committed", status: "committed" };
     },
 
@@ -732,9 +975,13 @@ function fixtureScene({
   sent,
   omitSearch,
   wrongTitleWithMatchingBody,
+  omitConversationTitle = false,
   placeNewBubbleOutsideTranscript,
   repeatedMessageReusesViewportSlot,
   repeatedMessageChangesTranscriptOnly,
+  repeatedMessageStableViewport,
+  bubbleChanged = sent,
+  omitMatchingBubble = false,
   candidateName,
   visibleTarget,
 }) {
@@ -810,7 +1057,7 @@ function fixtureScene({
       role: "conversation-header",
       parentKey: "conversation",
     });
-    add({
+    if (!omitConversationTitle) add({
       key: "title",
       type: "ActionableItem",
       role: "conversation-title",
@@ -823,7 +1070,7 @@ function fixtureScene({
       type: "Container",
       role: "transcript",
       parentKey: "conversation",
-      state: { changedSincePreviousFrame: repeatedMessageChangesTranscriptOnly && sent },
+      state: { changedSincePreviousFrame: repeatedMessageChangesTranscriptOnly && bubbleChanged },
     });
     add({
       key: "old-body",
@@ -833,7 +1080,11 @@ function fixtureScene({
       value: wrongTitleWithMatchingBody ? QUERY : "历史消息",
       state: { authoredBySelf: false },
     });
-    if (repeatedMessageReusesViewportSlot || repeatedMessageChangesTranscriptOnly) {
+    if (!omitMatchingBubble && (
+      repeatedMessageReusesViewportSlot
+      || repeatedMessageChangesTranscriptOnly
+      || repeatedMessageStableViewport
+    )) {
       add({
         key: "stable-self-slot",
         type: "ActionableItem",
@@ -843,7 +1094,7 @@ function fixtureScene({
         state: {
           authoredBySelf: true,
           latestInTranscript: true,
-          changedSincePreviousFrame: repeatedMessageReusesViewportSlot && sent,
+          changedSincePreviousFrame: repeatedMessageReusesViewportSlot && bubbleChanged,
         },
       });
     }
@@ -863,7 +1114,10 @@ function fixtureScene({
       parentKey: "conversation",
       actions: ["click"],
     });
-    if (sent && !repeatedMessageReusesViewportSlot && !repeatedMessageChangesTranscriptOnly) {
+    if (sent && !omitMatchingBubble
+      && !repeatedMessageReusesViewportSlot
+      && !repeatedMessageChangesTranscriptOnly
+      && !repeatedMessageStableViewport) {
       add({
         key: "new-bubble",
         type: "ActionableItem",

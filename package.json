@@ -1,6 +1,6 @@
 {
   "name": "agent-computer-use-mcp",
-  "version": "0.0.26",
+  "version": "0.0.27",
   "description": "Evidence-driven Windows Computer Use for MCP Hosts: semantic observation, local OCR, secure screenshots, Unicode actions, and verified cleanup.",
   "private": true,
   "license": "MIT",
@@ -55,6 +55,7 @@
     "verify:deterministic:messaging": "node --test test/deterministic-messaging-state-machine.test.mjs test/scene-region-ownership.test.mjs",
     "verify:bounded:llm": "node --test test/bounded-llm-interaction.test.mjs test/deterministic-messaging-state-machine.test.mjs test/scene-region-ownership.test.mjs",
     "verify:phase-6:contract": "node --test test/phase-6-staged-acceptance.test.mjs test/phase-6-live-mcp-session.test.mjs",
+    "verify:phase-6:release-evidence": "node scripts/verify-phase-6-release-evidence.mjs",
     "prepublishOnly": "node scripts/block-source-publish.mjs",
     "mcp": "node src/computer-use-mcp-server.mjs",
     "artifact:windows:build": "node scripts/build-windows-sea-artifact.mjs",

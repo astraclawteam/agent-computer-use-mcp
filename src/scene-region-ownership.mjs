@@ -141,13 +141,14 @@ export function buildHostScene({ observation, observationVersion } = {}) {
         ? "consistent"
         : "insufficient";
     const declaredActions = uniqueStrings(raw.actions);
+    const hostType = hostTypeFor(raw, source);
     const actions = evidenceConsistency === "consistent"
-      ? declaredActions
+      ? typeableActions(hostType, declaredActions)
       : [];
     const id = sceneElementId(sceneId, index);
     elements.push(hostElement({
       id,
-      type: hostTypeFor(raw, source),
+      type: hostType,
       role: typeof raw.role === "string" && raw.role.trim() ? raw.role : "observed-item",
       parentId,
       observationVersion: version,
@@ -561,6 +562,24 @@ function providerEvidenceSufficient(raw, source) {
     .map((item) => item?.provider)
     .filter((provider) => typeof provider === "string" && provider.trim() !== ""));
   return providers.size >= 2;
+}
+
+/// The Host types by focusing a control and delivering real keystrokes, so any
+/// editable it can see is typeable. Windows describes plenty of them - chat
+/// boxes in Electron applications especially - with ValuePattern and no
+/// keyboard verb at all. Taking that list literally left those controls
+/// observable but unusable: no candidate would offer them, and the Scene would
+/// not authorize typing even if one did.
+///
+/// Recorded here rather than at each reader, so the inventory that decides what
+/// can be offered and the one that authorizes the action cannot disagree.
+function typeableActions(hostType, declaredActions) {
+  if (hostType !== "Editable"
+    || declaredActions.includes("type_text")
+    || !declaredActions.includes("set_value")) {
+    return declaredActions;
+  }
+  return [...declaredActions, "type_text"];
 }
 
 function hostTypeFor(raw, source) {

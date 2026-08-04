@@ -32,7 +32,11 @@ import {
   detectMessagingVisualProposals,
   stableCompositionOcrElements,
 } from "./messaging-scene-composition.mjs";
-import { composeOwnedTransientSceneElements } from "./owned-transient-scene-composition.mjs";
+import {
+  composeOwnedTransientSceneElements,
+  composeSameWindowNavigationSceneElements,
+  detectSameWindowNavigationSurface,
+} from "./owned-transient-scene-composition.mjs";
 
 function sameRequestContext(left, right) {
   if (!left || !right) return !left && !right;
@@ -69,6 +73,15 @@ export class ComputerUseProviderRouter {
     this.runtimeCleanup = options.runtimeCleanup ?? null;
     this.runtimeCleanupOptions = options.runtimeCleanupOptions ?? {};
     this.overlayHandle = null;
+    // A multi-step task releases control between steps by design. Tearing the
+    // indicator down with every release makes the desktop's owner watch it
+    // flash once per step, which reads as instability rather than as the
+    // deliberate release it is. The hold keeps one continuous statement up for
+    // as long as a task is running.
+    this.controlIndicatorHold = null;
+    this.controlIndicatorExpiryTimer = null;
+    this.onOperatorStop = options.onOperatorStop ?? null;
+    this.operatorStopInProgress = false;
     this.cursorStartAttempted = false;
     this.cursorActive = false;
     this.controlGeneration = 0;
@@ -126,6 +139,10 @@ export class ComputerUseProviderRouter {
       ?? detectMessagingSemanticSurfaces;
     this.ownedTransientSceneComposition = options.ownedTransientSceneComposition
       ?? composeOwnedTransientSceneElements;
+    this.sameWindowNavigationSceneComposition = options.sameWindowNavigationSceneComposition
+      ?? composeSameWindowNavigationSceneElements;
+    this.sameWindowNavigationSurfaceOperation = options.sameWindowNavigationSurfaceOperation
+      ?? detectSameWindowNavigationSurface;
     this.actionPolicy = this.policy.describe();
   }
 
@@ -143,6 +160,7 @@ export class ComputerUseProviderRouter {
     this.consumedSurfaceReceiptId = null;
     this.activeFocusReceipt = null;
     this.recentEditableTarget = null;
+    this.openNavigationSurface = null;
   }
 
   health(options = {}) {
@@ -153,7 +171,7 @@ export class ComputerUseProviderRouter {
     const result = {
       status: "ready",
       module: "agent-computer-use-mcp",
-      version: "0.0.26",
+      version: "0.0.27",
       phases: {
         "0.9": "contract-freeze",
         "0.10": "release-metadata-changelog",
@@ -899,10 +917,25 @@ export class ComputerUseProviderRouter {
   }
 
   capture(args = {}) {
-    return this.runOperation((ticket) => this.captureOperation({
-      ...args,
-      publicObservation: true,
-    }, ticket));
+    return this.runOperation(async (ticket) => {
+      const preservedActionObservation = args.preserveActionObservation === true
+        ? this.lastCapture
+        : null;
+      try {
+        return await this.captureOperation({
+          ...args,
+          publicObservation: true,
+        }, ticket);
+      } finally {
+        // A Host-owned popup preflight answers only whether an anchored surface
+        // is already open. It must not replace the still-fresh observation that
+        // grounds the action which follows; otherwise router.act correctly
+        // rejects that action because its element disappeared from lastCapture.
+        if (args.preserveActionObservation === true) {
+          this.lastCapture = preservedActionObservation;
+        }
+      }
+    });
   }
 
   refineLatestScreenshotScene(args = {}) {
@@ -990,13 +1023,19 @@ export class ComputerUseProviderRouter {
       }
     } else if (mode === "ocr-region") {
       observation = (await this.awaitExternal(ticket, () => this.ocrRegionOperation({
-        titlePart: this.activeController.window.title,
         crop: args.crop,
         timeoutMs: args.timeoutMs,
       }, ticket))).observation;
     } else if (mode === "screenshot") {
       let semanticObservation = null;
-      if (this.driver?.capture) {
+      // A forced surface capture is used precisely because the Host must
+      // observe a transient popup from pixels. Some accessibility providers
+      // implement their semantic probe by activating or re-focusing the
+      // window; that observation can dismiss the popup before the screenshot
+      // is taken. Do not mutate the desktop with a redundant semantic probe on
+      // this path. The explicit anchor plus current OCR/visual evidence is the
+      // authority for the transient surface.
+      if (args.forceScreenshotSurfaceCapture !== true && this.driver?.capture) {
         try {
           semanticObservation = await this.awaitExternal(ticket, () => this.driver.capture({
             window: this.activeController.window,
@@ -1024,23 +1063,23 @@ export class ComputerUseProviderRouter {
           ...(args.includeRelatedSurfaces === undefined
             ? {}
             : { includeRelatedSurfaces: args.includeRelatedSurfaces }),
-          ...(args.preferNativeMainCapture === undefined
-            ? {}
-            : { preferNativeMainCapture: args.preferNativeMainCapture }),
+          // Native capture observes the existing HWND without the
+          // get-window-state focus transition that can close an in-window
+          // popup. An explicit caller choice still wins.
+          ...((args.preferNativeMainCapture !== undefined
+            || (args.forceScreenshotSurfaceCapture === true
+              && isCoordinateBox(args.relatedSurfaceAnchor?.bounds)))
+            ? {
+                preferNativeMainCapture: args.preferNativeMainCapture
+                  ?? true,
+              }
+            : {}),
           timeoutMs: Math.min(
             positiveTimeout(args.timeoutMs, SCREENSHOT_LATENCY_BUDGET_MS),
             SCREENSHOT_LATENCY_BUDGET_MS,
           ),
         }, ticket));
         observation = await this.prioritizeLocalScreenshotPerception(screenshot, args, ticket);
-        if (args.forceScreenshotSurfaceCapture === true
-          && Array.isArray(semanticObservation?.elements)
-          && semanticObservation.elements.length > 0) {
-          observation = {
-            ...observation,
-            elements: semanticObservation.elements,
-          };
-        }
       }
     } else {
       fail("capture.mode_unsupported", `Unsupported capture mode: ${mode}`);
@@ -1099,7 +1138,6 @@ export class ComputerUseProviderRouter {
   async prioritizeLocalScreenshotPerception(screenshot, args, ticket) {
     const imagePath = screenshot?.artifact?.path ?? screenshot?.capture?.path;
     if (typeof imagePath !== "string" || !imagePath) return screenshot;
-
     const currentDigest = await this.awaitExternal(ticket, async () => (
       createHash("sha256").update(await this.readOwnedArtifact(imagePath)).digest("hex")
     ));
@@ -1177,10 +1215,23 @@ export class ComputerUseProviderRouter {
       : 0;
     const stableFrameObservationBlocked = stableFrameObservations >= STABLE_FRAME_OBSERVATION_LIMIT
       && !retryBaselineOcr;
-    const shouldRunLocalOcr = !stableFrameObservationBlocked && (
-      !unchanged
-      || retryBaselineOcr
-      || Boolean(requestedCrop && args.effectHintRegion)
+    // An open in-window popup is rebuilt from OCR rows on every observation, so
+    // skipping OCR because the frame stopped changing erases a menu that is
+    // still on screen. Keep reading while one is known open; the stable-frame
+    // budget above still bounds how long that can last.
+    const regroundOpenNavigationSurface = isCoordinateBox(this.openNavigationSurface?.bounds);
+    const regroundRelatedNavigationAnchor = isCoordinateBox(args.relatedSurfaceAnchor?.bounds);
+    // A task continuation that names a related surface anchor is asking the
+    // Host to re-prove one current candidate, not to poll an idle frame. Always
+    // run that bounded OCR read even after the general stable-frame budget is
+    // exhausted; otherwise an on-screen menu loses its rows between tool steps.
+    const shouldRunLocalOcr = regroundRelatedNavigationAnchor || (
+      !stableFrameObservationBlocked && (
+        !unchanged
+        || retryBaselineOcr
+        || regroundOpenNavigationSurface
+        || Boolean(requestedCrop && args.effectHintRegion)
+      )
     );
     let localObservation = null;
     let primaryOcrElements = [];
@@ -1190,7 +1241,20 @@ export class ComputerUseProviderRouter {
     let ocrError = null;
 
     if (shouldRunLocalOcr) {
-      ocrRegion = requestedCrop ?? (dirtyRegion ? expandRegionToBucket(dirtyRegion) : null);
+      ocrRegion = requestedCrop
+        // An explicit related-surface anchor is the ownership question this
+        // capture must answer. Unrelated animation elsewhere in the window may
+        // produce a global dirty region, but it must not redirect OCR away from
+        // the visible menu whose child candidate is being revalidated.
+        ?? (regroundRelatedNavigationAnchor
+          ? navigationAnchorOcrRegion(args.relatedSurfaceAnchor.bounds, visualBounds)
+          : null)
+        ?? (dirtyRegion ? expandRegionToBucket(dirtyRegion) : null)
+        // Nothing changed, so there is no dirty region to read; read the popup
+        // itself instead of the whole frame. Bucketing needs the frame size and
+        // the remembered bounds do not carry it, so fall back to the exact
+        // region rather than failing the whole observation.
+        ?? (regroundOpenNavigationSurface ? openSurfaceOcrRegion(this.openNavigationSurface.bounds) : null);
       try {
         const ocr = await this.awaitExternal(ticket, () => this.ocrRegionOperation({
           imagePath,
@@ -1420,6 +1484,87 @@ export class ComputerUseProviderRouter {
             ...composition.elements,
           ],
         };
+        if (isCoordinateBox(args.relatedSurfaceAnchor?.bounds)) {
+          const navigationControl = {
+            role: typeof args.relatedSurfaceAnchor.role === "string"
+              ? args.relatedSurfaceAnchor.role
+              : "navigation-control",
+            bounds: { ...args.relatedSurfaceAnchor.bounds },
+          };
+          let detectedNavigationSurface = null;
+          try {
+            // A surface stops changing once it has finished opening. Carrying the
+            // one already proven open into this detection keeps it visible while
+            // it is still on screen, instead of dropping it on the first static
+            // frame and taking every candidate it contributed with it.
+            // The surface is still the same surface whether the target is the
+            // control that opened it or one of the items inside it. Keying only
+            // on the opening control loses it exactly when the Agent goes to act
+            // on what it was offered.
+            const remembered = this.openNavigationSurface;
+            const surfaceKey = navigationSurfaceKey(navigationControl);
+            const assertedKnownSurfaceBounds = isCoordinateBox(
+              args.relatedSurfaceAnchor?.surfaceBounds,
+            ) ? args.relatedSurfaceAnchor.surfaceBounds : null;
+            const targetingRemembered = isCoordinateBox(remembered?.bounds)
+              && (remembered.controlKey === surfaceKey
+                || boundsIntersect(navigationControl.bounds, remembered.bounds));
+            const knownSurfaceBounds = targetingRemembered
+              ? remembered.bounds
+              : assertedKnownSurfaceBounds;
+            detectedNavigationSurface = await this.awaitExternal(
+              ticket,
+              () => this.sameWindowNavigationSurfaceOperation({
+                imagePath,
+                previousImagePath: previous?.path ?? null,
+                navigationControl,
+                changedRegion: dirtyRegion,
+                ocrElements: compositionOcrElements,
+                knownSurfaceBounds,
+              }),
+            );
+            if (isCoordinateBox(detectedNavigationSurface?.bounds)
+              && (detectedNavigationSurface?.support?.transitionVerified === true
+                || targetingRemembered
+                || assertedKnownSurfaceBounds !== null)) {
+              this.openNavigationSurface = {
+                controlKey: surfaceKey,
+                bounds: { ...detectedNavigationSurface.bounds },
+              };
+            } else if (targetingRemembered) {
+              // A detection that was looking for the remembered surface and came
+              // back empty means it closed. A detection aimed somewhere else says
+              // nothing about it and must not discard it.
+              this.openNavigationSurface = null;
+            }
+          } catch (error) {
+            this.assertOperationTicket(ticket);
+            this.recordAudit("computer.scene.same_window_navigation_surface_failed", {
+              errorCode: safeAuditErrorCode(error, "scene.same_window_navigation_surface_failed"),
+            });
+          }
+          const sameWindowNavigationElements = this.sameWindowNavigationSceneComposition({
+            mainCapture: {
+              ...screenshot.capture,
+              windowId: controllerWindowId(this.activeController?.window),
+              screenshotId: screenshot.surfaceReceipt?.screenshotId ?? screenshot.observationId,
+              coordinateScale: screenshot.coordinateScale ?? screenshot.capture?.coordinateScale,
+            },
+            navigationControl,
+            changedRegion: detectedNavigationSurface?.bounds ?? dirtyRegion,
+            ocrElements: detectedNavigationSurface?.ocrElements ?? compositionOcrElements,
+            visualProposals: detectedNavigationSurface?.visualProposals ?? visualProposals,
+          });
+          if (sameWindowNavigationElements.length > 0) {
+            localObservation = {
+              ...localObservation,
+              elements: [
+                ...localObservation.elements,
+                ...sameWindowNavigationElements,
+              ],
+            };
+          }
+        }
       } catch (error) {
         this.assertOperationTicket(ticket);
         this.messagingSceneControls = [];
@@ -1657,7 +1802,17 @@ export class ComputerUseProviderRouter {
   }
 
   act(args = {}) {
-    const execute = () => this.runOperation((ticket) => this.actOperation(args, ticket));
+    const execute = () => this.runOperation(async (ticket) => {
+      const externalSignal = args.signal;
+      const onExternalAbort = () => ticket.controller.abort(externalSignal.reason);
+      if (externalSignal?.aborted === true) onExternalAbort();
+      else externalSignal?.addEventListener?.("abort", onExternalAbort, { once: true });
+      try {
+        return await this.actOperation(args, ticket);
+      } finally {
+        externalSignal?.removeEventListener?.("abort", onExternalAbort);
+      }
+    });
     const operation = this.actionTail.then(execute, execute);
     this.actionTail = operation.catch(() => {});
     return operation;
@@ -1720,14 +1875,22 @@ export class ComputerUseProviderRouter {
         },
       );
     }
-    const { admission, driverTarget, element, sceneElement, focusReceipt } = this.validateAction(action);
+    const {
+      admission,
+      driverTarget,
+      deliveryPlan,
+      element,
+      sceneElement,
+      focusReceipt,
+    } = this.validateAction(action);
     // A newly admitted action starts a distinct perception step. Permit one
     // fresh layout escalation for its resulting scene and bound the number of
     // observations made before the next action.
     this.consecutivePublicObservations = 0;
     this.lastVisualUnderstanding = null;
     this.interactionStep += 1;
-    const effectiveDeliveryMode = resolveEffectiveDeliveryMode(action, admission, focusReceipt);
+    const effectiveDeliveryMode = deliveryPlan?.deliveryMode
+      ?? resolveEffectiveDeliveryMode(action, admission, focusReceipt);
     if (action.kind === "activate_window" || action.kind === "click" || action.kind === "set_value"
       || ((action.kind === "type_text" || action.kind === "press_key") && !focusReceipt)) {
       this.activeFocusReceipt = null;
@@ -1958,6 +2121,7 @@ export class ComputerUseProviderRouter {
         focusReceipt,
         result,
         effectiveDeliveryMode,
+        deliveryPlan,
       }),
       includeUserOverlay: false,
       ...(surfaceReceipt?.id ? {
@@ -1969,11 +2133,16 @@ export class ComputerUseProviderRouter {
       } : {}),
     };
     if (this.activeFocusReceipt) actionResult.focusReceipt = serializeFocusReceipt(this.activeFocusReceipt);
+    const hostNavigationPostActionObservation = action.captureAfter === true
+      && action.kind === "click"
+      && action.hostDeliveryIntent === "navigation";
     const automaticLocalPostActionObservation = outcome === "indeterminate"
       && admission.pixelLimitedAction === true
       && (action.kind === "click" || action.kind === "type_text")
       && typeof this.driver?.captureScreenshot === "function"
       && this.ocr;
+    const screenshotPostActionObservation = automaticLocalPostActionObservation
+      || hostNavigationPostActionObservation;
     const continuationBounds = isCoordinateBox(focusReceipt?.target?.bounds)
       ? focusReceipt.target.bounds
       : driverTarget?.bounds;
@@ -2025,7 +2194,7 @@ export class ComputerUseProviderRouter {
       };
     }
     if (action.captureAfter || automaticLocalPostActionObservation) {
-      if (automaticLocalPostActionObservation) {
+      if (screenshotPostActionObservation) {
         await this.awaitExternal(
           ticket,
           () => new Promise((resolve) => setTimeout(
@@ -2035,13 +2204,24 @@ export class ComputerUseProviderRouter {
         );
       }
       const postActionCaptureArgs = {
-          mode: automaticLocalPostActionObservation ? "screenshot" : "semantic",
+          mode: screenshotPostActionObservation ? "screenshot" : "semantic",
           ...(postActionVerificationCrop ? { crop: postActionVerificationCrop } : {}),
-          ...(automaticLocalPostActionObservation
+          ...(screenshotPostActionObservation
             ? {
                 includeChangedRegionAlongsideCrop: isolatedRoleOwnedTextVerification !== true,
                 includeRelatedSurfaces: isolatedRoleOwnedTextVerification !== true,
                 preferNativeMainCapture: isolatedRoleOwnedTextVerification === true,
+                ...(hostNavigationPostActionObservation
+                  ? { forceScreenshotSurfaceCapture: true }
+                  : {}),
+                ...(action.hostDeliveryIntent === "navigation" && sceneElement?.coordinate?.bounds
+                  ? {
+                      relatedSurfaceAnchor: {
+                        role: sceneElement.role,
+                        bounds: { ...sceneElement.coordinate.bounds },
+                      },
+                    }
+                  : {}),
                 ...(postActionEffectHintRegion
                   ? { effectHintRegion: postActionEffectHintRegion }
                   : {}),
@@ -2056,7 +2236,7 @@ export class ComputerUseProviderRouter {
       if (action.kind === "type_text"
         && outcome === "committed"
         && isVerifiedTextMutation(result)
-        && (sceneElement?.role === "search" || sceneElement?.role === "message-editor")) {
+        && sceneElement?.type === "Editable") {
         const verifiedTargetBounds = isCoordinateBox(postActionTarget.targetBounds)
           ? postActionTarget.targetBounds
           : continuationBounds;
@@ -2519,10 +2699,6 @@ export class ComputerUseProviderRouter {
     };
   }
 
-  captureWindow(args) {
-    return this.runOperation((ticket) => this.captureWindowOperation(args, ticket));
-  }
-
   async captureWindowOperation(args, ticket) {
     const outputPath = args.outputPath ?? await this.awaitExternal(
       ticket,
@@ -2576,24 +2752,22 @@ export class ComputerUseProviderRouter {
     return observation;
   }
 
-  ocrRegion(args) {
-    return this.runOperation((ticket) => this.ocrRegionOperation(args, ticket));
-  }
-
   async ocrRegionOperation(args, ticket) {
     await this.ensureOcrResources(ticket);
     let imagePath = args.imagePath;
     let capture = null;
-    if (!imagePath && args.titlePart) {
+    if (!imagePath && this.activeController) {
       const captured = await this.awaitExternal(ticket, () => this.captureWindowOperation({
-        titlePart: args.titlePart,
         timeoutMs: args.timeoutMs,
       }, ticket));
       capture = captured.capture;
       imagePath = captured.capture.path;
     }
     if (!imagePath) {
-      fail("ocr_region.requires_imagePath_or_titlePart", "ocr_region requires either imagePath or titlePart");
+      fail(
+        "ocr_region.requires_imagePath_or_active_controller",
+        "ocr_region requires either imagePath or an active controller",
+      );
     }
 
     const windowId = String(args.windowId ?? capture?.title ?? this.activeController?.window?.id
@@ -3183,13 +3357,21 @@ export class ComputerUseProviderRouter {
         ? { actionTransform: sceneElement.coordinate.actionTransform }
         : this.lastCapture?.coordinateScale,
     );
+    const deliveryPlan = planHostNavigationPointerDelivery({
+      action,
+      admission,
+      sceneElement,
+      observation: this.lastCapture,
+      activeController: this.activeController,
+    });
     return {
       admission,
       driverTarget: resolveFocusContinuationTarget(
         action,
-        resolvedDriverTarget,
+        deliveryPlan?.driverTarget ?? resolvedDriverTarget,
         focusReceipt,
       ),
+      deliveryPlan,
       element,
       sceneElement,
       focusReceipt,
@@ -3616,7 +3798,13 @@ export class ComputerUseProviderRouter {
   }
 
   async assertDesktopInteractive(ticket, phase) {
-    const desktopState = await this.probeDesktopState(ticket);
+    let desktopState = await this.probeDesktopState(ticket);
+    if (this.driver?.desktopState
+      && desktopState.status !== "interactive"
+      && desktopState.status !== "locked"
+      && desktopState.secureDesktop !== true) {
+      desktopState = await this.probeDesktopState(ticket);
+    }
     if (desktopState.status === "locked" || desktopState.secureDesktop === true) {
       fail(
         "desktop.locked",
@@ -3626,6 +3814,7 @@ export class ComputerUseProviderRouter {
           terminal: true,
           retryable: false,
           requiresUserAction: "unlock",
+          delivered: false,
           desktopState,
         },
       );
@@ -3638,6 +3827,7 @@ export class ComputerUseProviderRouter {
           phase,
           terminal: true,
           retryable: false,
+          delivered: false,
           desktopState,
         },
       );
@@ -3647,7 +3837,7 @@ export class ComputerUseProviderRouter {
 
   enforcePolicyDecision(decision) {
     if (decision?.allowed) return;
-    fail(decision.code, policyMessage(decision), decision);
+    fail(decision.code, policyMessage(decision), { ...decision, delivered: false });
   }
 
   recordAudit(type, payload = {}) {
@@ -3908,33 +4098,135 @@ export class ComputerUseProviderRouter {
   startControlVisuals({ grant, tier, window, ticket }) {
     return this.runControlVisualLifecycle(async () => {
       this.assertControlGrant(grant);
-      if (tier !== "observe" && this.driver?.startCursor) {
+      if (tier !== "observe" && this.driver?.startCursor && !this.cursorStartAttempted && !this.cursorActive) {
         this.cursorStartAttempted = true;
         await this.awaitExternal(ticket, () => this.driver.startCursor());
         this.cursorActive = true;
         this.assertControlGrant(grant);
       }
-      if (this.overlayRuntime?.start) {
+      const targetRect = window.bounds ? {
+        windowId: window.windowId,
+        title: window.title,
+        x: window.bounds.x,
+        y: window.bounds.y,
+        width: window.bounds.width,
+        height: window.bounds.height,
+      } : undefined;
+      if (this.overlayHandle) {
+        // An indicator held across the previous release is still on screen.
+        // Re-aiming it costs a file write the overlay picks up on its own
+        // poll, where restarting would blink the whole surface.
+        await this.retargetOverlay(targetRect);
+      } else if (this.overlayRuntime?.start) {
         const handle = await this.awaitExternal(
           ticket,
-          () => this.overlayRuntime.start({ targetRect: window.bounds ? {
-            windowId: window.windowId,
-            title: window.title,
-            x: window.bounds.x,
-            y: window.bounds.y,
-            width: window.bounds.width,
-            height: window.bounds.height,
-          } : undefined }),
+          () => this.overlayRuntime.start({ targetRect }),
           { onInvalidResult: (lateHandle) => { this.overlayHandle = lateHandle; } },
         );
         this.overlayHandle = handle;
+        handle.onStopRequested?.(() => {
+          // Nothing awaits the operator; the stop has to stand on its own.
+          this.requestOperatorStop().catch(() => {});
+        });
         this.assertControlGrant(grant);
       }
     }, ticket);
   }
 
+  /// Holds the on-screen indicator up across control releases for as long as
+  /// `expiresAt` is in the future. The expiry means a caller that never gets to
+  /// clear the hold cannot strand the indicator on someone's desktop.
+  setControlIndicatorHold(hold, { allowShorten = false } = {}) {
+    const next = hold?.expiresAt ? { id: hold.id ?? null, expiresAt: hold.expiresAt } : null;
+    // Never shorten a hold that is already reaching further out. A quick
+    // health check must not cut short the task still running behind it. The
+    // exception is a caller that knows the work just failed, which is entitled
+    // to hand the desktop back early.
+    if (!allowShorten && next && this.controlIndicatorHold
+      && this.controlIndicatorHold.expiresAt > next.expiresAt) return;
+    this.controlIndicatorHold = next;
+    this.scheduleControlIndicatorExpiry();
+  }
+
+  /// Without this the indicator would sit on the desktop until some later
+  /// release happened to notice the hold had lapsed - and if the caller simply
+  /// stopped calling, that moment would never come.
+  scheduleControlIndicatorExpiry() {
+    if (this.controlIndicatorExpiryTimer) {
+      clearTimeout(this.controlIndicatorExpiryTimer);
+      this.controlIndicatorExpiryTimer = null;
+    }
+    if (!this.controlIndicatorHold) return;
+    const delay = Math.max(0, this.controlIndicatorHold.expiresAt - this.clock.now());
+    this.controlIndicatorExpiryTimer = setTimeout(() => {
+      this.controlIndicatorExpiryTimer = null;
+      if (this.hasLiveControlIndicatorHold()) {
+        this.scheduleControlIndicatorExpiry();
+        return;
+      }
+      this.releaseControlIndicator().catch(() => {
+        // The indicator is advisory; a failed teardown must not crash the Host.
+      });
+    }, delay);
+    // The Host must never stay alive just to take a banner down.
+    this.controlIndicatorExpiryTimer.unref?.();
+  }
+
+  hasLiveControlIndicatorHold() {
+    if (!this.controlIndicatorHold) return false;
+    if (this.controlIndicatorHold.expiresAt <= this.clock.now()) {
+      this.controlIndicatorHold = null;
+      return false;
+    }
+    return true;
+  }
+
+  /// The operator taking their desktop back. Everything in flight is aborted,
+  /// the task is dropped rather than paused, and the indicator comes down. This
+  /// deliberately stops short of closing the provider: the operator asked for
+  /// the current work to end, not for Computer Use to be unusable until the
+  /// Host restarts.
+  async requestOperatorStop(reason = "The operator stopped the desktop task.") {
+    if (this.operatorStopInProgress) return;
+    this.operatorStopInProgress = true;
+    try {
+      this.abortAdmittedOperations(null, reason);
+      await this.onOperatorStop?.(reason);
+      this.controlIndicatorHold = null;
+      await this.releaseControlIndicator();
+    } finally {
+      this.operatorStopInProgress = false;
+    }
+  }
+
+  /// Drops the hold and takes the indicator down with it, unless a controller
+  /// is genuinely active — that overlay belongs to the live grant, not to us.
+  async releaseControlIndicator(ticket) {
+    this.controlIndicatorHold = null;
+    this.scheduleControlIndicatorExpiry();
+    if (!this.overlayHandle || this.activeController) return;
+    await this.stopControlVisuals(ticket);
+  }
+
+  /// Best effort by design: the indicator is an advisory statement to the
+  /// person at the desk, so a failure to re-aim it must never fail their task.
+  async retargetOverlay(targetRect) {
+    try {
+      await this.overlayHandle?.retarget?.(targetRect ?? null);
+    } catch {
+      // Keep the previous frame rather than surfacing a cosmetic failure.
+    }
+  }
+
   async stopOverlay(ticket) {
     if (!this.overlayHandle) return;
+    if (this.hasLiveControlIndicatorHold()) {
+      // The task continues, so the banner stays. The target frame goes away
+      // because at this instant nothing is being acted on, and claiming
+      // otherwise would point at a window the Host no longer controls.
+      await this.retargetOverlay(null);
+      return;
+    }
     const handle = this.overlayHandle;
     if (this.overlayRuntime?.stop) {
       if (ticket) {
@@ -3960,6 +4252,16 @@ export class ComputerUseProviderRouter {
       } catch (error) {
         if (ticket) this.assertOperationTicket(ticket);
         firstError = error;
+      }
+      // A live task hold spans a release boundary. Keeping the user-only cursor
+      // runtime alive avoids a native focus teardown that dismisses transient
+      // menus between two Host-owned task steps. Controller authority is still
+      // released above; expiry, Stop, turn cleanup, and explicit hold release
+      // all clear the hold before entering this method and therefore still stop
+      // the cursor immediately.
+      if (this.hasLiveControlIndicatorHold()) {
+        if (firstError) throw firstError;
+        return;
       }
       if (this.cursorStartAttempted || this.cursorActive) {
         try {
@@ -4067,7 +4369,9 @@ function perceptionAdmissionMessage(admission) {
   if (admission?.code === "target.visual_grounding_required") {
     return "The declared click intent requires control geometry from a fresh screenshot; OCR glyph geometry is insufficient.";
   }
-  return admission?.code ?? "observation.insufficient";
+  // The refusal carries which requirement failed; surfacing only the code turns
+  // six distinct causes into one opaque message.
+  return admission?.reason ?? admission?.code ?? "observation.insufficient";
 }
 
 function resolveProviderElementBinding(observation, sceneElement) {
@@ -4144,7 +4448,7 @@ function synchronizeVerifiedEditableValue({ observation, pending, matchingElemen
 }
 
 function synchronizeReceiptVerifiedEditableValue({ observation, role, targetBounds, value }) {
-  if (!(role === "search" || role === "message-editor")
+  if (typeof role !== "string" || role.length === 0
     || !isCoordinateBox(targetBounds)
     || typeof value !== "string"
     || value.length === 0) return false;
@@ -4861,6 +5165,60 @@ function resolveEffectiveDeliveryMode(action, admission, focusReceipt) {
   return "background";
 }
 
+function planHostNavigationPointerDelivery({
+  action,
+  admission,
+  sceneElement,
+  observation,
+  activeController,
+}) {
+  if (action?.kind !== "click"
+    || action.hostDeliveryIntent !== "navigation"
+    || admission?.pixelLimitedAction !== false
+    || ["editable", "toggle"].includes(action.targetRole)) {
+    return null;
+  }
+  const coordinate = sceneElement?.coordinate;
+  const bounds = coordinate?.bounds;
+  const observationBounds = isCoordinateBox(observation?.coordinateBounds)
+    ? observation.coordinateBounds
+    : Number.isFinite(activeController?.window?.bounds?.width)
+      && Number.isFinite(activeController?.window?.bounds?.height)
+      ? {
+          x: 0,
+          y: 0,
+          width: activeController.window.bounds.width,
+          height: activeController.window.bounds.height,
+        }
+      : null;
+  const controlledWindowId = controllerWindowId(activeController?.window);
+  if (!isCoordinateBox(bounds)
+    || !isCoordinateBox(observationBounds)
+    || coordinate?.space !== "window-local"
+    || String(coordinate.windowId) !== String(controlledWindowId)
+    || !coordinateBoxContains(observationBounds, bounds)) {
+    return null;
+  }
+  const point = transformObservationPoint({
+    x: bounds.x + (bounds.width / 2),
+    y: bounds.y + (bounds.height / 2),
+  }, coordinate.actionTransform);
+  if (!Number.isFinite(point?.x) || !Number.isFinite(point?.y)) return null;
+  return {
+    driverTarget: point,
+    deliveryMode: "foreground",
+    targetPath: "semantic-element-coordinate",
+    selectionReason: "host-grounded-navigation-pointer",
+  };
+}
+
+function coordinateBoxContains(outer, inner) {
+  return inner.x >= outer.x
+    && inner.y >= outer.y
+    && inner.x + inner.width <= outer.x + outer.width
+    && inner.y + inner.height <= outer.y + outer.height;
+}
+
 function resolveDriverActionTarget(action, element, pixelLimitedAction, coordinateScale) {
   if (!pixelLimitedAction) {
     if (action.elementId === undefined
@@ -5235,6 +5593,7 @@ function describeActionExecution({
   focusReceipt,
   result,
   effectiveDeliveryMode,
+  deliveryPlan,
 }) {
   const resultPath = typeof result?.path === "string" && result.path.trim()
     ? result.path.trim()
@@ -5252,7 +5611,8 @@ function describeActionExecution({
     : (resultPath ?? "cua-driver-mcp");
 
   let targetPath = "controller-window";
-  if (focusReceipt) targetPath = "focus-receipt";
+  if (deliveryPlan?.targetPath) targetPath = deliveryPlan.targetPath;
+  else if (focusReceipt) targetPath = "focus-receipt";
   else if (element) targetPath = "semantic-element";
   else if (Number.isFinite(action.x) && Number.isFinite(action.y)) {
     targetPath = "observation-coordinate";
@@ -5263,9 +5623,10 @@ function describeActionExecution({
     targetPath,
     providerPath,
     deliveryMode: effectiveDeliveryMode,
-    selectionReason: providerPath.includes("windows_unicode")
-      ? "unicode-coordinate-input"
-      : null,
+    selectionReason: deliveryPlan?.selectionReason
+      ?? (providerPath.includes("windows_unicode")
+        ? "unicode-coordinate-input"
+        : null),
     fallback: {
       used: fallbackReason !== null,
       reason: fallbackReason,
@@ -5315,6 +5676,78 @@ function serializeFocusReceipt(receipt) {
 
 function controllerWindowId(window = {}) {
   return String(window.id ?? window.windowId ?? window.window_id ?? window.title ?? "unknown-window");
+}
+
+function boundsIntersect(left, right) {
+  if (!isCoordinateBox(left) || !isCoordinateBox(right)) return false;
+  return left.x < right.x + right.width
+    && left.x + left.width > right.x
+    && left.y < right.y + right.height
+    && left.y + left.height > right.y;
+}
+
+/** OCR crop for a surface already known open, bucketed when the frame size allows it. */
+function openSurfaceOcrRegion(bounds) {
+  try {
+    return expandRegionToBucket(bounds);
+  } catch {
+    return { x: bounds.x, y: bounds.y, width: bounds.width, height: bounds.height };
+  }
+}
+
+/** Read the bounded neighbourhood of a navigation anchor, not the whole app. */
+function navigationAnchorOcrRegion(anchor, visualBounds) {
+  if (!isCoordinateBox(anchor) || !isCoordinateBox(visualBounds)) return null;
+  const margin = 16;
+  const maximumSurfaceSpan = 320;
+  const viewportRight = visualBounds.x + visualBounds.width;
+  const viewportBottom = visualBounds.y + visualBounds.height;
+  const anchorCenterX = anchor.x + (anchor.width / 2);
+  const anchorCenterY = anchor.y + (anchor.height / 2);
+  const horizontalRatio = (anchorCenterX - visualBounds.x) / visualBounds.width;
+  const verticalRatio = (anchorCenterY - visualBounds.y) / visualBounds.height;
+  const left = Math.max(
+    visualBounds.x,
+    horizontalRatio <= 0.35
+      ? anchor.x - margin
+      : horizontalRatio >= 0.65
+        ? anchor.x + anchor.width - maximumSurfaceSpan
+        : anchor.x - (maximumSurfaceSpan / 2),
+  );
+  const right = Math.min(
+    viewportRight,
+    horizontalRatio <= 0.35
+      ? anchor.x + maximumSurfaceSpan
+      : horizontalRatio >= 0.65
+        ? anchor.x + anchor.width + margin
+        : anchor.x + anchor.width + (maximumSurfaceSpan / 2),
+  );
+  const top = Math.max(
+    visualBounds.y,
+    verticalRatio >= 0.65
+      ? anchor.y - maximumSurfaceSpan
+      : verticalRatio <= 0.35
+        ? anchor.y - margin
+        : anchor.y - (maximumSurfaceSpan / 2),
+  );
+  const bottom = Math.min(
+    viewportBottom,
+    verticalRatio >= 0.65
+      ? anchor.y + anchor.height + margin
+      : verticalRatio <= 0.35
+        ? anchor.y + anchor.height + maximumSurfaceSpan
+        : anchor.y + anchor.height + (maximumSurfaceSpan / 2),
+  );
+  return { x: left, y: top, width: right - left, height: bottom - top };
+}
+
+/** Identity of the control a remembered navigation surface belongs to. */
+function navigationSurfaceKey(navigationControl = {}) {
+  const bounds = navigationControl.bounds ?? {};
+  return JSON.stringify([
+    String(navigationControl.role ?? "navigation-control"),
+    bounds.x, bounds.y, bounds.width, bounds.height,
+  ]);
 }
 
 function positiveTimeout(value, fallback) {

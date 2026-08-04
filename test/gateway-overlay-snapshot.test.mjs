@@ -30,7 +30,10 @@ test("native overlay snapshots render valid, dimensioned, distinct PNGs", async 
   assert.match(theme, /var baseThickness = 30 \+ \(42 - 30\) \* breath;/);
   assert.match(theme, /var fillAlpha = MinFillAlpha \+ \(MaxFillAlpha - MinFillAlpha\) \* breath;/);
   assert.match(renderer, /new Bitmap\(width, height, PixelFormat\.Format32bppPArgb\)/);
-  assert.match(renderer, /public static Bitmap Render\(Size size, double phase, RectangleF\? targetRect\)/);
+  assert.match(
+    renderer,
+    /public static Bitmap Render\(Size size, double phase, RectangleF\? targetRect, bool escapeStops = false\)/,
+  );
   assert.match(renderer, /DrawTargetFrame\(graphics, targetRect, state\)/);
   assert.match(renderer, /DrawInnerRim/);
   assert.doesNotMatch(renderer, /LinearGradientBrush/);

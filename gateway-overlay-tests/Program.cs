@@ -30,6 +30,11 @@ internal static class Program
             ("renders exact river alpha at breath endpoints", RendersExactRiverAlphaAtBreathEndpoints),
             ("renders symmetric luminance on all four edges", RendersSymmetricLuminanceOnAllFourEdges),
             ("renders a closed river through all four corners", RendersClosedRiverThroughAllFourCorners),
+            ("states that the desktop is being controlled", StatesThatTheDesktopIsBeingControlled),
+            ("omits the status banner when it would not fit", OmitsStatusBannerWhenItWouldNotFit),
+            ("promises Escape only when the hook is listening", PromisesEscapeOnlyWhenListening),
+            ("treats a real Escape press as an operator stop", TreatsRealEscapeAsOperatorStop),
+            ("ignores the Host's own injected Escape", IgnoresInjectedEscape),
             ("rejects non-premultiplied frames before native acquisition", RejectsNonPremultipliedFramesBeforeNativeAcquisition),
             ("handles acquisition failures without real native handles", HandlesAcquisitionFailuresWithoutRealNativeHandles),
             ("reports a false presentation operation after ordered cleanup", ReportsFalsePresentationAfterOrderedCleanup),
@@ -243,6 +248,118 @@ internal static class Program
         string deviceId = "PCI\\DISPLAY\\0000",
         string deviceKey = "Physical Display Driver")
         => new(bounds, isPrimary, isForeground, isActive, isMirroring, isRemote, isRdpUdd, deviceName, deviceString, deviceId, deviceKey);
+
+    private const int WmKeyDown = 0x0100;
+    private const int WmSysKeyDown = 0x0104;
+    private const int WmKeyUp = 0x0101;
+    private const int VkEscape = 0x1B;
+    private const uint LlkhfInjected = 0x00000010;
+    private const uint LlkhfLowerIlInjected = 0x00000002;
+
+    private static void PromisesEscapeOnlyWhenListening()
+    {
+        // Windows can refuse the keyboard hook. Naming a key that nothing is
+        // listening for would leave someone pressing Escape at a desktop that
+        // keeps moving.
+        Require(
+            !OverlayRenderer.StatusText.Contains("Esc"),
+            "Without a live hook the banner must not name Escape.");
+        Require(
+            OverlayRenderer.StatusTextWithEscape.Contains("Esc"),
+            "With a live hook the banner must say how to stop.");
+
+        // The Escape wording still has to survive the fit guard on a real screen.
+        using var frame = OverlayRenderer.Render(new Size(1920, 1080), 0.25, null, escapeStops: true);
+        var painted = WidestBannerRun(frame);
+        Require(painted > 200, $"The Escape wording must still fit a 1920-wide desktop; only {painted} pixels were painted.");
+    }
+
+    /// <summary>
+    /// The banner is translucent on purpose, so it cannot be found by looking
+    /// for solid paint. What separates it from the border is that the border
+    /// never exceeds MaxFillAlpha. Rows are scanned rather than one guessed
+    /// line, so font metrics can change without the test lying about coverage.
+    /// </summary>
+    private static int BannerFloor => (int)Math.Round(OverlayTheme.MaxFillAlpha * 255) + 10;
+
+    private static int WidestBannerRun(Bitmap frame)
+    {
+        var widest = 0;
+        for (var y = 0; y < Math.Min(frame.Height, 120); y++)
+        {
+            var run = 0;
+            for (var x = 0; x < frame.Width; x++)
+            {
+                if (frame.GetPixel(x, y).A > BannerFloor) run++;
+            }
+
+            if (run > widest) widest = run;
+        }
+
+        return widest;
+    }
+
+    private static void TreatsRealEscapeAsOperatorStop()
+    {
+        Require(
+            OperatorStopWatcher.IsOperatorStop(WmKeyDown, VkEscape, 0),
+            "A person pressing Escape must be able to take their desktop back.");
+        Require(
+            OperatorStopWatcher.IsOperatorStop(WmSysKeyDown, VkEscape, 0),
+            "Escape held with Alt is still the operator asking to stop.");
+        Require(
+            !OperatorStopWatcher.IsOperatorStop(WmKeyUp, VkEscape, 0),
+            "Releasing Escape is not a second stop request.");
+        Require(
+            !OperatorStopWatcher.IsOperatorStop(WmKeyDown, 0x41, 0),
+            "Only Escape stops the desktop; every other key belongs to the application below.");
+    }
+
+    private static void IgnoresInjectedEscape()
+    {
+        // The Host presses Escape itself to dismiss menus. Counting its own
+        // keystroke would abort the task that sent it.
+        Require(
+            !OperatorStopWatcher.IsOperatorStop(WmKeyDown, VkEscape, LlkhfInjected),
+            "An injected Escape is the Host's own keystroke, not the operator's.");
+        Require(
+            !OperatorStopWatcher.IsOperatorStop(WmKeyDown, VkEscape, LlkhfLowerIlInjected),
+            "Escape injected from a lower integrity level is still not the operator.");
+    }
+
+    private static void StatesThatTheDesktopIsBeingControlled()
+    {
+        // A breathing border says something is happening but not what. Someone
+        // whose desktop is being driven should be told in words.
+        using var frame = OverlayRenderer.Render(new Size(1920, 1080), 0.25, null);
+        var painted = WidestBannerRun(frame);
+        Require(painted > 200, $"The status banner must be visible across the top; only {painted} pixels found.");
+
+        // It must not become a second wall of colour: the desktop stays visible.
+        Require(frame.GetPixel(frame.Width / 2, frame.Height / 2).A == 0, "The middle of the screen must stay untouched.");
+        Require(frame.GetPixel(10, 40).A <= BannerFloor, "The banner must sit inside the frame, not span the whole width.");
+
+        // It also must not turn into a solid bar: what is behind it stays legible.
+        Require(
+            frame.GetPixel(frame.Width / 2, 40).A < 210,
+            "The banner surface must stay see-through rather than hiding what it sits over.");
+    }
+
+    private static void OmitsStatusBannerWhenItWouldNotFit()
+    {
+        // A banner wider than its surface would be clipped into nonsense, so a
+        // narrow overlay shows the border alone.
+        using var frame = OverlayRenderer.Render(new Size(160, 200), 0.25, null);
+        for (var y = 0; y < frame.Height; y++)
+        {
+            for (var x = 0; x < frame.Width; x++)
+            {
+                Require(
+                    frame.GetPixel(x, y).A <= BannerFloor,
+                    $"A surface too narrow for the banner must show the border alone; found banner paint at {x},{y}.");
+            }
+        }
+    }
 
     private static void RendersClosedRiverThroughAllFourCorners()
     {

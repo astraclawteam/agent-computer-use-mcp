@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
+import { readFile, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { test } from "node:test";
 
@@ -87,22 +87,36 @@ test("provider router reuses OCR only for identical overlay-free region pixels",
   };
   const router = new ComputerUseProviderRouter({ ocrSession: ocr });
   t.after(() => router.close());
-  const imagePath = resolve("test/fixtures/perception/regressions/images/quick-visual-canvas.png");
+  const baselinePath = resolve("test/fixtures/perception/regressions/images/quick-visual-cad-like.png");
+  const changedPath = resolve("test/fixtures/perception/regressions/images/quick-visual-canvas.png");
 
-  const first = await router.ocrRegion({ imagePath, crop: REGION, windowId: "fixture-window" });
-  const second = await router.ocrRegion({ imagePath, crop: REGION, windowId: "fixture-window" });
+  const first = await router.observeDiff({ baselinePath, changedPath });
+  const second = await router.observeDiff({ baselinePath, changedPath });
 
   assert.equal(recognizeCalls, 1);
   assert.equal(first.observation.cacheHit, false);
   assert.equal(second.observation.cacheHit, true);
-  assert.deepEqual(await readFile(imagePath), await readFile(imagePath));
+  assert.deepEqual(await readFile(changedPath), await readFile(changedPath));
 });
 
-test("title-based OCR replaces stale minimized geometry with the restored capture", async (t) => {
+test("active-controller OCR replaces stale minimized geometry with the current driver capture", async (t) => {
   const clickCalls = [];
   const imagePath = resolve("test/fixtures/perception/regressions/images/quick-visual-canvas.png");
   const router = new ComputerUseProviderRouter({
     driver: {
+      async captureScreenshot(args) {
+        const artifactBytes = await readFile(imagePath);
+        await writeFile(args.outputPath, artifactBytes);
+        return {
+          path: args.outputPath,
+          artifactBytes,
+          title: "Weixin",
+          x: 440,
+          y: 144,
+          width: 968,
+          height: 711,
+        };
+      },
       async click(args) {
         clickCalls.push(args);
         return { status: "ok", verified: true };
@@ -134,31 +148,20 @@ test("title-based OCR replaces stale minimized geometry with the restored captur
     expiresAt: new Date(Date.now() + 60_000).toISOString(),
     expiresAtMs: Date.now() + 60_000,
   };
-  router.captureWindowOperation = async () => ({
-    capture: {
-      path: imagePath,
-      title: "Weixin",
-      x: 440,
-      y: 144,
-      width: 968,
-      height: 711,
-    },
-  });
-
-  const result = await router.ocrRegion({ titlePart: "Weixin" });
-  assert.deepEqual(result.observation.capture, {
+  const result = await router.capture({ mode: "ocr-region" });
+  assert.deepEqual(result.capture, {
     x: 440,
     y: 144,
     width: 968,
     height: 711,
   });
-  assert.deepEqual(result.observation.window.bounds, {
+  assert.deepEqual(result.window.bounds, {
     x: 440,
     y: 144,
     width: 968,
     height: 711,
   });
-  assert.deepEqual(result.observation.coordinateBounds, {
+  assert.deepEqual(result.coordinateBounds, {
     x: 0,
     y: 0,
     width: 968,
@@ -169,7 +172,7 @@ test("title-based OCR replaces stale minimized geometry with the restored captur
     action: {
       kind: "click",
       elementToken: "ocr-1",
-      observationId: result.observation.observationId,
+      observationId: result.observationId,
       coordinateSpace: "window-local",
       x: 97,
       y: 45,

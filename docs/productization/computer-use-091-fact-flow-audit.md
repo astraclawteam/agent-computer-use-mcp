@@ -121,7 +121,11 @@ A coordinate is not complete evidence unless it carries: screenshot/observation 
 
 ### Compatibility surfaces
 
-- `LEGACY_COMPUTER_USE_MCP_TOOLS` still defines `computer.approve`, `computer.revoke`, `computer.list_state`, `computer.capture_window`, `computer.ocr_region`, and `computer.observe_diff` for old phase/test surfaces; they are not the four-tool Agent contract.
+- At the `.91` baseline, the schema table still defined `computer.approve`,
+  `computer.revoke`, `computer.list_state`, `computer.capture_window`,
+  `computer.ocr_region`, and `computer.observe_diff` for old phase/test
+  surfaces; none belonged to the Agent contract. The current implementation
+  has removed those unreachable schema literals.
 - `titlePart` and duplicated action-envelope normalization remain compatibility input paths beside exact application/window identity and the canonical action envelope.
 - Both `AGENT_COMPUTER_USE_*` and older `XIAOZHICLAW_*` environment aliases are accepted by driver/install resolution.
 

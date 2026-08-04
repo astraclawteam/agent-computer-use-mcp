@@ -1,4 +1,7 @@
-# Real Application Smoke Matrix
+# Withdrawn Real Application Smoke Matrix Specification
+
+Status: historical rebuild specification; not a generated artifact and not
+current release evidence.
 
 > Phase 6.2 is application harness evidence, not Agent E2E qualification.
 > Its scripted adapters may validate fixture, policy, lifecycle, and verifier
@@ -6,10 +9,11 @@
 > Every installed application remains `unqualified` until matching sealed
 > Phase 10 Agent E2E evidence exists.
 
-This file is generated only by `scripts/render-app-smoke-matrix.mjs` from a
-sealed, independently verified, full-matrix evidence directory. Filtered,
-tampered, or incomplete runs cannot update it. Until the app-lab publishes that
-evidence, no application is claimed as Commercial 1.0 coverage here.
+The former renderer and real-application runner were removed during SEA
+convergence. A future replacement must generate its matrix only from a sealed,
+independently verified, full-matrix evidence directory; filtered, tampered, or
+incomplete runs must be ineligible. No current application coverage or release
+claim may cite this file.
 
 Current local development observations remain evidence gaps, not release
 claims: Notepad and Native Lab completed real actions; Chrome exposed only its

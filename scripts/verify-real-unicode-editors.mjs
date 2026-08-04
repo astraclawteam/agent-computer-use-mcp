@@ -157,7 +157,7 @@ async function verifyOneEntry({ driver, ocr, window, editor, value, iteration, t
       y: nativePoint.y,
       value,
       textMode: "replace-all",
-      inputBehavior: "commit",
+      inputBehavior: editor.inputBehavior,
       deliveryMode: "foreground",
     });
     latestSideEffects = actionSideEffects(result);
@@ -217,7 +217,7 @@ async function verifyCancellationBoundary({ driver, ocr, window, editor, tempRoo
     y: nativePoint.y,
     value,
     textMode: "replace-all",
-    inputBehavior: "commit",
+    inputBehavior: editor.inputBehavior,
     deliveryMode: "foreground",
     signal: controller.signal,
   });
@@ -329,6 +329,7 @@ function validateConfig(config) {
         bounds,
         readbackBounds,
         values,
+        inputBehavior: editor.inputBehavior === "incremental" ? "incremental" : "commit",
         comparison: ["contains", "value-with-caret"].includes(editor.comparison)
           ? editor.comparison
           : "exact",

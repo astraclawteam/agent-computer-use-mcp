@@ -101,7 +101,7 @@ test("sendWindowsUnicodeText suspends active IME composition for non-ASCII incre
   assert.doesNotMatch(bridgeScript, /PasteUnicode\(/);
 });
 
-test("sendWindowsUnicodeText sends replace-all intent through the private stdin payload", async () => {
+test("sendWindowsUnicodeText keeps commit replace-all on the IME-neutral native transaction", async () => {
   let stdinText = "";
   let encodedBridge = "";
   const spawnProcess = (_command, args) => {
@@ -109,7 +109,7 @@ test("sendWindowsUnicodeText sends replace-all intent through the private stdin 
     return fakeChild({
     onStdin(value, child) {
       stdinText = value;
-      child.stdout.end('{"status":"ok","utf16CodeUnits":2,"clipboardRestored":true,"changeSignalDelivered":true,"focusVerified":true,"exactValueVerified":true,"readBackStatus":"available","readBackComparison":"exact","readBackUtf16CodeUnits":2,"deliveryPath":"windows_clipboard_transaction"}');
+      child.stdout.end('{"status":"ok","utf16CodeUnits":2,"clipboardRestored":true,"changeSignalDelivered":true,"focusVerified":true,"deliveryPath":"windows_sendinput_unicode_ime_neutral"}');
       child.emit("close", 0, null);
     },
     });
@@ -134,16 +134,13 @@ test("sendWindowsUnicodeText sends replace-all intent through the private stdin 
   assert.equal(payload.inputBehavior, "commit");
   assert.equal(payload.focusX, 12);
   assert.equal(payload.focusY, 16);
-  assert.equal(result.exactValueVerified, true);
-  assert.equal(result.readBackStatus, "available");
-  assert.equal(result.readBackComparison, "exact");
-  assert.equal(result.readBackUtf16CodeUnits, 2);
+  assert.equal(result.exactValueVerified, undefined);
+  assert.equal(result.deliveryPath, "windows_sendinput_unicode_ime_neutral");
   assert.ok(encodedBridge.length < 30_000, "encoded bootstrap must stay below Windows command-line limits");
   const bridgeScript = Buffer.from(envelope.scriptBase64, "base64").toString("utf8");
-  assert.doesNotMatch(bridgeScript, /read-back selection/);
-  assert.doesNotMatch(bridgeScript, /WM_COPY|EM_SETSEL|agent-computer-use-/);
-  assert.match(bridgeScript, /AutomationElement\]::FocusedElement/);
-  assert.match(bridgeScript, /containsApprovedPoint/);
+  assert.match(bridgeScript, /AgentComputerUseIncrementalInput/);
+  assert.match(bridgeScript, /KEYEVENTF_UNICODE/);
+  assert.doesNotMatch(bridgeScript, /Clipboard|AutomationElement/);
   assert.equal(Buffer.from(payload.textBase64, "base64").toString("utf8"), "张三");
 });
 
