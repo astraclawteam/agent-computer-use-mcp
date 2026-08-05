@@ -897,12 +897,75 @@ test("a fresh connector can recover a populated search role from icon and surfac
   const result = composeMessagingSceneElements({
     coordinateBounds: bounds,
     ocrElements: [decoratedQuery],
-    visualProposals: [searchSurface],
+    visualProposals: [searchSurface, {
+      ...searchSurface,
+      proposalId: "visual-search-structure",
+      role: "search-surface",
+      source: "visual-structure",
+      supportProposalId: searchSurface.proposalId,
+    }],
   });
 
   const search = result.elements.find((element) => element.role === "search");
   assert.equal(search.value, "Example-用户");
   assert.deepEqual(search.actions, ["click", "type_text"]);
+});
+
+test("legitimate Q-prefixed labels do not multiply the search authority", () => {
+  const qLabels = [{
+    ...searchOcr,
+    elementToken: "ocr-window-title",
+    proposalId: "ocr-window-title",
+    name: "QQ\u90ae\u7bb1\u63d0\u9192",
+    value: "QQ\u90ae\u7bb1\u63d0\u9192",
+    bounds: { x: 310, y: 44, width: 91, height: 19 },
+  }, {
+    ...searchOcr,
+    elementToken: "ocr-list-label",
+    proposalId: "ocr-list-label",
+    name: "QQ\u90ae\u7bb1\u63d0\u9192",
+    value: "QQ\u90ae\u7bb1\u63d0\u9192",
+    bounds: { x: 113, y: 523, width: 88, height: 18 },
+  }, {
+    ...searchOcr,
+    elementToken: "ocr-footer-label",
+    proposalId: "ocr-footer-label",
+    name: "QQ\u90ae\u7bb1(99+)",
+    value: "QQ\u90ae\u7bb1(99+)",
+    bounds: { x: 731, y: 674, width: 102, height: 22 },
+  }];
+  const result = composeMessagingSceneElements({
+    coordinateBounds: bounds,
+    ocrElements: [searchOcr, ...qLabels],
+    visualProposals: [searchSurface, {
+      proposalId: "visual-conversation-header",
+      role: "conversation-header",
+      source: "visual-structure",
+      confidence: 0.95,
+      bounds: { x: 301, y: 32, width: 650, height: 47 },
+    }, {
+      proposalId: "visual-list-row",
+      role: "region",
+      source: "som-proposal",
+      confidence: 0.94,
+      bounds: { x: 108, y: 509, width: 192, height: 43 },
+    }, {
+      proposalId: "visual-footer",
+      role: "region",
+      source: "som-proposal",
+      confidence: 0.94,
+      bounds: { x: 307, y: 661, width: 633, height: 49 },
+    }],
+  });
+
+  const searches = result.elements.filter((element) => element.role === "search");
+  assert.equal(searches.length, 1);
+  assert.deepEqual(searches[0].bounds, searchSurface.bounds);
+  assert.deepEqual(result.knownControls, [{
+    role: "search",
+    bounds: searchSurface.bounds,
+    semanticKey: "control:search",
+  }]);
 });
 
 test("ordinary words starting with Q are not interpreted as a search icon", () => {

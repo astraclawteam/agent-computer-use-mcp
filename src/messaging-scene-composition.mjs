@@ -299,7 +299,16 @@ export function composeMessagingSceneElements({
   }
 
   for (const item of ocr) {
-    if (consumedOcr.has(item) || semanticControlRole(elementText(item)) !== "search") continue;
+    if (consumedOcr.has(item)) continue;
+    const itemText = elementText(item);
+    const semanticRole = semanticControlRole(itemText);
+    const independentlyBackedDecoratedSearch = semanticRole === null
+      && isSearchIconDecoratedText(itemText)
+      && (
+        isDecoratedSearchPlaceholder(itemText)
+        || hasFreshSearchStructureEvidence(item, visual)
+      );
+    if (semanticRole !== "search" && !independentlyBackedDecoratedSearch) continue;
     const owners = visualOwnersForOcr({ ...item, bounds: semanticLabelBounds(item) }, visual);
     if (owners.length === 0) continue;
     const conflict = materiallyDifferentOwners(owners);
@@ -1051,7 +1060,6 @@ function isTargetRowGeometry(surface, listBounds, labelBounds) {
 }
 
 function semanticControlRole(value) {
-  if (isSearchIconDecoratedText(value)) return "search";
   const normalized = normalizeControlLabel(value);
   if (SEARCH_LABELS.has(normalized)) return "search";
   if (SEND_LABELS.has(normalized)) return "send";
@@ -1059,6 +1067,27 @@ function semanticControlRole(value) {
   if (!label) return null;
   const prefix = normalized.slice(0, -label.length).trim();
   return prefix.length === 1 && isOcrDecorationCharacter(prefix) ? "search" : null;
+}
+
+function hasFreshSearchStructureEvidence(element, visual) {
+  const labelBounds = semanticLabelBounds(element);
+  return visual.some((proposal) => (
+    proposal?.source === "visual-structure"
+    && proposal.role === "search-surface"
+    && isBox(proposal.bounds)
+    && contains(proposal.bounds, labelBounds)
+    && finiteConfidence(proposal.confidence, 0) >= 0.7
+  ));
+}
+
+function isDecoratedSearchPlaceholder(value) {
+  const normalized = normalizeRecognizedUiText(String(value ?? ""), {
+    languageClass: "mixed",
+  });
+  const decorationLength = leadingSearchDecorationLength(normalized);
+  if (decorationLength === 0) return false;
+  const remainder = [...normalized].slice(decorationLength).join("").trim();
+  return SEARCH_LABELS.has(normalizeControlLabel(remainder));
 }
 
 function semanticSearchValue(element) {
