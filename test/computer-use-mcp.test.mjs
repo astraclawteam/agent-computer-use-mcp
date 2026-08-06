@@ -2493,6 +2493,10 @@ test("agent-computer-use-mcp freezes the local MCP tool contract", () => {
 
   const task = COMPUTER_USE_MCP_TOOLS.find((tool) => tool.name === "computer.task");
   assert.match(task.description, /Host-owned observations/u);
+  assert.equal(task.title, "Run Native Desktop Task");
+  assert.match(task.description, /Chrome or Chromium belongs to a dedicated browser capability such as agent-browser/u);
+  assert.match(task.description, /in-app preview belongs to the Host preview_browser capability/u);
+  assert.match(task._meta["xiaozhiclaw/semanticCapability"].constraints.join("\n"), /Do not use this generic desktop surface/u);
   assert.equal(task.inputSchema.required, undefined);
   assert.deepEqual(task.inputSchema.allOf[0].anyOf, [
     { required: ["applicationName", "goal"] },

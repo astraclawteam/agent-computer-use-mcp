@@ -4,6 +4,14 @@ All notable changes to `agent-computer-use-mcp` are tracked here.
 
 ## Unreleased
 
+## 0.0.28
+
+- Clarify the public `computer.task` contract as native desktop and operating-
+  system UI automation. Chrome/Chromium web-page interaction and XiaozhiClaw's
+  in-app preview now advertise their dedicated browser capabilities as the
+  preferred semantic match, leaving Computer Use as the native-UI path and
+  browser fallback instead of a competing default.
+
 ## 0.0.27
 
 - Restore a tray application's main window before considering same-process
