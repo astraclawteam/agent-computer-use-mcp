@@ -1059,11 +1059,11 @@ const actTool = {
 
 const genericTaskTool = {
   name: "computer.task",
-  title: "Run Generic Desktop Task",
-  description: "Continue one desktop navigation or non-submitting edit task through Host-owned observations and opaque semantic candidates. Use this tool to open menus/pages, read visible state, or focus, replace-all, enter, and read back text in a proven Editable when the user did not request submission or sending; this includes drafting text in a chat-shaped editor without sending it. Start with applicationName and goal. After the Host returns taskToken, continue with only taskToken plus one candidateId, or finish with taskToken plus decision=complete, reobserve, report, or cancel; do not repeat or paraphrase applicationName or goal. Prefer Host relevance=target, then relevance=route when the target is not yet visible; select relevance=context only when no target or route candidate fits the goal. Each invocation performs at most one freshly revalidated navigation or edit action and releases before returning. Navigation requires a newer Scene transition; edit requires exact-value read-back. Submit, send, contact search, conversation selection, and send controls are never exposed here. Use computer.message only when the user supplied a recipient/conversation, exact content, and requested that it be sent. Never use shell commands, guessed coordinates, element ids, OCR-region assignment, or lifecycle tools for a GUI task.",
+  title: "Run Native Desktop Task",
+  description: "Continue one native desktop application or operating-system UI navigation or non-submitting edit task through Host-owned observations and opaque semantic candidates. Use this tool for visible native controls when a browser-native capability cannot complete the task. Web-page interaction in Chrome or Chromium belongs to a dedicated browser capability such as agent-browser when available; XiaozhiClaw's in-app preview belongs to the Host preview_browser capability when available. Start with applicationName and goal. After the Host returns taskToken, continue with only taskToken plus one candidateId, or finish with taskToken plus decision=complete, reobserve, report, or cancel; do not repeat or paraphrase applicationName or goal. Prefer Host relevance=target, then relevance=route when the target is not yet visible; select relevance=context only when no target or route candidate fits the goal. Each invocation performs at most one freshly revalidated navigation or edit action and releases before returning. Navigation requires a newer Scene transition; edit requires exact-value read-back. Submit, send, contact search, conversation selection, and send controls are never exposed here. Use computer.message only when the user supplied a recipient/conversation, exact content, and requested that it be sent. Never use shell commands, guessed coordinates, element ids, OCR-region assignment, or lifecycle tools for a GUI task.",
   _meta: {
     ...semanticCapabilityMeta({
-      summary: "Advance a desktop navigation or non-submitting exact edit one Host-grounded action at a time without exposing coordinates or controller lifecycle decisions.",
+      summary: "Advance native desktop or operating-system UI navigation and non-submitting exact edits one Host-grounded action at a time; browser-native web pages and the Host in-app preview use their dedicated capabilities when available.",
       scenarios: [
         "Open a native application's settings and navigate to a requested page.",
         "Select a visible command, tab, or menu item.",
@@ -1073,11 +1073,13 @@ const genericTaskTool = {
       prerequisites: [
         "The user requested navigation, visible-state inspection, or text editing without submit/send.",
         "The target application is running or recoverable in the Host application inventory.",
+        "A dedicated browser-native or Host in-app preview capability is unavailable or cannot complete the requested interaction.",
       ],
       effects: ["May perform one freshly revalidated visible interface action per invocation."],
       modalities: ["local desktop GUI", "Host Scene", "semantic candidate selection"],
       constraints: [
         "Select only opaque candidates returned by the Host for the current task token.",
+        "Do not use this generic desktop surface for Chrome or Chromium web-page DOM interaction when a browser-native capability is available, or for XiaozhiClaw's in-app preview when Host preview_browser is available.",
         "Never call shell, SendKeys, lifecycle tools, or coordinate actions as a fallback.",
         "Never expose submit/send controls or use this path to choose a recipient, open a conversation for sending, or send content.",
       ],

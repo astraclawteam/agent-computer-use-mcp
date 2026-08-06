@@ -47,7 +47,7 @@ The Agent sees two task-level tools:
 
 | Tool | Purpose |
 | --- | --- |
-| `computer.task` | Navigate or perform a non-submitting exact edit through Host-owned observations and opaque semantic candidates; every invocation releases control before returning. |
+| `computer.task` | Navigate native desktop or operating-system UI, or perform a non-submitting exact edit, through Host-owned observations and opaque semantic candidates; browser-native web pages and Host in-app previews use their dedicated capabilities when available. |
 | `computer.message` | Send exact content to an explicit contact or conversation through the Host-owned deterministic messaging state machine. |
 
 The lifecycle tools (`computer.acquire`, `computer.observe`, `computer.act`,
@@ -119,6 +119,12 @@ falling back.
   may expose its proven editor only as a non-submitting `edit` candidate while
   hiding send controls, conversation targets, transcript, and descendants.
   Only an explicit recipient-plus-send request uses `computer.message`.
+- **Browser-native work keeps its native path.** Chrome or Chromium web-page
+  interaction belongs to a dedicated browser capability such as `agent-browser`
+  when the Host provides one, and XiaozhiClaw's in-app preview belongs to
+  `preview_browser`. Computer Use remains the visible native-desktop and
+  operating-system UI path, plus the fallback when a browser-native path cannot
+  complete the interaction.
 - **No hidden self-update.** Startup is offline. Installation, upgrade,
   downgrade, and rollback are explicit Host or operator actions.
 
