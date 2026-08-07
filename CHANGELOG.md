@@ -4,6 +4,16 @@ All notable changes to `agent-computer-use-mcp` are tracked here.
 
 ## Unreleased
 
+## 0.0.29
+
+- Remove the remaining private `computer.request_access` and
+  `computer.cancel` schema-name override path. The public Agent and Host tool
+  surfaces remain unchanged, while `computer.acquire` and `computer.release`
+  now reference canonical same-name schemas directly.
+- Pin patched transitive releases of `fast-uri`, `hono`, `ip-address`,
+  `brace-expansion`, and `undici` across the runtime and build dependency
+  closure.
+
 ## 0.0.28
 
 - Clarify the public `computer.task` contract as native desktop and operating-
