@@ -1,6 +1,6 @@
 {
   "name": "agent-computer-use-mcp",
-  "version": "0.0.28",
+  "version": "0.0.29",
   "description": "Evidence-driven Windows Computer Use for MCP Hosts: semantic observation, local OCR, secure screenshots, Unicode actions, and verified cleanup.",
   "private": true,
   "license": "MIT",
@@ -132,7 +132,12 @@
     "yaml": "2.9.0"
   },
   "overrides": {
-    "adm-zip": "0.6.0"
+    "adm-zip": "0.6.0",
+    "brace-expansion": "1.1.18",
+    "fast-uri": "3.1.5",
+    "hono": "4.12.34",
+    "ip-address": "10.4.0",
+    "undici": "6.28.0"
   },
   "packageManager": "npm@11.6.2"
 }
