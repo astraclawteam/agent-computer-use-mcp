@@ -533,6 +533,7 @@ test("CuaDriverMcpDriver never treats z-order as foreground confirmation", async
   const calls = [];
   const driver = new CuaDriverMcpDriver({
     session: "activate-window-failure-session",
+    foregroundWindowProbe: async () => "0x303a4",
     foregroundWindowActivator: async (args) => {
       calls.push({ name: "foregroundWindowActivator", args });
       return {
@@ -576,6 +577,7 @@ test("CuaDriverMcpDriver uses the bounded Windows bridge after the driver cannot
   const calls = [];
   const driver = new CuaDriverMcpDriver({
     session: "activate-window-fallback-session",
+    foregroundWindowProbe: async () => "0x303a4",
     foregroundWindowActivator: async (args) => {
       calls.push({ name: "foregroundWindowActivator", args });
       return {

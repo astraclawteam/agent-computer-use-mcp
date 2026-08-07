@@ -4,6 +4,13 @@ All notable changes to `agent-computer-use-mcp` are tracked here.
 
 ## Unreleased
 
+## 0.0.31
+
+- Keep the foreground-confirmation contract deterministic in Windows CI by
+  injecting the foreground probe in its unit tests. Production continues to
+  require a fresh native foreground-window fact and never treats z-order as
+  confirmation.
+
 ## 0.0.30
 
 - Restore a requested application's owned main window through one deterministic
