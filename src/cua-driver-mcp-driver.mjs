@@ -10,6 +10,7 @@ import { activateWindowsForeground } from "./windows-foreground-activation.mjs";
 import { queryWindowsForegroundWindowId } from "./windows-foreground-probe.mjs";
 import { queryWindowsProcessApplications } from "./windows-process-application-probe.mjs";
 import { activateWindowsTrayApplication } from "./windows-tray-application-activation.mjs";
+import { queryWindowsApplicationWindows } from "./windows-application-window-probe.mjs";
 import { queryWindowsDesktopSession } from "./windows-desktop-session-probe.mjs";
 import { queryWindowsWindowRelationships } from "./windows-window-relationship-probe.mjs";
 import { captureWindowPngById } from "./real-window-capture.mjs";
@@ -20,6 +21,9 @@ const DEFAULT_DRIVER_PATH = `${RUNTIME_ENV.LOCALAPPDATA}\\Programs\\Cua\\cua-dri
 const DEFAULT_SCREENSHOT_TIMEOUT_MS = 8_000;
 const RELATED_SURFACE_RELEASE_SETTLE_MS = 200;
 const TEXT_REFOCUS_SETTLE_MS = 75;
+const APPLICATION_RESTORE_POLL_ATTEMPTS = 8;
+const APPLICATION_RESTORE_POLL_MS = 250;
+const APPLICATION_RESTORE_STABLE_FRAMES = 2;
 
 export class CuaDriverMcpDriver {
   constructor(options = {}) {
@@ -33,6 +37,7 @@ export class CuaDriverMcpDriver {
     this.foregroundWindowProbe = options.foregroundWindowProbe ?? queryWindowsForegroundWindowId;
     this.processApplicationProbe = options.processApplicationProbe ?? queryWindowsProcessApplications;
     this.trayApplicationActivator = options.trayApplicationActivator ?? activateWindowsTrayApplication;
+    this.applicationWindowProbe = options.applicationWindowProbe ?? queryWindowsApplicationWindows;
     this.windowRelationshipProbe = options.windowRelationshipProbe
       ?? queryWindowsWindowRelationships;
     this.mainWindowCapture = options.mainWindowCapture === false
@@ -213,6 +218,8 @@ export class CuaDriverMcpDriver {
       const primaryProcessIds = new Set(normalizeProcessIds(processIds, pid));
       const candidateProcessIds = new Set(primaryProcessIds);
       const trustedOwnerProcessIds = new Set(normalizeProcessIds(ownerProcessIds));
+      let hiddenWindowActivation = { status: "not-attempted" };
+      let trayActivation = { status: "not-attempted" };
       for (const ownerPid of trustedOwnerProcessIds) candidateProcessIds.add(ownerPid);
       if (running === true && candidateProcessIds.size > 0) {
         const existingWindows = (await this.listWindowsResources(ticket, {
@@ -278,41 +285,43 @@ export class CuaDriverMcpDriver {
             };
           }
         }
-        const trayActivation = await this.trayApplicationActivator({ name });
+        hiddenWindowActivation = await this.restoreHiddenApplicationWindow(ticket, {
+          candidateProcessIds,
+          primaryProcessIds,
+          name,
+        });
+        if (hiddenWindowActivation.status === "invoked") {
+          const restored = await this.awaitStableRestoredApplicationWindow(ticket, {
+            candidateProcessIds,
+            initialIdentityWindows: identityMatchedWindows,
+            name,
+            preferredWindowId: hiddenWindowActivation.windowId,
+          });
+          if (restored) {
+            return {
+              status: "restored",
+              method: "hidden-process-window",
+              pid: restored.window.pid,
+              name,
+              windows: restored.windows,
+            };
+          }
+        }
+        trayActivation = await this.trayApplicationActivator({ name });
         this.assertWorkTicket(ticket);
         if (trayActivation?.status === "invoked") {
-          let restoredWindow = null;
-          let applicationWindows = [];
-          for (let attempt = 0; restoredWindow === null && attempt < 8; attempt += 1) {
-            await new Promise((resolve) => setTimeout(resolve, 250));
-            this.assertWorkTicket(ticket);
-            applicationWindows = (await this.listWindowsResources(ticket, {
-              onScreenOnly: false,
-              includeForeground: false,
-            }))
-              .filter((window) => candidateProcessIds.has(window.pid))
-              .filter((window) => matchesApplicationWindowIdentity(window, { name }))
-              .sort((left, right) => compareApplicationWindowControllability(
-                left,
-                right,
-                { name },
-              ));
-            restoredWindow = applicationWindows.find((window) => (
-              isMateriallyRestoredApplicationWindow(window, identityMatchedWindows)
-            )) ?? null;
-          }
-          if (restoredWindow) {
+          const restored = await this.awaitStableRestoredApplicationWindow(ticket, {
+            candidateProcessIds,
+            initialIdentityWindows: identityMatchedWindows,
+            name,
+          });
+          if (restored) {
             return {
               status: "restored",
               method: "tray-accessibility-invoke",
-              pid: restoredWindow.pid,
+              pid: restored.window.pid,
               name,
-              windows: [
-                restoredWindow,
-                ...applicationWindows.filter((window) => (
-                  !sameNativeWindowId(window.windowId, restoredWindow.windowId)
-                )),
-              ],
+              windows: restored.windows,
             };
           }
         }
@@ -338,6 +347,11 @@ export class CuaDriverMcpDriver {
           pid: Number.isInteger(pid) && pid > 0 ? pid : 0,
           name: name ?? null,
           windows: [],
+          restoration: {
+            hiddenProcessWindow: hiddenWindowActivation.status,
+            tray: trayActivation?.status ?? "unavailable",
+            stableWindow: false,
+          },
         };
       }
       const result = await this.client.callTool("launch_app", {
@@ -365,6 +379,83 @@ export class CuaDriverMcpDriver {
         windows,
       };
     });
+  }
+
+  async restoreHiddenApplicationWindow(ticket, { candidateProcessIds, primaryProcessIds, name }) {
+    let candidates;
+    try {
+      candidates = await this.applicationWindowProbe({ processIds: [...candidateProcessIds] });
+      this.assertWorkTicket(ticket);
+    } catch {
+      this.assertWorkTicket(ticket);
+      return { status: "unavailable" };
+    }
+    const selected = selectRecoverableProcessWindow(candidates, { name, primaryProcessIds });
+    if (!selected) return { status: candidates.length > 0 ? "ambiguous" : "not-found" };
+    try {
+      const activation = await this.foregroundWindowActivator({
+        windowId: selected.windowId,
+        processId: selected.pid,
+      });
+      this.assertWorkTicket(ticket);
+      return activation?.landed_on_target === true
+        && sameNativeWindowId(activation.now_fg_hwnd, selected.windowId)
+        ? { status: "invoked", windowId: selected.windowId, processId: selected.pid }
+        : { status: "indeterminate" };
+    } catch {
+      this.assertWorkTicket(ticket);
+      return { status: "failed" };
+    }
+  }
+
+  async awaitStableRestoredApplicationWindow(ticket, {
+    candidateProcessIds,
+    initialIdentityWindows,
+    name,
+    preferredWindowId,
+  }) {
+    let previousWindowId = null;
+    let stableFrames = 0;
+    for (let attempt = 0; attempt < APPLICATION_RESTORE_POLL_ATTEMPTS; attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, APPLICATION_RESTORE_POLL_MS));
+      this.assertWorkTicket(ticket);
+      const applicationWindows = (await this.listWindowsResources(ticket, {
+        onScreenOnly: false,
+        includeForeground: true,
+      }))
+        .filter((window) => candidateProcessIds.has(window.pid))
+        .sort((left, right) => compareApplicationWindowControllability(left, right, { name }));
+      const window = selectStableApplicationWindow(applicationWindows, {
+        initialIdentityWindows,
+        name,
+        preferredWindowId,
+      });
+      if (!window) {
+        previousWindowId = null;
+        stableFrames = 0;
+        continue;
+      }
+      if (sameNativeWindowId(previousWindowId, window.windowId)) stableFrames += 1;
+      else {
+        previousWindowId = window.windowId;
+        stableFrames = 1;
+      }
+      if (stableFrames < APPLICATION_RESTORE_STABLE_FRAMES) continue;
+      const activation = window.isForeground === true
+        ? { verified: true, foregroundWindow: window }
+        : await this.activateWindowResources(ticket, window);
+      if (activation?.verified !== true || !activation.foregroundWindow) continue;
+      return {
+        window: activation.foregroundWindow,
+        windows: [
+          activation.foregroundWindow,
+          ...applicationWindows.filter((candidate) => (
+            !sameNativeWindowId(candidate.windowId, activation.foregroundWindow.windowId)
+          )),
+        ],
+      };
+    }
+    return null;
   }
 
   async awaitWindowRelationships(ticket, windows, options = {}) {
@@ -2078,6 +2169,61 @@ function matchesApplicationWindowIdentity(window, { name } = {}) {
   return title === expectedName || title.includes(expectedName);
 }
 
+function selectRecoverableProcessWindow(candidates, { name, primaryProcessIds } = {}) {
+  const primary = primaryProcessIds instanceof Set ? primaryProcessIds : new Set(primaryProcessIds ?? []);
+  const eligible = (Array.isArray(candidates) ? candidates : [])
+    .filter((candidate) => (
+      Number.isSafeInteger(candidate?.windowId)
+      && candidate.windowId > 0
+      && Number.isSafeInteger(candidate?.pid)
+      && candidate.pid > 0
+      && candidate.enabled === true
+      && candidate.toolWindow !== true
+      && candidate.cloaked !== true
+      && candidate.ownerWindowId === 0
+      && (candidate.visible !== true || candidate.minimized === true)
+      && isRecoverableApplicationSurface(candidate)
+    ));
+  const identityMatched = eligible.filter((candidate) => matchesApplicationWindowIdentity(candidate, { name }));
+  const pool = identityMatched.length > 0
+    ? identityMatched
+    : eligible.filter((candidate) => primary.size === 0 || primary.has(candidate.pid));
+  if (pool.length === 0) return null;
+  pool.sort((left, right) => {
+    const primaryDifference = Number(primary.has(right.pid)) - Number(primary.has(left.pid));
+    if (primaryDifference !== 0) return primaryDifference;
+    const visibleDifference = Number(right.visible === true) - Number(left.visible === true);
+    if (visibleDifference !== 0) return visibleDifference;
+    return boundedWindowArea(right) - boundedWindowArea(left);
+  });
+  if (identityMatched.length > 0 || pool.length === 1) return pool[0];
+  return boundedWindowArea(pool[0]) >= boundedWindowArea(pool[1]) * 1.5 ? pool[0] : null;
+}
+
+function selectStableApplicationWindow(applicationWindows, {
+  initialIdentityWindows = [],
+  name,
+  preferredWindowId,
+} = {}) {
+  const materiallyRestored = applicationWindows.filter((window) => (
+    window.isOnScreen === true
+    && isRecoverableApplicationSurface(window)
+    && isMateriallyRestoredApplicationWindow(window, initialIdentityWindows)
+  ));
+  if (preferredWindowId !== undefined) {
+    const preferred = materiallyRestored.find((window) => (
+      sameNativeWindowId(window.windowId, preferredWindowId)
+    ));
+    if (preferred) return preferred;
+  }
+  const identityMatched = materiallyRestored.filter((window) => (
+    matchesApplicationWindowIdentity(window, { name })
+  ));
+  if (identityMatched.length > 0) return identityMatched[0];
+  const primarySurfaces = materiallyRestored.filter(isPrimaryApplicationSurface);
+  return primarySurfaces.length === 1 ? primarySurfaces[0] : null;
+}
+
 function normalizeApplicationIdentity(value) {
   return String(value ?? "").normalize("NFKC").trim().toLocaleLowerCase();
 }
@@ -2089,6 +2235,20 @@ function boundedWindowArea(window) {
     && Number.isFinite(height) && height > 0
     ? width * height
     : 0;
+}
+
+function isPrimaryApplicationSurface(window) {
+  const width = Number(window?.bounds?.width);
+  const height = Number(window?.bounds?.height);
+  return Number.isFinite(width) && width >= 480
+    && Number.isFinite(height) && height >= 320;
+}
+
+function isRecoverableApplicationSurface(window) {
+  const width = Number(window?.bounds?.width);
+  const height = Number(window?.bounds?.height);
+  return Number.isFinite(width) && width >= 160
+    && Number.isFinite(height) && height >= 120;
 }
 
 function shouldDeferCompactApplicationWindow(window, applicationWindows) {

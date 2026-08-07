@@ -640,6 +640,7 @@ export class ComputerUseProviderRouter {
     const grant = this.beginControlGrant();
     try {
       let window;
+      let applicationLaunch = null;
       try {
         if (hasApplicationToken) {
           const application = this.applicationCatalog.get(args.applicationToken);
@@ -672,7 +673,7 @@ export class ComputerUseProviderRouter {
             }
             [window] = foregroundWindows;
           } else {
-            const launch = await this.awaitExternal(
+            applicationLaunch = await this.awaitExternal(
               ticket,
               () => this.driver.launchApp({
                 launchPath: application.launchPath,
@@ -687,12 +688,16 @@ export class ComputerUseProviderRouter {
                 running: application.running,
               }),
             );
-            window = launch.windows?.[0];
+            window = applicationLaunch.windows?.[0];
           }
           if (!window) {
-            fail("window.not_found", "The application was activated but no controllable window appeared.", {
-              retryable: true,
-              nextTool: "computer.observe",
+            fail("window.not_found", "The Host could not restore one stable controllable application window.", {
+              retryable: false,
+              stage: "restore-main-window",
+              lifecycleOwner: "host",
+              ...(applicationLaunch?.restoration
+                ? { restoration: applicationLaunch.restoration }
+                : {}),
             });
           }
         } else {
@@ -708,6 +713,13 @@ export class ComputerUseProviderRouter {
       } catch (error) {
         this.assertOperationTicket(ticket);
         if (error?.code === "window.not_found" || String(error?.message ?? "").startsWith("window.not_found")) {
+          if (error?.detail?.stage === "restore-main-window") {
+            fail(
+              "window.not_found",
+              error.message,
+              error.detail,
+            );
+          }
           fail(
             "window.not_found",
             "No visible window matched the requested selector.",

@@ -1959,11 +1959,88 @@ test("CuaDriverMcpDriver prefers the identity-matched main window and independen
   assert.equal(calls.some(({ name }) => name === "launch_app"), false);
 });
 
+test("CuaDriverMcpDriver restores a hidden process window and rebinds a replacement HWND before control", async () => {
+  const calls = [];
+  let windowPolls = 0;
+  let foregroundWindowId = "999";
+  let trayInvoked = false;
+  const driver = new CuaDriverMcpDriver({
+    session: "hidden-process-window-session",
+    applicationWindowProbe: async ({ processIds }) => {
+      assert.deepEqual(processIds, [505]);
+      return [{
+        windowId: 91,
+        pid: 505,
+        title: "",
+        ownerWindowId: 0,
+        visible: false,
+        enabled: true,
+        toolWindow: false,
+        cloaked: false,
+        bounds: { x: -32000, y: -32000, width: 320, height: 240 },
+      }];
+    },
+    foregroundWindowActivator: async ({ windowId, processId }) => {
+      assert.equal(windowId, 91);
+      assert.equal(processId, 505);
+      foregroundWindowId = "91";
+      return { landed_on_target: true, now_fg_hwnd: "91", target_hwnd: "91" };
+    },
+    foregroundWindowProbe: async () => foregroundWindowId,
+    trayApplicationActivator: async () => {
+      trayInvoked = true;
+      return { status: "invoked" };
+    },
+    client: {
+      async start() {},
+      async callTool(name, args) {
+        calls.push({ name, args });
+        if (name === "list_windows") {
+          windowPolls += 1;
+          if (windowPolls === 1) return { windows: [] };
+          const windowId = windowPolls === 2 ? 91 : 92;
+          foregroundWindowId = String(windowId);
+          return {
+            windows: [{
+              window_id: windowId,
+              title: "Tray App",
+              app_name: "tray-app.exe",
+              pid: 505,
+              is_on_screen: true,
+              bounds: { x: 20, y: 30, width: 320, height: 240 },
+              z_index: 1,
+            }],
+          };
+        }
+        if (name === "launch_app") throw new Error("must not launch a running application");
+        return { status: "ok" };
+      },
+    },
+  });
+
+  const result = await driver.launchApp({
+    launchPath: "C:\\Program Files\\Tray App\\tray-app.exe",
+    name: "Tray App",
+    pid: 505,
+    running: true,
+  });
+
+  assert.equal(result.status, "restored");
+  assert.equal(result.method, "hidden-process-window");
+  assert.equal(result.windows[0].windowId, 92);
+  assert.equal(result.windows[0].isForeground, true);
+  assert.equal(windowPolls, 4);
+  assert.equal(trayInvoked, false);
+  assert.equal(calls.some(({ name }) => name === "launch_app"), false);
+});
+
 test("CuaDriverMcpDriver restores a tray-only process by exact application identity before launching", async () => {
   const calls = [];
   let windowPolls = 0;
   const driver = new CuaDriverMcpDriver({
     session: "tray-identity-restore-session",
+    applicationWindowProbe: async () => [],
+    foregroundWindowProbe: async () => "88",
     trayApplicationActivator: async ({ name }) => {
       assert.equal(name, "Tray App");
       return { status: "invoked" };
@@ -2013,6 +2090,7 @@ test("CuaDriverMcpDriver never launches a second instance when a running tray pr
   const calls = [];
   const driver = new CuaDriverMcpDriver({
     session: "tray-restore-failed-session",
+    applicationWindowProbe: async () => [],
     trayApplicationActivator: async ({ name }) => {
       assert.equal(name, "Tray App");
       return { status: "not-found" };
@@ -2041,6 +2119,11 @@ test("CuaDriverMcpDriver never launches a second instance when a running tray pr
     pid: 505,
     name: "Tray App",
     windows: [],
+    restoration: {
+      hiddenProcessWindow: "not-found",
+      tray: "not-found",
+      stableWindow: false,
+    },
   });
   assert.equal(calls.some(({ name }) => name === "launch_app"), false);
 });
@@ -2050,6 +2133,8 @@ test("CuaDriverMcpDriver ignores an open auxiliary window until tray restoration
   let trayInvoked = false;
   const driver = new CuaDriverMcpDriver({
     session: "tray-main-window-session",
+    applicationWindowProbe: async () => [],
+    foregroundWindowProbe: async () => trayInvoked ? "91" : "999",
     trayApplicationActivator: async ({ name }) => {
       assert.equal(name, "Tray App");
       trayInvoked = true;
@@ -2109,6 +2194,8 @@ test("CuaDriverMcpDriver does not promote a same-process auxiliary through a dup
   let trayInvoked = false;
   const driver = new CuaDriverMcpDriver({
     session: "tray-duplicate-owner-pid-session",
+    applicationWindowProbe: async () => [],
+    foregroundWindowProbe: async () => trayInvoked ? "91" : "999",
     trayApplicationActivator: async ({ name }) => {
       assert.equal(name, "Tray App");
       trayInvoked = true;
@@ -2247,6 +2334,10 @@ test("CuaDriverMcpDriver restores the primary window before accepting a same-tit
   let windowPollsAfterTray = 0;
   const driver = new CuaDriverMcpDriver({
     session: "tray-compact-launcher-session",
+    applicationWindowProbe: async () => [],
+    foregroundWindowProbe: async () => (
+      trayInvoked && windowPollsAfterTray >= 2 ? "94" : "999"
+    ),
     trayApplicationActivator: async ({ name }) => {
       assert.equal(name, "Target App");
       trayInvoked = true;
@@ -2309,7 +2400,7 @@ test("CuaDriverMcpDriver restores the primary window before accepting a same-tit
   assert.equal(result.status, "restored");
   assert.equal(result.method, "tray-accessibility-invoke");
   assert.equal(result.windows[0].windowId, 94);
-  assert.equal(windowPollsAfterTray, 2);
+  assert.equal(windowPollsAfterTray, 3);
   assert.equal(calls.some(({ name }) => name === "bring_to_front"), false);
   assert.equal(calls.some(({ name }) => name === "launch_app"), false);
 });

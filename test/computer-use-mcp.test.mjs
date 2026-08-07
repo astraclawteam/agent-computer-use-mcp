@@ -3342,6 +3342,63 @@ test("state observation projects opaque application tokens that acquire can use 
   }]);
 });
 
+test("application restore failure remains one Host-owned non-replayable acquisition result", async () => {
+  const { ComputerUseProviderRouter } = await import("../src/computer-use-provider-router.mjs");
+  const router = new ComputerUseProviderRouter({
+    driver: {
+      async listWindows() {
+        return [];
+      },
+      async listApps() {
+        return [{
+          name: "Recoverable App",
+          kind: "desktop",
+          running: true,
+          active: false,
+          pid: 101,
+          launchPath: "C:\\private\\recoverable.exe",
+        }];
+      },
+      async launchApp() {
+        return {
+          status: "not-applied",
+          reason: "running-application-window-unavailable",
+          windows: [],
+          restoration: {
+            hiddenProcessWindow: "not-found",
+            tray: "not-found",
+            stableWindow: false,
+          },
+        };
+      },
+    },
+  });
+  const state = await router.listState();
+
+  await assert.rejects(
+    () => router.requestAccess({
+      applicationToken: state.applications[0].applicationToken,
+      tier: "full",
+    }),
+    (error) => {
+      assert.equal(error.code, "window.not_found");
+      assert.equal(error.message, "The Host could not restore one stable controllable application window.");
+      assert.equal(error.detail.retryable, false);
+      assert.equal(error.detail.stage, "restore-main-window");
+      assert.equal(error.detail.lifecycleOwner, "host");
+      assert.deepEqual(error.detail.restoration, {
+        hiddenProcessWindow: "not-found",
+        tray: "not-found",
+        stableWindow: false,
+      });
+      return true;
+    },
+  );
+  const after = await router.listState();
+  assert.equal(after.status, "idle");
+  assert.equal(after.activeController, null);
+});
+
 test("same-Agent acquire retries reuse or retarget the lease and active observations renew its idle timeout", async () => {
   const { ComputerUseProviderRouter } = await import("../src/computer-use-provider-router.mjs");
   let now = 1_000;
