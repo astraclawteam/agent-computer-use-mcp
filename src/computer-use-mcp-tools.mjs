@@ -171,7 +171,7 @@ function withErrorEnvelopeStatus(properties) {
   };
 }
 
-const TOOL_SCHEMA_TEMPLATES = [
+const COMPUTER_USE_TOOL_SCHEMAS = [
   {
     name: "computer.health",
     title: "Computer Use Health",
@@ -332,8 +332,8 @@ const TOOL_SCHEMA_TEMPLATES = [
     }, ["phase", "manifest", "clientConfig"]),
   },
   {
-    name: "computer.request_access",
-    title: "Request Computer Access",
+    name: "computer.acquire",
+    title: "Acquire Computer Access",
     description: "Acquire a Gateway-managed controller lease from trusted discovery evidence and return an initial semantic observation when available. When the user refers to an application, call computer.observe mode=\"state\" first and pass its applicationToken even if auxiliary windows are already listed; the Host will restore and select the primary application window. Use target=\"foreground\" only when the user explicitly means the current OS foreground window. Use windowId only for the exact window returned by the immediately preceding state observation. Never infer, guess, or synthesize a window title.",
     annotations: { phase: "1.3", destructiveHint: false },
     inputSchema: {
@@ -611,9 +611,9 @@ const TOOL_SCHEMA_TEMPLATES = [
     }, ["status", "provider", "action", "result", "pixelLimitedAction", "outcome", "execution"]),
   },
   {
-    name: "computer.cancel",
-    title: "Cancel Computer Use",
-    description: "Cancel the active Gateway-managed controller lease.",
+    name: "computer.release",
+    title: "Release Computer Access",
+    description: "Release the active Gateway-managed controller lease.",
     annotations: { phase: "1.3", destructiveHint: false },
     inputSchema: {
       type: "object",
@@ -628,8 +628,8 @@ const TOOL_SCHEMA_TEMPLATES = [
   },
 ];
 
-const toolSchemaTemplate = (name) => {
-  const tool = TOOL_SCHEMA_TEMPLATES.find((candidate) => candidate.name === name);
+const schemaByName = (name) => {
+  const tool = COMPUTER_USE_TOOL_SCHEMAS.find((candidate) => candidate.name === name);
   if (!tool) throw new Error(`Missing Computer Use schema: ${name}`);
   return tool;
 };
@@ -777,7 +777,7 @@ const GENERIC_TASK_EXECUTION_CONTROL_SCHEMA = {
 
 export const COMPUTER_USE_HOST_TOOLS = Object.freeze(
   ["computer.health", "computer.doctor", "computer.installation", "computer.repair"].map((name) =>
-    Object.freeze({ ...toolSchemaTemplate(name), _meta: HOST_MANAGEMENT_META })),
+    Object.freeze({ ...schemaByName(name), _meta: HOST_MANAGEMENT_META })),
 );
 
 const semanticCapabilityMeta = ({
@@ -801,8 +801,7 @@ const semanticCapabilityMeta = ({
 });
 
 const acquireTool = {
-  ...toolSchemaTemplate("computer.request_access"),
-  name: "computer.acquire",
+  ...schemaByName("computer.acquire"),
   title: "Acquire Computer Access",
   description: "Acquire a lease and initial evidence for a generic non-messaging desktop task. Never use this tool for a request to find a contact, open a conversation, or send a message; call computer.message directly so the Host owns the entire messaging lifecycle. For other tasks, pass applicationName for an exact Host resolution, or use a fresh observed applicationToken.",
   _meta: Object.freeze({
@@ -1011,8 +1010,7 @@ const observeTool = {
 };
 
 const releaseTool = {
-  ...toolSchemaTemplate("computer.cancel"),
-  name: "computer.release",
+  ...schemaByName("computer.release"),
   title: "Release Computer Access",
   description: "Release a generic non-messaging controller lease or pending access request. Do not use this tool around computer.message; the Host-owned messaging workflow releases itself on every terminal path.",
   _meta: Object.freeze({
@@ -1033,7 +1031,7 @@ const releaseTool = {
 };
 
 const actTool = {
-  ...toolSchemaTemplate("computer.act"),
+  ...schemaByName("computer.act"),
   description: "For generic non-messaging tasks only; never search contacts, select conversations, enter chat text, or send messages here—use computer.message. Act once on an actionable element from the latest versioned Host Scene. OCR-only or conflicting evidence cannot authorize an action. The result outcome is exactly committed, not-applied, or indeterminate; never replay an indeterminate mutation.",
   _meta: Object.freeze({
     ...semanticCapabilityMeta({
