@@ -4,6 +4,14 @@ All notable changes to `agent-computer-use-mcp` are tracked here.
 
 ## Unreleased
 
+## 0.0.30
+
+- Restore a requested application's owned main window through one deterministic
+  Host path before Scene composition. Minimized, hidden, cloaked, and tray-owned
+  windows are resolved from fresh native window evidence, while ambiguous
+  ownership still fails closed instead of exposing duplicate search fields or
+  guessing a target window.
+
 ## 0.0.29
 
 - Remove the remaining private `computer.request_access` and
