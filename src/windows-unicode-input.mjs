@@ -15,16 +15,22 @@ Invoke-Expression $script
 const WINDOWS_INCREMENTAL_INPUT_SCRIPT = String.raw`
 $ErrorActionPreference = "Stop"
 
+Add-Type -AssemblyName System.Windows.Forms
 Add-Type -TypeDefinition @'
 using System;
 using System.Runtime.InteropServices;
 using System.Threading;
+using System.Windows.Forms;
 
 public static class AgentComputerUseIncrementalInput
 {
     private const uint INPUT_KEYBOARD = 1;
     private const uint KEYEVENTF_KEYUP = 0x0002;
     private const uint KEYEVENTF_UNICODE = 0x0004;
+    private const byte VK_CONTROL = 0x11;
+    private const byte VK_A = 0x41;
+    private const byte VK_BACK = 0x08;
+    private const byte VK_SPACE = 0x20;
 
     [StructLayout(LayoutKind.Sequential)]
     private struct INPUT
@@ -90,25 +96,18 @@ public static class AgentComputerUseIncrementalInput
     private static extern uint SendInput(uint inputCount, INPUT[] inputs, int inputSize);
 	[DllImport("imm32.dll")]
 	private static extern IntPtr ImmAssociateContext(IntPtr window, IntPtr inputContext);
+    [DllImport("ole32.dll")]
+    private static extern int OleGetClipboard(
+        out System.Runtime.InteropServices.ComTypes.IDataObject dataObject
+    );
+    [DllImport("ole32.dll")]
+    private static extern int OleSetClipboard(
+        System.Runtime.InteropServices.ComTypes.IDataObject dataObject
+    );
 
     public static int Send(string text, long expectedWindow, uint expectedProcess, bool replaceAll)
     {
-        IntPtr foreground = GetForegroundWindow();
-        uint foregroundProcess;
-        uint foregroundThread = GetWindowThreadProcessId(foreground, out foregroundProcess);
-        if (foreground != new IntPtr(expectedWindow))
-            throw new InvalidOperationException("The approved target window is not foreground.");
-
-        GUITHREADINFO info = new GUITHREADINFO();
-        info.cbSize = Marshal.SizeOf(typeof(GUITHREADINFO));
-        if (!GetGUIThreadInfo(foregroundThread, ref info) || info.hwndFocus == IntPtr.Zero)
-            throw new InvalidOperationException("The approved target has no verified focused window.");
-        uint focusProcess;
-        GetWindowThreadProcessId(info.hwndFocus, out focusProcess);
-        if (focusProcess != expectedProcess)
-            throw new InvalidOperationException("The focused window does not belong to the approved target process.");
-
-        IntPtr focusedWindow = info.hwndFocus;
+        IntPtr focusedWindow = VerifyFocusedWindow(expectedWindow, expectedProcess);
         IntPtr previousInputContext = ImmAssociateContext(focusedWindow, IntPtr.Zero);
         try
         {
@@ -132,6 +131,75 @@ public static class AgentComputerUseIncrementalInput
                 ImmAssociateContext(focusedWindow, previousInputContext);
         }
         return text.Length;
+    }
+
+    public static int PasteWholeValue(
+        string text,
+        long expectedWindow,
+        uint expectedProcess,
+        bool replaceAll
+    )
+    {
+        VerifyFocusedWindow(expectedWindow, expectedProcess);
+        System.Runtime.InteropServices.ComTypes.IDataObject originalClipboard;
+        if (OleGetClipboard(out originalClipboard) != 0)
+            throw new InvalidOperationException("The Windows clipboard could not be snapshotted.");
+        bool hadOriginalClipboard = originalClipboard != null;
+        bool clipboardRestored = false;
+        try
+        {
+            DataObject replacement = new DataObject();
+            replacement.SetData(DataFormats.UnicodeText, true, text);
+            Clipboard.SetDataObject(replacement, true);
+            if (replaceAll)
+            {
+                SendChord(VK_CONTROL, VK_A);
+                Thread.Sleep(30);
+            }
+            SendChord(VK_CONTROL, 0x56);
+            Thread.Sleep(100);
+            SendKey(VK_SPACE);
+            Thread.Sleep(50);
+            SendKey(VK_BACK);
+            Thread.Sleep(300);
+        }
+        finally
+        {
+            if (hadOriginalClipboard)
+            {
+                for (int attempt = 0; attempt < 10 && !clipboardRestored; attempt++)
+                {
+                    clipboardRestored = OleSetClipboard(originalClipboard) == 0;
+                    if (!clipboardRestored) Thread.Sleep(25);
+                }
+            }
+            else
+            {
+                Clipboard.Clear();
+                clipboardRestored = true;
+            }
+        }
+        if (!clipboardRestored)
+            throw new InvalidOperationException("The Windows clipboard could not be restored.");
+        return text.Length;
+    }
+
+    private static IntPtr VerifyFocusedWindow(long expectedWindow, uint expectedProcess)
+    {
+        IntPtr foreground = GetForegroundWindow();
+        uint foregroundProcess;
+        uint foregroundThread = GetWindowThreadProcessId(foreground, out foregroundProcess);
+        if (foreground != new IntPtr(expectedWindow))
+            throw new InvalidOperationException("The approved target window is not foreground.");
+        GUITHREADINFO info = new GUITHREADINFO();
+        info.cbSize = Marshal.SizeOf(typeof(GUITHREADINFO));
+        if (!GetGUIThreadInfo(foregroundThread, ref info) || info.hwndFocus == IntPtr.Zero)
+            throw new InvalidOperationException("The approved target has no verified focused window.");
+        uint focusProcess;
+        GetWindowThreadProcessId(info.hwndFocus, out focusProcess);
+        if (foregroundProcess != expectedProcess || focusProcess != expectedProcess)
+            throw new InvalidOperationException("The focused window does not belong to the approved target process.");
+        return info.hwndFocus;
     }
 
     private static void SendKey(byte key)
@@ -159,25 +227,38 @@ public static class AgentComputerUseIncrementalInput
         keybd_event(modifier, 0, KEYEVENTF_KEYUP, UIntPtr.Zero);
     }
 }
-'@
+'@ -ReferencedAssemblies System.Windows.Forms
 
 $payload = $global:AgentComputerUsePayload
 $text = [System.Text.Encoding]::UTF8.GetString(
     [System.Convert]::FromBase64String([string]$payload.textBase64)
 )
-$utf16CodeUnits = [AgentComputerUseIncrementalInput]::Send(
-    $text,
-    [long]$payload.windowId,
-    [uint32]$payload.processId,
-    [bool]$payload.replaceAll
-)
+$inputBehavior = [string]$payload.inputBehavior
+if ($inputBehavior -eq "commit") {
+    $utf16CodeUnits = [AgentComputerUseIncrementalInput]::PasteWholeValue(
+        $text,
+        [long]$payload.windowId,
+        [uint32]$payload.processId,
+        [bool]$payload.replaceAll
+    )
+    $deliveryPath = "windows_clipboard_transaction"
+}
+else {
+    $utf16CodeUnits = [AgentComputerUseIncrementalInput]::Send(
+        $text,
+        [long]$payload.windowId,
+        [uint32]$payload.processId,
+        [bool]$payload.replaceAll
+    )
+    $deliveryPath = "windows_sendinput_unicode_ime_neutral"
+}
 @{
     status = "ok"
     utf16CodeUnits = $utf16CodeUnits
     clipboardRestored = $true
     changeSignalDelivered = $true
     focusVerified = $true
-    deliveryPath = "windows_sendinput_unicode_ime_neutral"
+    deliveryPath = $deliveryPath
 } | ConvertTo-Json -Compress
 `;
 
@@ -259,9 +340,9 @@ export async function sendWindowsUnicodeText(options = {}) {
     );
   }
 
-  // Both Host behaviors use the same single IME-neutral native transaction.
-  // `commit` describes whole-value task semantics; it is not permission to
-  // switch to an unprovable clipboard paste path or submit the field.
+  // Both Host behaviors use one focused-window bridge. Incremental entry emits
+  // per-character edits for live search; commit entry uses one whole-value
+  // clipboard transaction and restores the complete OLE clipboard snapshot.
   const bridgeScript = WINDOWS_INCREMENTAL_INPUT_SCRIPT;
   const encodedBootstrap = Buffer.from(POWERSHELL_STDIN_BOOTSTRAP, "utf16le").toString("base64");
   const child = spawnProcess(
@@ -348,7 +429,8 @@ export async function sendWindowsUnicodeText(options = {}) {
           || typeof result.clipboardRestored !== "boolean"
           || typeof result.changeSignalDelivered !== "boolean"
           || typeof result.focusVerified !== "boolean"
-          || result.deliveryPath !== "windows_sendinput_unicode_ime_neutral") {
+          || !["windows_sendinput_unicode_ime_neutral", "windows_clipboard_transaction"]
+            .includes(result.deliveryPath)) {
           throw new Error("invalid bridge response");
         }
         finish(resolve, {

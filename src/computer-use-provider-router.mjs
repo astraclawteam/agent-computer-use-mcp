@@ -27,6 +27,7 @@ import { MCP_RESULT_SCHEMA_VERSION } from "./computer-use-mcp-tools.mjs";
 import { buildHostScene, resolveHostSceneElement } from "./scene-region-ownership.mjs";
 import {
   composeMessagingSceneElements,
+  conversationTitleContentCrop,
   deduplicateVisualProposals,
   detectMessagingSemanticSurfaces,
   detectMessagingVisualProposals,
@@ -1421,6 +1422,39 @@ export class ComputerUseProviderRouter {
             ocrElements: compositionOcrElements,
           }),
         );
+        let refinedConversationTitleOcrElements = [];
+        const titleRefinement = conversationTitleContentCrop({
+          coordinateBounds: visualBounds,
+          ocrElements: compositionOcrElements,
+          visualProposals,
+        });
+        if (titleRefinement) {
+          try {
+            const refinedTitleOcr = await this.awaitExternal(ticket, () => this.ocrRegionOperation({
+              imagePath,
+              crop: titleRefinement.crop,
+              timeoutMs: Math.min(
+                positiveTimeout(args.timeoutMs, LOCAL_OCR_LATENCY_BUDGET_MS),
+                LOCAL_OCR_LATENCY_BUDGET_MS,
+              ),
+            }, ticket));
+            refinedConversationTitleOcrElements = Array.isArray(refinedTitleOcr.observation?.elements)
+              ? refinedTitleOcr.observation.elements
+              : [];
+            compositionOcrElements = [
+              ...compositionOcrElements.filter((element) => (
+                !isCoordinateBox(element?.bounds)
+                || !boxesIntersect(element.bounds, titleRefinement.contaminatedBounds)
+              )),
+              ...refinedConversationTitleOcrElements,
+            ];
+          } catch (error) {
+            this.assertOperationTicket(ticket);
+            this.recordAudit("computer.scene.conversation_title_ocr_failed", {
+              errorCode: safeAuditErrorCode(error, "scene.conversation_title_ocr_failed"),
+            });
+          }
+        }
         let composition = this.messagingSceneComposition({
           coordinateBounds: visualBounds,
           ocrElements: compositionOcrElements,
@@ -1492,6 +1526,7 @@ export class ComputerUseProviderRouter {
           ...localObservation,
           elements: [
             ...(Array.isArray(localObservation.elements) ? localObservation.elements : []),
+            ...refinedConversationTitleOcrElements,
             ...targetedEditorOcrElements,
             ...composition.elements,
           ],

@@ -374,7 +374,7 @@ async function actOnTaskCandidate({
     });
   }
 
-  const lease = await withLease({ task, router, acquire, signal, requestContext }, async ({ scene }) => {
+  const lease = await withLease({ task, router, acquire, signal, requestContext }, async ({ scene, observation }) => {
     let currentScene = scene;
     let current = projectScene(scene, task.applicationName, { goal: task.goal });
     let matching = current.candidates.filter((candidate) => sameCandidate(candidate, selected));
@@ -477,31 +477,37 @@ async function actOnTaskCandidate({
         }
       }
     }
-    let grounding = null;
+    let grounding = currentCandidate.actionKind === "type_text"
+      && typeof observation?.observationId === "string"
+      && pixelTargetFor(currentScene, currentCandidate)
+      ? { scene: currentScene, observationId: observation.observationId }
+      : null;
     if (currentCandidate.actionKind === "type_text") {
       // A semantic observation knows the control exists but not where it is,
       // and replacing everything in an unlocated control is refused - rightly.
       // One screenshot-grounded look is what turns an observable chat box into
       // one that can actually be typed into.
-      try {
-        const groundedCapture = await abortable(() => router.capture({
-          mode: "screenshot",
-          forceScreenshotSurfaceCapture: true,
-          requestContext,
-        }), signal);
-        const groundedScene = groundedCapture?.scene;
-        if (isFreshSceneAfter(groundedScene, currentScene)) {
-          const regrounded = projectScene(groundedScene, task.applicationName, { goal: task.goal }).candidates
-            .filter((candidate) => sameCandidate(candidate, currentCandidate));
-          if (regrounded.length === 1) {
-            currentScene = groundedScene;
-            currentCandidate = regrounded[0];
-            grounding = { scene: groundedScene, observationId: groundedCapture?.observationId ?? null };
+      if (!grounding) {
+        try {
+          const groundedCapture = await abortable(() => router.capture({
+            mode: "screenshot",
+            forceScreenshotSurfaceCapture: true,
+            requestContext,
+          }), signal);
+          const groundedScene = groundedCapture?.scene;
+          if (isFreshSceneAfter(groundedScene, currentScene)) {
+            const regrounded = projectScene(groundedScene, task.applicationName, { goal: task.goal }).candidates
+              .filter((candidate) => sameCandidate(candidate, currentCandidate));
+            if (regrounded.length === 1) {
+              currentScene = groundedScene;
+              currentCandidate = regrounded[0];
+              grounding = { scene: groundedScene, observationId: groundedCapture?.observationId ?? null };
+            }
           }
+        } catch {
+          // Leave the action ungrounded. It will be refused for exactly the
+          // reason it should be, rather than aimed at a guess.
         }
-      } catch {
-        // Leave the action ungrounded. It will be refused for exactly the
-        // reason it should be, rather than aimed at a guess.
       }
       if (!grounding && currentCandidate.setValueAllowed === true) {
         // The screenshot probe supersedes the semantic Scene even when it
@@ -834,29 +840,33 @@ async function withLease({ task, router, acquire, signal, requestContext }, oper
         };
       }
     } else {
-      let scene;
+      let observation;
       if (surfaceAnchor) {
         try {
-          scene = (await abortable(() => router.capture({
+          observation = await abortable(() => router.capture({
             mode: "screenshot",
             forceScreenshotSurfaceCapture: true,
             includeRelatedSurfaces: true,
             relatedSurfaceAnchor: surfaceAnchor,
             requestContext,
-          }), signal))?.scene;
+          }), signal);
         } catch (surfaceCaptureError) {
           if (signal?.aborted) throw surfaceCaptureError;
           // The surface-aware capture is an optimisation for continuing on an
           // open surface; losing it must not fail the step.
           task.openSurfaceAnchor = null;
-          scene = (await abortable(() => router.capture({ mode: "screenshot", requestContext }), signal))?.scene;
+          observation = await abortable(
+            () => router.capture({ mode: "screenshot", requestContext }),
+            signal,
+          );
         }
       } else {
-        scene = access?.initialObservation?.scene
-          ?? (await abortable(() => router.capture({ mode: "screenshot", requestContext }), signal))?.scene;
+        observation = access?.initialObservation
+          ?? await abortable(() => router.capture({ mode: "screenshot", requestContext }), signal);
       }
+      const scene = observation?.scene;
       assertScene(scene);
-      value = await operation({ scene });
+      value = await operation({ scene, observation });
     }
   } catch (caught) {
     if (!acquired && !signal?.aborted && isUnavailableTargetError(caught)) {

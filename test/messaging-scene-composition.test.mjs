@@ -3,8 +3,10 @@ import test from "node:test";
 
 import {
   composeMessagingSceneElements,
+  conversationTitleContentCrop,
   deduplicateVisualProposals,
   detectSemanticControlSurfaceFromPixels,
+  inferConversationTitleAccessoryVisualStructure,
   inferConversationVisualStructure,
   inferSearchVisualStructure,
   inferTargetCollectionVisualStructure,
@@ -566,6 +568,71 @@ test("an owned visible target row composes under its collection with consistent 
   assert.equal(hostCandidate.actionable, true);
   assert.equal(hostCandidate.coordinate.screenshotId, "visible-target-shot");
   assert.equal(hostCandidate.coordinate.windowId, "visible-target-window");
+});
+
+test("a compact trailing badge is excluded from conversation identity and triggers bounded title OCR", () => {
+  const titleOcr = {
+    elementToken: "ocr-title-with-badge",
+    role: "text",
+    name: "微信ClawBotAI",
+    value: "微信ClawBotAI",
+    bounds: { x: 312.5, y: 45, width: 109.5, height: 18 },
+    confidence: 0.95,
+    source: "ocr",
+    proposalId: "ocr-title-with-badge",
+  };
+  const structures = [
+    structuralProposal("conversation-pane", { x: 301, y: 32, width: 650, height: 690 }),
+    structuralProposal("conversation-header", { x: 301, y: 32, width: 650, height: 47 }),
+    structuralProposal("conversation-transcript", { x: 301, y: 79, width: 650, height: 501 }),
+    structuralProposal("message-editor", { x: 301, y: 580, width: 650, height: 142 }),
+  ];
+  const accessories = inferConversationTitleAccessoryVisualStructure({
+    ocrElements: [titleOcr],
+    conversationStructures: structures,
+    proposals: [{
+      proposalId: "som-title-badge",
+      role: "region",
+      source: "som-proposal",
+      bounds: { x: 403, y: 48, width: 16, height: 12 },
+      area: 187,
+      confidence: 0.91,
+    }],
+  });
+
+  assert.equal(accessories.length, 1);
+  assert.equal(accessories[0].role, "conversation-title-accessory");
+  assert.deepEqual(conversationTitleContentCrop({
+    coordinateBounds: bounds,
+    ocrElements: [titleOcr],
+    visualProposals: [...structures, ...accessories],
+  }), {
+    crop: { x: 307, y: 34, width: 94, height: 40 },
+    contaminatedBounds: titleOcr.bounds,
+  });
+
+  const contaminated = composeMessagingSceneElements({
+    coordinateBounds: bounds,
+    ocrElements: [titleOcr],
+    visualProposals: [...structures, ...accessories],
+  });
+  assert.equal(contaminated.elements.some((element) => element.role === "conversation-title"), false);
+
+  const refined = composeMessagingSceneElements({
+    coordinateBounds: bounds,
+    ocrElements: [{
+      ...titleOcr,
+      elementToken: "ocr-refined-title",
+      proposalId: "ocr-refined-title",
+      name: "微信ClawBot",
+      value: "微信ClawBot",
+      bounds: { x: 313, y: 47, width: 88, height: 17.5 },
+    }],
+    visualProposals: [...structures, ...accessories],
+  });
+  const title = refined.elements.find((element) => element.role === "conversation-title");
+  assert.equal(title.name, "微信ClawBot");
+  assert.equal(title.semanticKey, "conversation:微信clawbot");
 });
 
 test("pixel structure discovers a visible target collection and row without OCR click geometry", () => {
@@ -1398,6 +1465,74 @@ test("the production screenshot path retries composition with one editor-owned O
   assert.equal(compositionCalls, 2);
   assert.equal(observation.localObservation.elements.filter((element) => element.role === "send").length, 1);
   assert.equal(observation.localObservation.elements.some((element) => element === sendOcr), true);
+});
+
+test("the production screenshot path re-reads a title without its proven trailing accessory", async (t) => {
+  const titleWithBadge = {
+    elementToken: "ocr-title-with-badge",
+    role: "text",
+    name: "微信ClawBotAI",
+    value: "微信ClawBotAI",
+    bounds: { x: 312.5, y: 45, width: 109.5, height: 18 },
+    confidence: 0.95,
+    source: "ocr",
+    proposalId: "ocr-title-with-badge",
+  };
+  const refinedTitle = {
+    ...titleWithBadge,
+    elementToken: "ocr-refined-title",
+    proposalId: "ocr-refined-title",
+    name: "微信ClawBot",
+    value: "微信ClawBot",
+    bounds: { x: 313, y: 47, width: 88, height: 17.5 },
+  };
+  const visualProposals = [
+    structuralProposal("conversation-pane", { x: 301, y: 32, width: 650, height: 690 }),
+    structuralProposal("conversation-header", { x: 301, y: 32, width: 650, height: 47 }),
+    structuralProposal("conversation-transcript", { x: 301, y: 79, width: 650, height: 501 }),
+    structuralProposal("message-editor", { x: 301, y: 580, width: 650, height: 142 }),
+    structuralProposal("conversation-title-accessory", { x: 403, y: 48, width: 16, height: 12 }),
+  ];
+  const ocrCrops = [];
+  const router = new ComputerUseProviderRouter({
+    messagingVisualProposalOperation: async () => visualProposals,
+  });
+  t.after(() => router.close());
+  router.activeController = {
+    controllerId: "controller-1",
+    tier: "full",
+    window: { id: "window-1", windowId: "window-1", title: "Fixture", bounds },
+    expiresAtMs: Date.now() + 60_000,
+  };
+  router.readOwnedArtifact = async () => Buffer.from("fixture-pixels");
+  router.ocrRegionOperation = async ({ crop }) => {
+    ocrCrops.push(crop ?? null);
+    return {
+      observation: {
+        source: "ocr",
+        elements: crop ? [refinedTitle] : [titleWithBadge],
+      },
+    };
+  };
+
+  const observation = await router.runOperation((ticket) => (
+    router.prioritizeLocalScreenshotPerception({
+      observationId: "shot-refined-title",
+      artifact: { path: "C:\\owned\\shot.png" },
+      capture: { width: bounds.width, height: bounds.height },
+      coordinateSpace: "window-local",
+      coordinateBounds: bounds,
+      window: { id: "window-1", bounds },
+      includeUserOverlay: false,
+    }, {}, ticket)
+  ));
+  const actionObservation = router.createActionObservation(observation);
+  const title = actionObservation.scene.elements.find((element) => element.role === "conversation-title");
+
+  assert.deepEqual(ocrCrops, [null, { x: 307, y: 34, width: 94, height: 40 }]);
+  assert.equal(title.name, "微信ClawBot");
+  assert.equal(title.semanticKey, "conversation:微信clawbot");
+  assert.equal(observation.localObservation.elements.some((element) => element === refinedTitle), true);
 });
 
 test("the production screenshot path merges a proven related search surface into one Host Scene", async (t) => {

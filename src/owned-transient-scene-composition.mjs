@@ -416,9 +416,7 @@ function surfaceActionableElements({ surface, parentElementToken, coordinate, su
   }
   const elements = [];
   for (const row of rows.values()) {
-    const name = row.lines.map((line) => line.elements.map(elementText).join(" ").trim())
-      .filter(Boolean)
-      .join(" ");
+    const name = primaryOwnedRowLabel(row.lines);
     const normalizedName = normalizeLabel(name);
     if (normalizedName === "") continue;
     const visualConfidence = finiteConfidence(row.owner.confidence, 0.9);
@@ -461,6 +459,23 @@ function surfaceActionableElements({ surface, parentElementToken, coordinate, su
     });
   }
   return elements;
+}
+
+function primaryOwnedRowLabel(lines) {
+  const primary = [...lines].sort((left, right) => (
+    left.bounds.y - right.bounds.y || left.bounds.x - right.bounds.x
+  ))[0];
+  if (!primary) return "";
+  const unique = [];
+  for (const element of [...primary.elements].sort(compareReadingOrder)) {
+    const normalized = normalizeLabel(elementText(element));
+    if (unique.some((candidate) => (
+      normalizeLabel(elementText(candidate)) === normalized
+      && overlapBySmallerArea(candidate.bounds, element.bounds) >= 0.8
+    ))) continue;
+    unique.push(element);
+  }
+  return unique.map(elementText).join(" ").trim();
 }
 
 function isNavigationOwnedSurface({ mainCapture, navigationControl, surface }) {

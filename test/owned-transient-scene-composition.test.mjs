@@ -565,6 +565,47 @@ test("an adjacent visual avatar grounds one row without absorbing a distant acce
   assert.deepEqual(result.actions, ["click"]);
 });
 
+test("a search result uses its primary label instead of concatenating a subtitle or duplicate OCR", () => {
+  const elements = composeOwnedTransientSceneElements({
+    mainCapture,
+    searchControl,
+    surfaces: [surface({
+      ocrElements: [{
+        elementToken: "ocr-primary",
+        role: "text",
+        name: "微信ClawBot",
+        source: "ocr",
+        confidence: 0.99,
+        bounds: { x: 74, y: 61, width: 96, height: 20 },
+      }, {
+        elementToken: "ocr-primary-duplicate",
+        role: "text",
+        name: "微信ClawBot",
+        source: "ocr",
+        confidence: 0.98,
+        bounds: { x: 74, y: 61, width: 96, height: 20 },
+      }, {
+        elementToken: "ocr-subtitle",
+        role: "text",
+        name: "微信 ClawBot",
+        source: "ocr",
+        confidence: 0.99,
+        bounds: { x: 74, y: 86, width: 92, height: 18 },
+      }],
+      visualProposals: [{
+        proposalId: "avatar-for-two-line-result",
+        confidence: 0.94,
+        bounds: { x: 36, y: 54, width: 36, height: 52 },
+      }],
+    })],
+  });
+
+  const result = elements.find((element) => element.role === "search-result");
+  assert.equal(result.name, "微信ClawBot");
+  assert.equal(result.semanticKey, "conversation:微信clawbot");
+  assert.deepEqual(result.actions, ["click"]);
+});
+
 function flatPixels(width, height, color) {
   const data = new Uint8ClampedArray(width * height * 4);
   for (let offset = 0; offset < data.length; offset += 4) {

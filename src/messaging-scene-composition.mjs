@@ -67,15 +67,26 @@ export async function detectMessagingVisualProposals({
   const deduplicated = deduplicateVisualProposals(proposals);
   const searchStructures = inferSearchVisualStructure({ pixels, proposals: deduplicated });
   const conversationStructures = inferConversationVisualStructure({ pixels });
+  const conversationTitleAccessories = inferConversationTitleAccessoryVisualStructure({
+    ocrElements,
+    proposals: deduplicated,
+    conversationStructures,
+  });
   const targetStructures = inferTargetCollectionVisualStructure({
     pixels,
     ocrElements,
-    proposals: [...deduplicated, ...searchStructures, ...conversationStructures],
+    proposals: [
+      ...deduplicated,
+      ...searchStructures,
+      ...conversationStructures,
+      ...conversationTitleAccessories,
+    ],
   });
   return deduplicateVisualProposals([
     ...deduplicated,
     ...searchStructures,
     ...conversationStructures,
+    ...conversationTitleAccessories,
     ...targetStructures,
   ]);
 }
@@ -195,6 +206,100 @@ export function inferConversationVisualStructure({ pixels } = {}) {
     pixelLimitedAction: role === "message-editor",
     guessedAction: false,
   }));
+}
+
+export function inferConversationTitleAccessoryVisualStructure({
+  ocrElements = [],
+  proposals = [],
+  conversationStructures = [],
+} = {}) {
+  const header = uniqueProposal(conversationStructures, "conversation-header");
+  if (!header) return [];
+  const titleCandidates = ocrElements.filter((element) => (
+    isOcrElement(element)
+    && contains(header.bounds, element.bounds)
+    && element.bounds.x < header.bounds.x + (header.bounds.width * 0.55)
+  ));
+  if (titleCandidates.length !== 1) return [];
+  const title = titleCandidates[0];
+  const titleRight = title.bounds.x + title.bounds.width;
+  const trailing = proposals.filter((proposal) => {
+    if (proposal?.source !== "som-proposal" || !isBox(proposal.bounds)) return false;
+    if (!contains(header.bounds, proposal.bounds)) return false;
+    const fillRatio = Number(proposal.area) / area(proposal.bounds);
+    const verticalOverlap = intersectionLength(
+      proposal.bounds.y,
+      proposal.bounds.y + proposal.bounds.height,
+      title.bounds.y,
+      title.bounds.y + title.bounds.height,
+    ) / Math.min(proposal.bounds.height, title.bounds.height);
+    return Number.isFinite(fillRatio)
+      && fillRatio >= 0.85
+      && verticalOverlap >= 0.65
+      && proposal.bounds.width <= title.bounds.height * 1.5
+      && proposal.bounds.height <= title.bounds.height * 1.25
+      && proposal.bounds.x >= title.bounds.x + (title.bounds.width * 0.6)
+      && proposal.bounds.x <= titleRight
+      && proposal.bounds.x + proposal.bounds.width >= titleRight - (title.bounds.height * 0.5);
+  }).sort((left, right) => left.bounds.x - right.bounds.x);
+  if (trailing.length !== 1) return [];
+  const accessory = trailing[0];
+  return [{
+    proposalId: `visual-conversation-title-accessory:${stableBoxId(accessory.bounds)}`,
+    role: "conversation-title-accessory",
+    bounds: { ...accessory.bounds },
+    confidence: complementConfidence([
+      finiteConfidence(accessory.confidence, 0.7),
+      finiteConfidence(title.confidence, 0.8),
+    ]),
+    source: "visual-structure",
+    supportProposalId: accessory.proposalId,
+    pixelLimitedAction: false,
+    guessedAction: false,
+  }];
+}
+
+export function conversationTitleContentCrop({
+  coordinateBounds,
+  ocrElements = [],
+  visualProposals = [],
+} = {}) {
+  if (!isBox(coordinateBounds)) return null;
+  const header = uniqueProposal(visualProposals, "conversation-header");
+  const accessory = uniqueProposal(visualProposals, "conversation-title-accessory");
+  if (!header || !accessory) return null;
+  const contaminated = ocrElements.filter((element) => (
+    isOcrElement(element)
+    && contains(header.bounds, element.bounds)
+    && overlapBySmallerArea(element.bounds, accessory.bounds) >= 0.6
+  ));
+  if (contaminated.length !== 1) return null;
+  const title = contaminated[0];
+  const left = Math.max(
+    coordinateBounds.x,
+    header.bounds.x,
+    Math.floor(title.bounds.x - Math.max(4, title.bounds.height * 0.3)),
+  );
+  const top = Math.max(
+    coordinateBounds.y,
+    header.bounds.y,
+    Math.floor(title.bounds.y - (title.bounds.height * 0.6)),
+  );
+  const right = Math.min(
+    coordinateBounds.x + coordinateBounds.width,
+    Math.floor(accessory.bounds.x - 2),
+  );
+  const bottom = Math.min(
+    coordinateBounds.y + coordinateBounds.height,
+    header.bounds.y + header.bounds.height,
+    Math.ceil(title.bounds.y + title.bounds.height + (title.bounds.height * 0.6)),
+  );
+  const crop = { x: left, y: top, width: right - left, height: bottom - top };
+  if (!isBox(crop) || crop.width < title.bounds.width * 0.5) return null;
+  return Object.freeze({
+    crop: Object.freeze(crop),
+    contaminatedBounds: Object.freeze({ ...title.bounds }),
+  });
 }
 
 export function inferTargetCollectionVisualStructure({
@@ -447,6 +552,11 @@ function composeConversationSceneElements({ ocr, visual, focusedTarget, changedR
     contains(header.bounds, element.bounds)
     && element.bounds.x < header.bounds.x + (header.bounds.width * 0.55)
     && elementText(element).trim().length > 0
+    && !visual.some((proposal) => (
+      proposal?.source === "visual-structure"
+      && proposal.role === "conversation-title-accessory"
+      && overlapBySmallerArea(element.bounds, proposal.bounds) >= 0.6
+    ))
   ));
   const title = titleCandidates.length === 1 ? titleCandidates[0] : null;
   const editorVisual = visual

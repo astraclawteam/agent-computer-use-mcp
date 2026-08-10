@@ -283,9 +283,10 @@ test("computer.task can aim at a chat box that only exposes ValuePattern", async
   assert.equal(action.y, 620);
   assert.equal(action.coordinateSpace, "window-local");
   assert.equal(typeof action.observationId, "string");
-  assert.ok(
+  assert.equal(
     router.captureRequests.some((request) => request.forceScreenshotSurfaceCapture === true),
-    "the edit step must take one screenshot-grounded look before typing",
+    false,
+    "the edit step must reuse the lease's already-grounded Scene instead of capturing again",
   );
   assert.equal(typed.action.receipt.postconditionVerified, true);
   assert.equal(typed.action.receipt.verificationMethod, "host-exact-edit-readback");

@@ -98,7 +98,7 @@ test("sendWindowsUnicodeText suspends active IME composition for non-ASCII incre
   assert.match(bridgeScript, /AgentComputerUseIncrementalInput/);
   assert.match(bridgeScript, /GetGUIThreadInfo\(/);
   assert.match(bridgeScript, /ImmAssociateContext\(/);
-  assert.doesNotMatch(bridgeScript, /PasteUnicode\(/);
+  assert.match(bridgeScript, /PasteWholeValue\(/);
 });
 
 test("sendWindowsUnicodeText keeps commit replace-all on the IME-neutral native transaction", async () => {
@@ -109,7 +109,7 @@ test("sendWindowsUnicodeText keeps commit replace-all on the IME-neutral native 
     return fakeChild({
     onStdin(value, child) {
       stdinText = value;
-      child.stdout.end('{"status":"ok","utf16CodeUnits":2,"clipboardRestored":true,"changeSignalDelivered":true,"focusVerified":true,"deliveryPath":"windows_sendinput_unicode_ime_neutral"}');
+      child.stdout.end('{"status":"ok","utf16CodeUnits":2,"clipboardRestored":true,"changeSignalDelivered":true,"focusVerified":true,"deliveryPath":"windows_clipboard_transaction"}');
       child.emit("close", 0, null);
     },
     });
@@ -135,12 +135,13 @@ test("sendWindowsUnicodeText keeps commit replace-all on the IME-neutral native 
   assert.equal(payload.focusX, 12);
   assert.equal(payload.focusY, 16);
   assert.equal(result.exactValueVerified, undefined);
-  assert.equal(result.deliveryPath, "windows_sendinput_unicode_ime_neutral");
+  assert.equal(result.deliveryPath, "windows_clipboard_transaction");
   assert.ok(encodedBridge.length < 30_000, "encoded bootstrap must stay below Windows command-line limits");
   const bridgeScript = Buffer.from(envelope.scriptBase64, "base64").toString("utf8");
   assert.match(bridgeScript, /AgentComputerUseIncrementalInput/);
   assert.match(bridgeScript, /KEYEVENTF_UNICODE/);
-  assert.doesNotMatch(bridgeScript, /Clipboard|AutomationElement/);
+  assert.match(bridgeScript, /OleGetClipboard/);
+  assert.match(bridgeScript, /OleSetClipboard/);
   assert.equal(Buffer.from(payload.textBase64, "base64").toString("utf8"), "张三");
 });
 
