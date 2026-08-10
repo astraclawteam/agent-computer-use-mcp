@@ -4,6 +4,19 @@ All notable changes to `agent-computer-use-mcp` are tracked here.
 
 ## Unreleased
 
+## 0.0.32
+
+- Merge same-owner transient and auxiliary windows into one current Scene only
+  when their structure and regional evidence agree, preventing duplicate search
+  editables from making deterministic messaging fail while preserving the
+  fail-closed conflict rule.
+- Preserve screenshot and ownership provenance for composed transient content
+  so messaging and generic task candidates remain bound to the exact observed
+  window and coordinate space.
+- Strengthen native Unicode replacement and post-write verification for real
+  Windows editors without adding clipboard fallback, guessed coordinates, or
+  automatic replay of an uncertain mutation.
+
 ## 0.0.31
 
 - Keep the foreground-confirmation contract deterministic in Windows CI by
