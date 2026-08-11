@@ -874,6 +874,7 @@ test("computer.task never replays an indeterminate action and closes the task", 
   assert.equal(second.error.code, "task.action_indeterminate");
   assert.equal(second.error.replayAllowed, false);
   assert.equal(second.released, true);
+  assert.equal(second.executionControl, undefined);
   assert.equal(router.actions.length, 1);
 
   const replay = await runGenericTaskTool(router, {
@@ -910,6 +911,7 @@ test("computer.task binds Stop to the in-flight action and returns a released ca
   assert.equal(stopped.error.code, "task.cancelled");
   assert.equal(stopped.error.replayAllowed, false);
   assert.equal(stopped.released, true);
+  assert.equal(stopped.executionControl, undefined);
   assert.equal(router.actions.length, 1);
   assert.equal(router.cancelCalls, 2);
 });

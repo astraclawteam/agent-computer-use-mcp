@@ -114,9 +114,12 @@ export class CuaDriverMcpDriver {
 
   listApps() {
     return this.runWork(async (ticket) => {
-      await this.ensureStartedResources(ticket);
       const [driverInventory, processInventory] = await Promise.allSettled([
-        this.client.callTool("list_apps", {}),
+        (async () => {
+          await this.ensureStartedResources(ticket);
+          this.assertWorkTicket(ticket);
+          return this.client.callTool("list_apps", {});
+        })(),
         this.probeProcessApplications(ticket),
       ]);
       this.assertWorkTicket(ticket);

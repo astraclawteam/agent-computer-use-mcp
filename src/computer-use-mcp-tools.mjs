@@ -1159,7 +1159,7 @@ const genericTaskTool = {
     error: ANY_OBJECT,
   }, [
     "status", "outcome", "released", "terminalControllerState",
-    "toolErrorCount", "wrongSendCount", "elapsedMs", "executionControl", "phase",
+    "toolErrorCount", "wrongSendCount", "elapsedMs", "phase",
   ]),
 };
 

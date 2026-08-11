@@ -4,6 +4,16 @@ All notable changes to `agent-computer-use-mcp` are tracked here.
 
 ## Unreleased
 
+## 0.0.33
+
+- Stop terminal `computer.task` receipts from advertising stale interaction-step
+  continuation control after completion, cancellation, or an indeterminate
+  action. Live tasks still carry their opaque task token and bounded next-step
+  contract.
+- Preserve independently observed Windows process and window inventory when the
+  CUA driver cannot start, so a temporarily unavailable driver does not make a
+  running desktop application disappear from Host discovery.
+
 ## 0.0.32
 
 - Merge same-owner transient and auxiliary windows into one current Scene only

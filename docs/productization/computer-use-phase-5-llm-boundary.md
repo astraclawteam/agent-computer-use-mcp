@@ -87,10 +87,11 @@ OCR rows agree with anchor-local pixel structure: either a fresh changed region
 or a stable flat popup surface. OCR-only text, one-row surfaces, unrelated
 panes, and unrelated frame changes remain non-actionable.
 
-Every result installs an interaction-step execution control whose only allowed
-next tool is `computer.task`. This prevents shell and low-level GUI bypass
-without incorrectly marking the whole turn terminal; the next Host result
-renews the same boundary. The initial call supplies `applicationName` and
+Every live result carrying an opaque task token installs an interaction-step
+execution control whose only allowed next tool is `computer.task`. Terminal
+results expose no continuation control. This prevents shell and low-level GUI
+bypass without incorrectly marking the whole turn terminal; the next live Host
+result renews the same boundary. The initial call supplies `applicationName` and
 `goal`; later calls use the opaque `taskToken` as their sole scope authority and
 do not repeat natural-language goal text. The Host retains the original
 application, goal, owner, agent, project, session, and expiry binding. When an

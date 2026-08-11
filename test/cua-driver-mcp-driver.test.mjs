@@ -2560,6 +2560,35 @@ test("CuaDriverMcpDriver keeps process inventory when driver discovery fails", a
   assert.equal(applications[0].running, true);
 });
 
+test("CuaDriverMcpDriver keeps process inventory when the driver cannot start", async () => {
+  const driver = new CuaDriverMcpDriver({
+    session: "process-inventory-driver-start-fallback-session",
+    processApplicationProbe: async () => [{
+      name: "Visible Process App",
+      kind: "desktop",
+      running: true,
+      active: false,
+      pid: 809,
+      processIds: [809],
+      lastUsed: null,
+      launchPath: "C:\\Program Files\\Visible Process App\\visible-process-app.exe",
+    }],
+    client: {
+      async start() {
+        throw new Error("driver process unavailable");
+      },
+      async callTool() {
+        throw new Error("must not call a driver that failed to start");
+      },
+    },
+  });
+
+  const applications = await driver.listApps();
+  assert.equal(applications.length, 1);
+  assert.equal(applications[0].name, "Visible Process App");
+  assert.equal(applications[0].running, true);
+});
+
 test("CuaDriverMcpDriver merges native process evidence into an installed app", async () => {
   const driver = new CuaDriverMcpDriver({
     session: "running-installed-app-session",

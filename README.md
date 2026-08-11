@@ -107,8 +107,9 @@ falling back.
 - **Control has a lifecycle.** Leases are bound to the requesting Host session
   and are revoked on completion, cancellation, timeout, disconnect, or process
   shutdown.
-- **Task routing cannot escape the Host.** A generic task result limits the next
-  interaction step to `computer.task`; shell, raw targeting, and lifecycle
+- **Task routing cannot escape the Host.** A live generic task result carrying
+  an opaque task token limits the next interaction step to `computer.task`;
+  terminal results expose no continuation control. Shell, raw targeting, and lifecycle
   tools cannot replace an unresolved Host candidate. Same-package child
   processes inherit only their proven owning-window process identity. A
   navigation click whose Scene postcondition is not proven closes without
