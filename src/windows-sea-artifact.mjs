@@ -269,6 +269,7 @@ const load = (name) => import(pathToFileURL(path.join(artifactRoot, "runtime", n
   }
   const server = await load("server.js");
   await server.main({
+    installation: { executablePath: process.execPath, packageRoot: artifactRoot },
     platformRuntime: {
       paths: {
         cuaDriverExecutable: path.join(artifactRoot, "driver", "cua-driver.exe"),
@@ -356,8 +357,8 @@ function createHubManifest() {
     kind: "executable",
     catalogOrigin: "xiaozhiclaw-first-party",
     name: "Computer Use",
-    summary: "XiaozhiClaw Windows computer control through the standard MCP Host.",
-    description: "Observe and control the local Windows desktop with approval, OCR, overlay exclusion, cancellation, and process cleanup.",
+    summary: "Windows computer control for any standard stdio MCP Host.",
+    description: "A standard executable MCP server for observing and controlling the local Windows desktop with approval, OCR, overlay exclusion, cancellation, and process cleanup. Any MCP Host can download the public release from https://github.com/astraclawteam/agent-computer-use-mcp/releases/latest and launch artifact/bin/agent-computer-use-mcp.exe with no arguments.",
     launch: { kind: "artifact", args: [], env: {}, inputs: [] },
     declaredPermissions: ["desktop.control", "filesystem.write", "screen.capture"],
     requires: [],

@@ -50,6 +50,24 @@ test("builds one Runtime-compatible win32-x64 artifact rooted at artifact/", asy
   assert.equal(result.publisherInput.artifacts[0].platform, "win32");
   assert.equal(result.publisherInput.artifacts[0].arch, "x64");
   assert.equal(result.publisherInput.artifacts[0].format, "tar.gz");
+  assert.equal(
+    result.publisherInput.manifest.summary,
+    "Windows computer control for any standard stdio MCP Host.",
+  );
+  assert.match(result.publisherInput.manifest.description, /Any MCP Host can download/);
+  assert.match(
+    result.publisherInput.manifest.description,
+    /https:\/\/github\.com\/astraclawteam\/agent-computer-use-mcp\/releases\/latest/,
+  );
+  assert.match(result.publisherInput.manifest.description, /bin\/agent-computer-use-mcp\.exe/);
+  assert.doesNotMatch(result.publisherInput.manifest.summary, /AstraClaw|XiaozhiClaw/);
+  assert.deepEqual(result.publisherInput.manifest.launch, {
+    kind: "artifact",
+    args: [],
+    env: {},
+    inputs: [],
+  });
+  assert.deepEqual(result.publisherInput.manifest.requires, []);
   assert.deepEqual(result.publisherInput.manifest.branding, {
     iconUrl: "https://xiaozhi.qlogicagent.com/assets/skills/mcp-computer-use.svg",
     color: "#4F46E5",

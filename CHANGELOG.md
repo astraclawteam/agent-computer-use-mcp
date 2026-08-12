@@ -4,6 +4,13 @@ All notable changes to `agent-computer-use-mcp` are tracked here.
 
 ## Unreleased
 
+## 0.0.34
+
+- Publish the Windows artifact as a standard executable MCP that any stdio MCP
+  Host can download and launch without AstraClaw-specific runtime requirements.
+- Derive both MCP initialization and health versions from the package release
+  version so packaged executables cannot advertise stale protocol metadata.
+
 ## 0.0.33
 
 - Stop terminal `computer.task` receipts from advertising stale interaction-step

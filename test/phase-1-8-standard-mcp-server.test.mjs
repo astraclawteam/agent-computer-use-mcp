@@ -11,6 +11,15 @@ test("Phase 1.8 server uses the official MCP SDK transport instead of a hand-rol
   assert.doesNotMatch(source, /async function handleLine/);
   assert.doesNotMatch(source, /async function dispatch/);
   assert.doesNotMatch(source, /function write\(message\)/);
+  assert.match(source, /COMPUTER_USE_MCP_VERSION/);
+  assert.doesNotMatch(source, /version:\s*"0\.0\.\d+"/);
+});
+
+test("release version has one package-owned source of truth", async () => {
+  const packageJson = JSON.parse(readFileSync("package.json", "utf8"));
+  const { COMPUTER_USE_MCP_VERSION } = await import("../src/computer-use-version.mjs");
+
+  assert.equal(COMPUTER_USE_MCP_VERSION, packageJson.version);
 });
 
 test("Phase 1.8 cua-driver MCP bridge also uses the official MCP SDK client", () => {

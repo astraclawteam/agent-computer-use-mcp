@@ -23,6 +23,7 @@ import { createComputerUsePolicy } from "./computer-use-policy.mjs";
 import { createRepairProgressPlan } from "./repair-progress-plan.mjs";
 import { cleanupRuntimeState } from "./runtime-cleanup.mjs";
 import { createComputerUseCapabilityHandshake } from "./computer-use-capability-handshake.mjs";
+import { COMPUTER_USE_MCP_VERSION } from "./computer-use-version.mjs";
 import { MCP_RESULT_SCHEMA_VERSION } from "./computer-use-mcp-tools.mjs";
 import { buildHostScene, resolveHostSceneElement } from "./scene-region-ownership.mjs";
 import {
@@ -172,7 +173,7 @@ export class ComputerUseProviderRouter {
     const result = {
       status: "ready",
       module: "agent-computer-use-mcp",
-      version: "0.0.28",
+      version: COMPUTER_USE_MCP_VERSION,
       phases: {
         "0.9": "contract-freeze",
         "0.10": "release-metadata-changelog",

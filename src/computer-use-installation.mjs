@@ -7,7 +7,7 @@ import {
   hostToolSurfaceEnv,
 } from "./computer-use-tool-surface.mjs";
 import { existsSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 
 export const COMPUTER_USE_MODULE_NAME = "agent-computer-use-mcp";
 export const COMPUTER_USE_MCP_SERVER_ID = "agent-computer-use";
@@ -38,21 +38,23 @@ export function getComputerUseInstallationManifest(options = {}) {
     ?? env.XIAOZHICLAW_OCR_MODEL_ROOT
     ?? defaultLocalDataPath(env, "models");
   const driverPath = resolveCuaDriverCandidate(env) ?? defaultCuaDriverPath(env);
-  const entryPath = resolveComputerUseMcpEntry({
-    packageRoot,
-    pathExists: options.pathExists,
-  });
+  const executablePath = typeof options.executablePath === "string" && options.executablePath.length > 0
+    ? options.executablePath
+    : null;
+  const entry = executablePath
+    ? { command: executablePath, args: [], cwd: dirname(executablePath) }
+    : {
+        command: process.execPath,
+        args: [resolveComputerUseMcpEntry({ packageRoot, pathExists: options.pathExists })],
+        cwd: packageRoot,
+      };
 
   return {
     phase: "1.6",
     module: COMPUTER_USE_MODULE_NAME,
     binary: COMPUTER_USE_MODULE_NAME,
     transport: "stdio",
-    entry: {
-      command: process.execPath,
-      args: [entryPath],
-      cwd: packageRoot,
-    },
+    entry,
     paths: {
       packageRoot,
       artifactRoot,
@@ -82,8 +84,9 @@ export function getComputerUseInstallationManifest(options = {}) {
       includeUserOverlay: false,
     },
     packaging: {
-      kind: "local-mcp-module",
-      ownership: "gateway-host",
+      kind: executablePath ? "executable-mcp" : "source-mcp-module",
+      ownership: "client-host",
+      hostIndependent: true,
       splitRepoRequired: false,
     },
   };
@@ -102,20 +105,18 @@ export function buildClientMcpConfig({ client, manifest }) {
     throw new Error(`client.unsupported: ${client}`);
   }
 
+  const isPortableExecutable = manifest.packaging?.kind === "executable-mcp";
   return {
     mcpServers: {
       [COMPUTER_USE_MCP_SERVER_ID]: {
         command: manifest.entry.command,
         args: manifest.entry.args,
         cwd: manifest.entry.cwd,
-        env: {
+        ...(!isPortableExecutable ? { env: {
           AGENT_COMPUTER_USE_ARTIFACT_ROOT: manifest.paths.artifactRoot,
           AGENT_COMPUTER_USE_OCR_MODEL_ROOT: manifest.paths.modelRoot,
           ...(manifest.paths.driverPath ? { AGENT_COMPUTER_USE_CUA_DRIVER: manifest.paths.driverPath } : {}),
-          XIAOZHICLAW_COMPUTER_USE_ARTIFACT_ROOT: manifest.paths.artifactRoot,
-          XIAOZHICLAW_OCR_MODEL_ROOT: manifest.paths.modelRoot,
-          ...(manifest.paths.driverPath ? { XIAOZHICLAW_CUA_DRIVER: manifest.paths.driverPath } : {}),
-        },
+        } } : {}),
       },
     },
   };

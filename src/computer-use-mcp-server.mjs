@@ -24,6 +24,7 @@ import {
 import { verifyWindowsFocusedProcess } from "./windows-focus-verification.mjs";
 import { DeterministicMessagingStateMachine } from "./deterministic-messaging-state-machine.mjs";
 import { cancelPendingTasks, runGenericTaskHostContract } from "./generic-task-host-contract.mjs";
+import { COMPUTER_USE_MCP_VERSION } from "./computer-use-version.mjs";
 
 const PENDING_MESSAGING_SELECTION_TTL_MS = 60_000;
 const PENDING_MESSAGING_REPLAY_FENCE_TTL_MS = 120_000;
@@ -63,7 +64,7 @@ export async function runComputerUseMcpServer(options = {}) {
   const server = new Server(
     {
       name: "agent-computer-use-mcp",
-      version: "0.0.28",
+      version: COMPUTER_USE_MCP_VERSION,
     },
     {
       capabilities: {
@@ -83,7 +84,7 @@ export async function runComputerUseMcpServer(options = {}) {
       name,
       args,
       request.params._meta?.["xiaozhiclaw/requestContext"],
-      { signal: extra.signal, toolSurface },
+      { signal: extra.signal, toolSurface, installation: options.installation },
     );
   });
 
@@ -206,6 +207,7 @@ export async function callTool(router, name, args, requestContext, options = {})
       structuredContent = getComputerUseInstallation({
         client: args.client ?? "codex",
         packageRoot: process.cwd(),
+        ...options.installation,
       });
     } else if (name === "computer.acquire") {
       structuredContent = await acquireComputer(router, args, requestContext);
