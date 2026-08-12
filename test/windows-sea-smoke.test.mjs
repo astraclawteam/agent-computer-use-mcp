@@ -11,6 +11,9 @@ test("Windows SEA smoke uses the released executable directly and fails closed o
   assert.match(source, /connection\.call\("computer\.acquire"/u);
   assert.match(source, /connection\.call\("computer\.observe", \{ mode: "semantic" \}\)/u);
   assert.match(source, /connection\.call\("computer\.release"/u);
+  assert.match(source, /connection\.call\("computer\.installation"/u);
+  assert.match(source, /sea_smoke\.non_portable_installation/u);
+  assert.match(source, /hostIndependent !== true/u);
   assert.match(source, /allowToolError: true/u);
   assert.match(source, /clickOutcomeVerified/u);
   assert.match(source, /capture\.scene\?\.elements/u);

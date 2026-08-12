@@ -57,6 +57,17 @@ export async function runWindowsSeaSmoke(options = {}) {
     await connection.connect();
     const tools = await connection.listTools();
     assertExactTools(tools);
+    const installation = await connection.call("computer.installation", { client: "codex" });
+    const clientEntry = installation.clientConfig?.config?.mcpServers?.["agent-computer-use"];
+    if (
+      clientEntry?.command !== executablePath
+      || clientEntry.args?.length !== 0
+      || Object.hasOwn(clientEntry, "env")
+      || installation.manifest?.packaging?.kind !== "executable-mcp"
+      || installation.manifest?.packaging?.hostIndependent !== true
+    ) {
+      throw smokeError("sea_smoke.non_portable_installation", JSON.stringify(clientEntry));
+    }
     const health = await connection.call("computer.health", { fast: false, prewarm: true });
     if (health.status !== "ready" || health.driver?.status !== "healthy" || health.ocr?.status !== "healthy") {
       throw smokeError("sea_smoke.health_not_ready", JSON.stringify({
@@ -144,6 +155,13 @@ export async function runWindowsSeaSmoke(options = {}) {
       target: manifest.target,
       toolCount: tools.length,
       agentSurface,
+      installation: {
+        status: "passed",
+        executable: true,
+        args: [],
+        envRequired: false,
+        hostIndependent: true,
+      },
       health: { status: health.status, driver: health.driver.status, ocr: health.ocr.status },
       nativeLab: {
         status: "passed",
