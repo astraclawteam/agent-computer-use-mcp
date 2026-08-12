@@ -4,6 +4,14 @@ All notable changes to `agent-computer-use-mcp` are tracked here.
 
 ## Unreleased
 
+- Classify structured Windows `Document` controls with declared text actions as
+  editable on the default Agent surface, preserving opaque targeting and exact
+  post-write read-back without requiring Host mode.
+- Retire the nested `action.action`, partial-title selector, and `--host-control`
+  compatibility paths. Canonical action values and acquisition selectors now
+  fail with precise server-side errors even when an MCP client does not validate
+  the advertised JSON Schema.
+
 ## 0.0.34
 
 - Publish the Windows artifact as a standard executable MCP that any stdio MCP

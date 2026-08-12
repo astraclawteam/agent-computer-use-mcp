@@ -16,7 +16,7 @@ Host-only status is enforced by the advertised inventory, not by the private `xi
 | Surface | Selected by | `tools/list` |
 | --- | --- | --- |
 | `agent` (default) | any launch without an explicit signal | `computer.task`, `computer.message` |
-| `host` | `--tool-surface=host`, `--host-control`, or `AGENT_COMPUTER_USE_TOOL_SURFACE=host` | all ten tools |
+| `host` | `--tool-surface=host` or `AGENT_COMPUTER_USE_TOOL_SURFACE=host` | all ten tools |
 
 `tools/call` applies the same gate. A name the active surface did not advertise returns the `tool_not_found` error a genuinely unknown name returns, with no detail distinguishing the two, so the error cannot confirm which hidden tools exist. The `_meta` key remains advisory for Hosts that already read it, and `computer.installation` publishes the surface contract under `manifest.toolSurface`.
 
@@ -49,5 +49,4 @@ A tool that constrains `status` with an enum must therefore admit `"error"` as w
 Third-party agent-native Computer Use remains agent-owned: agent-native operations MUST NOT be routed through Gateway approval, target leases, or policy enforcement. This package exposes only the OS-oriented `computer.*` contract and does not wrap, intercept, or replace third-party agent-native capabilities.
 
 End-to-end agent-native routing is a host-owned invariant and is not implemented by this MCP package. The XiaozhiClaw host runtime owns the executable routing test that proves agent-native calls bypass Gateway approval, target leases, policy enforcement, and Gateway-managed overlays.
-
 

@@ -126,7 +126,9 @@ A coordinate is not complete evidence unless it carries: screenshot/observation 
   `computer.ocr_region`, and `computer.observe_diff` for old phase/test
   surfaces; none belonged to the Agent contract. The current implementation
   has removed those unreachable schema literals.
-- `titlePart` and duplicated action-envelope normalization remain compatibility input paths beside exact application/window identity and the canonical action envelope.
+- At the `.91` baseline, `titlePart` and duplicated action-envelope normalization
+  remained compatibility input paths. The current public server rejects both;
+  real action gates discover a window first and acquire it by exact `windowId`.
 - Both `AGENT_COMPUTER_USE_*` and older `XIAOZHICLAW_*` environment aliases are accepted by driver/install resolution.
 
 ## 6. Duplicate authorities and defects found
@@ -149,7 +151,7 @@ Deletion is gated on consumer search and replacement proof; these are candidates
 | OCR `actions: ["click"]` plus exact-OCR admission exception | Conflicts with the declared observation-only authority and the future Scene evidence contract. | Scene integration supplies a structured, consistent parent and explicit action, and fixed screenshots prove no regression. |
 | Flat primary/secondary OCR merge | It destroys region ownership. | Replace with region-owned claims; all observation projections and post-action verification consume them. |
 | Transient list-item Enter compensation | It infers a list action from focus/mutation/region heuristics outside a unified Scene/state machine. | Deterministic state machine proves the same transition using explicit transient-surface ownership and postcondition. |
-| Duplicated action envelope and `titlePart` compatibility normalization | Canonical action and exact window/application identity already exist. | Host and supported clients emit only canonical contracts for a deprecation window. |
+| Duplicated action envelope and `titlePart` compatibility normalization | Removed from the public server; canonical action and exact window/application identity are the only current paths. | Completed: focused contract tests and the real Phase 1.4 action gate use canonical inputs. |
 
 ## 8. Atomic proof gates
 

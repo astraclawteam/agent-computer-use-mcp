@@ -25,9 +25,10 @@ export const DEFAULT_TOOL_SURFACE = AGENT_TOOL_SURFACE;
 export const TOOL_SURFACES = Object.freeze([AGENT_TOOL_SURFACE, HOST_TOOL_SURFACE]);
 
 export const TOOL_SURFACE_FLAG = "--tool-surface";
-export const HOST_TOOL_SURFACE_FLAG = "--host-control";
 export const TOOL_SURFACE_ENV = "AGENT_COMPUTER_USE_TOOL_SURFACE";
-const LEGACY_TOOL_SURFACE_ENV = "XIAOZHICLAW_TOOL_SURFACE";
+// Repository policy keeps this environment alias as an explicitly supported
+// launcher contract; the retired --host-control argument had no such owner.
+const COMPATIBILITY_TOOL_SURFACE_ENV = "XIAOZHICLAW_TOOL_SURFACE";
 
 const SURFACE_TOOLS = Object.freeze({
   [AGENT_TOOL_SURFACE]: COMPUTER_USE_AGENT_TOOLS,
@@ -98,7 +99,6 @@ function readSurfaceFromArgv(argv) {
   for (let index = 0; index < args.length; index += 1) {
     const arg = args[index];
     if (typeof arg !== "string") continue;
-    if (arg === HOST_TOOL_SURFACE_FLAG) return { value: HOST_TOOL_SURFACE, origin: "argv" };
     if (arg.startsWith(`${TOOL_SURFACE_FLAG}=`)) {
       return { value: arg.slice(TOOL_SURFACE_FLAG.length + 1), origin: "argv" };
     }
@@ -111,7 +111,7 @@ function readSurfaceFromArgv(argv) {
 
 function readSurfaceFromEnv(env) {
   const source = env ?? {};
-  const value = source[TOOL_SURFACE_ENV] ?? source[LEGACY_TOOL_SURFACE_ENV];
+  const value = source[TOOL_SURFACE_ENV] ?? source[COMPATIBILITY_TOOL_SURFACE_ENV];
   if (typeof value !== "string" || value.trim() === "") return null;
   return { value, origin: "environment" };
 }

@@ -66,6 +66,12 @@ default launch          → computer.task, computer.message
 --tool-surface=host     → the full ten-tool Host surface
 ```
 
+The default surface is not a reduced desktop engine. `computer.task` and the
+Host lifecycle tools consume the same versioned Scene, action implementation,
+and receipts; the default surface only keeps targeting and controller lifecycle
+inside the MCP server. A desktop control that is editable through Host mode must
+therefore also be offered as an opaque `edit` candidate through `computer.task`.
+
 Host mode is selected only from launch arguments or the
 `AGENT_COMPUTER_USE_TOOL_SURFACE` environment variable, both owned by whoever
 spawns the process. Nothing the Agent sends over the transport can widen its own
@@ -165,6 +171,26 @@ management tools in the model's inventory. Only add
 `"args": ["--tool-surface=host"]` if your Host itself owns user approval,
 controller lifecycle, and tool projection — it hands the model eight more tools,
 including direct desktop mutation and repair.
+
+For the default Agent surface, start `computer.task` with `applicationName` and
+`goal`. Choose a returned opaque `candidateId`; when that candidate declares
+`inputRequired: true`, provide the exact text in the task-level `text` field.
+`relevance: "route"` describes a reversible path toward a target that is not yet
+visible; it is not an action name. Element ids, bounds, observations, and surface
+receipts intentionally remain Host-owned.
+
+For a Host integration, calling `computer.acquire` without a selector returns
+fresh application and window candidates without starting control. The next call
+accepts exactly one selector: `applicationToken` restores the primary window,
+`windowId` selects that exact observed window, `applicationName` resolves one
+exact current product name, and `target: "foreground"` selects the current OS
+foreground window. Combining selectors returns `window.selector_conflict` with
+the selector meanings; the retired partial-title selector is rejected.
+`computer.act` accepts one canonical `action` object and uses `action.value` for
+`set_value` and `type_text`; task-level `text` and nested `action.action`
+envelopes are not aliases. A returned `surfaceReceipt.id` optionally binds an
+action to that latest single-use surface and expires when a new observation
+replaces it, the action consumes it, or the lease ends.
 
 The release contains the exact Windows x64 driver, native overlay, ONNX runtime,
 PP-OCRv6 model pack, inventory, checksums, licenses, and SBOM used by CI. It

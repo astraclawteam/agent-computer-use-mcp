@@ -186,12 +186,12 @@ async function easeControlIndicatorAfterFailure(router, name, structuredContent,
 }
 
 export async function callTool(router, name, args, requestContext, options = {}) {
-  if (name === "computer.act") args = normalizeComputerActArgs(args);
   let structuredContent;
   try {
     // An unlisted tool must also be uncallable, otherwise the Agent can invoke a
     // host-only name it already knows. Off-surface and unknown are the same error.
     assertToolOnSurface(options.toolSurface ?? HOST_TOOL_SURFACE, name);
+    assertCanonicalToolArguments(name, args);
     // The indicator belongs to the stretch of work, not to one tool call. A
     // model that switches tools mid-goal - message, then task, then act - was
     // making it blink once per switch, which reads as the Host losing its grip
@@ -319,7 +319,7 @@ export async function callTool(router, name, args, requestContext, options = {})
   }
   const compactedStructuredContent = compactComputerUseResult(projected.structuredContent);
   structuredContent = withResultContract(
-    stripLegacyObservationAuthorities(compactedStructuredContent),
+    projectCanonicalObservationAuthority(compactedStructuredContent),
   );
   const visualUnderstandingEligible = structuredContent?.perceptionRouting?.visualUnderstandingEligible !== false;
   const visualInstruction = typeof args?.visualQuestion === "string" && args.visualQuestion.trim()
@@ -830,10 +830,10 @@ function normalizePublicComputerActResult(value = {}) {
     return { ...value, status: outcome, outcome };
   }
   const {
-    effect: _legacyEffect,
-    replaySafe: _legacyReplaySafe,
-    completionEligible: _legacyCompletionEligible,
-    delivered: _legacyDelivered,
+    effect: _providerEffect,
+    replaySafe: _providerReplaySafety,
+    completionEligible: _providerCompletionEligibility,
+    delivered: _providerDelivery,
     status: providerStatus,
     ...detail
   } = result;
@@ -852,8 +852,8 @@ function normalizePublicComputerActResult(value = {}) {
   };
 }
 
-function stripLegacyObservationAuthorities(value) {
-  if (Array.isArray(value)) return value.map(stripLegacyObservationAuthorities);
+function projectCanonicalObservationAuthority(value) {
+  if (Array.isArray(value)) return value.map(projectCanonicalObservationAuthority);
   if (!value || typeof value !== "object") return value;
   const isObservation = value.observationId !== undefined || value.scene !== undefined;
   const stripped = {};
@@ -861,7 +861,7 @@ function stripLegacyObservationAuthorities(value) {
     if (isObservation && (key === "elements" || key === "localObservation" || key === "semanticProbe")) {
       continue;
     }
-    stripped[key] = key === "scene" ? publicHostScene(entry) : stripLegacyObservationAuthorities(entry);
+    stripped[key] = key === "scene" ? publicHostScene(entry) : projectCanonicalObservationAuthority(entry);
   }
   return stripped;
 }
@@ -2178,33 +2178,53 @@ async function freshAcquisitionTargets(router) {
   };
 }
 
-function normalizeComputerActArgs(args = {}) {
-  const outerAction = args?.action;
-  const nestedAction = outerAction?.action;
-  if (!outerAction || typeof outerAction !== "object" || Array.isArray(outerAction)
-    || typeof outerAction.kind === "string"
-    || !nestedAction || typeof nestedAction !== "object" || Array.isArray(nestedAction)
-    || typeof nestedAction.kind !== "string") {
-    return args;
-  }
-  const { action: _discardedWrapper, ...forwardedActionFields } = outerAction;
-  return {
-    ...args,
-    action: {
-      ...forwardedActionFields,
-      ...nestedAction,
-    },
-  };
-}
-
 function acquisitionSelectorCount(args = {}) {
   return [
     args.target === "foreground",
     args.windowId !== undefined,
-    typeof args.titlePart === "string" && args.titlePart.trim() !== "",
     typeof args.applicationToken === "string" && args.applicationToken.trim() !== "",
     typeof args.applicationName === "string" && args.applicationName.trim() !== "",
   ].filter(Boolean).length;
+}
+
+function assertCanonicalToolArguments(name, args = {}) {
+  if (name === "computer.observe" && Object.hasOwn(args, "titlePart")) {
+    throw new ComputerUseMcpError(
+      "window.selector_unsupported",
+      "computer.observe does not accept titlePart. Discover current targets with mode=state, acquire one exact applicationToken or windowId, then observe the leased window.",
+    );
+  }
+  if (name === "computer.acquire") {
+    if (Object.hasOwn(args, "titlePart")) {
+      throw new ComputerUseMcpError(
+        "window.selector_unsupported",
+        "computer.acquire does not accept titlePart. Omit selectors to discover current targets, then use one returned applicationToken or windowId; use applicationName only for one exact product name, or target=\"foreground\" for the current OS foreground window.",
+      );
+    }
+    if (acquisitionSelectorCount(args) > 1) {
+      throw new ComputerUseMcpError(
+        "window.selector_conflict",
+        "computer.acquire accepts at most one selector. Use applicationToken for an application's primary window, windowId for one exact observed window, applicationName for one exact current product name, or target=\"foreground\" for the current OS foreground window.",
+      );
+    }
+    return;
+  }
+  if (name !== "computer.act") return;
+  const action = args?.action;
+  if (!action || typeof action !== "object" || Array.isArray(action)) return;
+  if (Object.hasOwn(action, "action")) {
+    throw new ComputerUseMcpError(
+      "action.envelope_invalid",
+      "computer.act expects one canonical action object at arguments.action; nested action.action envelopes are not supported.",
+    );
+  }
+  if ((action.kind === "set_value" || action.kind === "type_text")
+    && typeof action.value !== "string") {
+    throw new ComputerUseMcpError(
+      "action.value_required",
+      "computer.act action.value is required for set_value and type_text; action.text is not accepted.",
+    );
+  }
 }
 
 function withResultContract(value) {

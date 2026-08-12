@@ -41,7 +41,6 @@ test("only a launch-owned signal selects the host surface", () => {
   const launches = [
     { argv: ["--tool-surface=host"], env: {} },
     { argv: ["--tool-surface", "host"], env: {} },
-    { argv: ["--host-control"], env: {} },
     { argv: ["--tool-surface=HOST"], env: {} },
   ];
   for (const launch of launches) {
@@ -56,6 +55,13 @@ test("only a launch-owned signal selects the host surface", () => {
     resolveToolSurface({ argv: [], env: { XIAOZHICLAW_TOOL_SURFACE: "host" } }),
     { surface: "host", source: "environment" },
   );
+});
+
+test("the retired host-control flag cannot reopen the Host surface", () => {
+  assert.deepEqual(resolveToolSurface({ argv: ["--host-control"], env: {} }), {
+    surface: "agent",
+    source: "default",
+  });
 });
 
 test("launch arguments outrank inherited environment", () => {

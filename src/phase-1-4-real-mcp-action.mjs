@@ -37,8 +37,13 @@ try {
   await new Promise((resolvePromise) => setTimeout(resolvePromise, 500));
 
   await server.connect();
+  const state = await server.callTool("computer.observe", { mode: "state" });
+  const targetWindow = state.windows?.find((window) => window.title?.includes(basename(outputFile)));
+  if (!targetWindow?.windowId) {
+    throw new Error(`window.not_found: ${basename(outputFile)}`);
+  }
   const access = await server.callTool("computer.acquire", {
-    titlePart: basename(outputFile),
+    windowId: targetWindow.windowId,
     tier: "full",
     agentId: "phase-1-4-smoke",
     reason: "Phase 1.4 real MCP action validation",

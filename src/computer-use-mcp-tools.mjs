@@ -334,10 +334,11 @@ const COMPUTER_USE_TOOL_SCHEMAS = [
   {
     name: "computer.acquire",
     title: "Acquire Computer Access",
-    description: "Acquire a Gateway-managed controller lease from trusted discovery evidence and return an initial semantic observation when available. When the user refers to an application, call computer.observe mode=\"state\" first and pass its applicationToken even if auxiliary windows are already listed; the Host will restore and select the primary application window. Use target=\"foreground\" only when the user explicitly means the current OS foreground window. Use windowId only for the exact window returned by the immediately preceding state observation. Never infer, guess, or synthesize a window title.",
+    description: "Acquire a Gateway-managed controller lease from trusted discovery evidence and return an initial semantic observation when available. With no selector, return fresh application and window candidates without starting control. To acquire, pass exactly one selector: applicationToken restores the primary application window, windowId selects one exact observed window, applicationName resolves one unique exact current product name, and target=\"foreground\" selects the current OS foreground window. Never combine selectors or infer, guess, or synthesize a window title.",
     annotations: { phase: "1.3", destructiveHint: false },
     inputSchema: {
       type: "object",
+      description: "Omit all selectors for discovery. Otherwise provide exactly one of applicationToken, windowId, applicationName, or target=\"foreground\".",
       not: {
         anyOf: [
           { required: ["windowId", "target"] },
@@ -441,6 +442,14 @@ const COMPUTER_USE_TOOL_SCHEMAS = [
             },
             then: {
               required: ["interactionIntent", "targetRole"],
+            },
+          }, {
+            if: {
+              properties: { kind: { enum: ["set_value", "type_text"] } },
+              required: ["kind"],
+            },
+            then: {
+              required: ["value"],
             },
           }, {
             if: {
@@ -566,7 +575,7 @@ const COMPUTER_USE_TOOL_SCHEMAS = [
             },
             value: {
               type: "string",
-              description: "Text for set_value or atomic type_text.",
+              description: "Required text for set_value or atomic type_text. This field is named value; text is the task-level computer.task field and is not accepted here.",
             },
             textMode: {
               type: "string",
@@ -675,12 +684,25 @@ const GENERIC_TASK_CANDIDATE_SCHEMA = {
     "evidenceSources",
   ],
   properties: {
-    candidateId: { type: "string" },
-    label: { type: "string" },
-    role: { type: "string" },
-    parentRole: { anyOf: [{ type: "string" }, { type: "null" }] },
-    action: { type: "string", enum: ["activate", "select", "edit"] },
-    inputRequired: { type: "boolean" },
+    candidateId: {
+      type: "string",
+      description: "Opaque id accepted only by the next computer.task continuation for this taskToken; it is not a Scene element id.",
+    },
+    label: { type: "string", description: "Host-grounded semantic label for the candidate." },
+    role: { type: "string", description: "Semantic role observed by the Host." },
+    parentRole: {
+      anyOf: [{ type: "string" }, { type: "null" }],
+      description: "Semantic role of the candidate's owning parent container when available.",
+    },
+    action: {
+      type: "string",
+      enum: ["activate", "select", "edit"],
+      description: "Opaque task action category: activate an application/window, select one visible control, or edit without submitting.",
+    },
+    inputRequired: {
+      type: "boolean",
+      description: "When true, the continuation must include exact task-level text; otherwise text is rejected.",
+    },
     relevance: {
       type: "string",
       enum: ["target", "route", "context"],
@@ -860,7 +882,6 @@ const observeTool = {
         maxLength: 1200,
         description: "Visual only. Ask one unresolved layout/icon/scene question; combine every needed fact and editable targetBounds in this single request.",
       },
-      titlePart: { type: "string" },
       outputPath: { type: "string" },
       imagePath: { type: "string" },
       baselinePath: { type: "string" },

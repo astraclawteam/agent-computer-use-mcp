@@ -586,6 +586,10 @@ function hostTypeFor(raw, source) {
   if (HOST_ELEMENT_TYPES.has(raw.hostType)) return raw.hostType;
   const role = String(raw.role ?? "").trim().toLowerCase();
   if (EDITABLE_ROLES.has(role)) return "Editable";
+  if (source === "structure"
+    && uniqueStrings(raw.actions).some((action) => action === "set_value" || action === "type_text")) {
+    return "Editable";
+  }
   if (TRANSIENT_ROLES.has(role)) return "TransientSurface";
   if (!Array.isArray(raw.actions) || raw.actions.length === 0) {
     return "Container";

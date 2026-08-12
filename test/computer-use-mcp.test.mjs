@@ -379,6 +379,45 @@ test("computer.acquire without a selector returns fresh target discovery without
   assert.equal(validate(result.structuredContent), true, JSON.stringify(validate.errors));
 });
 
+test("computer.acquire rejects conflicting and retired selectors with actionable errors", async () => {
+  let requestAccessCalls = 0;
+  const router = {
+    async requestAccess() {
+      requestAccessCalls += 1;
+      throw new Error("must not reach desktop control");
+    },
+  };
+
+  const conflict = await callTool(router, "computer.acquire", {
+    applicationToken: "application-target",
+    windowId: "window-target",
+  });
+  assert.equal(conflict.isError, true);
+  assert.equal(conflict.structuredContent.error.code, "window.selector_conflict");
+  assert.match(conflict.structuredContent.error.message, /applicationToken.*windowId/u);
+
+  const retired = await callTool(router, "computer.acquire", { titlePart: "Notepad" });
+  assert.equal(retired.isError, true);
+  assert.equal(retired.structuredContent.error.code, "window.selector_unsupported");
+  assert.match(retired.structuredContent.error.message, /does not accept titlePart/u);
+  assert.equal(requestAccessCalls, 0);
+});
+
+test("computer.observe rejects the retired partial-title window track before capture", async () => {
+  let captureCalls = 0;
+  const result = await callTool({
+    async capture() {
+      captureCalls += 1;
+      throw new Error("must not reach capture");
+    },
+  }, "computer.observe", { mode: "screenshot", titlePart: "Notepad" });
+
+  assert.equal(result.isError, true);
+  assert.equal(result.structuredContent.error.code, "window.selector_unsupported");
+  assert.match(result.structuredContent.error.message, /mode=state.*applicationToken or windowId/u);
+  assert.equal(captureCalls, 0);
+});
+
 test("computer.acquire recovers a stale application token with fresh discovery instead of a tool error", async () => {
   let listStateCalls = 0;
   const result = await callTool({
@@ -424,27 +463,12 @@ test("computer.acquire unmatched application name remains schema-valid discovery
   assert.equal(validate(result.structuredContent), true, JSON.stringify(validate.errors));
 });
 
-test("computer.act unwraps one structurally duplicated action envelope", async () => {
-  let received;
+test("computer.act rejects duplicated action envelopes instead of maintaining a second input track", async () => {
+  let actCalls = 0;
   const result = await callTool({
-    async act(args) {
-      received = args;
-      return {
-        status: "ok",
-        provider: "gateway-managed",
-        action: "type_text",
-        result: { status: "ok", verified: true },
-        pixelLimitedAction: true,
-        outcome: "applied",
-        effectiveDeliveryMode: "foreground",
-        execution: {
-          schemaVersion: 1,
-          targetPath: "observation-coordinate",
-          providerPath: "windows-unicode-input",
-          deliveryMode: "foreground",
-          fallback: { used: false, reason: null },
-        },
-      };
+    async act() {
+      actCalls += 1;
+      throw new Error("must not execute a non-canonical action envelope");
     },
   }, "computer.act", {
     action: {
@@ -457,50 +481,32 @@ test("computer.act unwraps one structurally duplicated action envelope", async (
     },
   });
 
-  assert.equal(result.isError, false);
-  assert.equal(received.action.kind, "type_text");
-  assert.equal(received.action.value, "宋");
-  assert.equal(received.action.action, undefined);
+  assert.equal(result.isError, true);
+  assert.equal(result.structuredContent.error.code, "action.envelope_invalid");
+  assert.match(result.structuredContent.error.message, /one canonical action object/u);
+  assert.equal(actCalls, 0);
 });
 
-test("computer.act forwards receipt fields placed beside a duplicated action envelope", async () => {
-  let received;
+test("computer.act rejects text aliases with a precise value-field error", async () => {
+  let actCalls = 0;
   const result = await callTool({
-    async act(args) {
-      received = args;
-      return {
-        status: "ok",
-        provider: "gateway-managed",
-        action: "type_text",
-        result: { status: "ok", verified: true },
-        pixelLimitedAction: true,
-        outcome: "applied",
-        effectiveDeliveryMode: "foreground",
-        execution: {
-          schemaVersion: 1,
-          targetPath: "observation-coordinate",
-          providerPath: "windows-unicode-input",
-          deliveryMode: "foreground",
-          fallback: { used: false, reason: null },
-        },
-      };
+    async act() {
+      actCalls += 1;
+      throw new Error("must not execute without action.value");
     },
   }, "computer.act", {
     action: {
-      action: {
-        kind: "type_text",
-        value: "query",
-        textMode: "replace-all",
-        inputBehavior: "incremental",
-      },
-      surfaceReceiptId: "surface-1",
+      kind: "type_text",
+      text: "query",
+      textMode: "replace-all",
+      inputBehavior: "incremental",
     },
   });
 
-  assert.equal(result.isError, false);
-  assert.equal(received.action.kind, "type_text");
-  assert.equal(received.action.surfaceReceiptId, "surface-1");
-  assert.equal(received.action.action, undefined);
+  assert.equal(result.isError, true);
+  assert.equal(result.structuredContent.error.code, "action.value_required");
+  assert.match(result.structuredContent.error.message, /action\.value.*action\.text/u);
+  assert.equal(actCalls, 0);
 });
 
 test("model-facing OCR geometry is compressed into visual rows without losing structured tokens", () => {
@@ -2504,6 +2510,12 @@ test("agent-computer-use-mcp freezes the local MCP tool contract", () => {
     { required: ["taskToken"] },
   ]);
   assert.equal(task._meta["xiaozhiclaw/requestTimeoutMs"], 120_000);
+  const taskCandidate = task.outputSchema.properties.candidates.items.properties;
+  assert.match(taskCandidate.candidateId.description, /not a Scene element id/u);
+  assert.match(taskCandidate.action.description, /edit without submitting/u);
+  assert.match(taskCandidate.inputRequired.description, /must include exact task-level text/u);
+  assert.equal(taskCandidate.elementId, undefined);
+  assert.equal(taskCandidate.bounds, undefined);
 
   const health = COMPUTER_USE_MCP_TOOLS.find((tool) => tool.name === "computer.health");
   assert.equal(health.annotations.phase, "0.9");
@@ -2525,6 +2537,7 @@ test("agent-computer-use-mcp freezes the local MCP tool contract", () => {
 
   const acquire = COMPUTER_USE_MCP_TOOLS.find((tool) => tool.name === "computer.acquire");
   assert.equal(acquire.annotations.phase, "1.3");
+  assert.match(acquire.inputSchema.description, /Omit all selectors for discovery/u);
   assert.equal(acquire.inputSchema.required, undefined);
   const validateAcquire = new Ajv({ strict: false }).compile(acquire.inputSchema);
   assert.equal(validateAcquire({}), true, JSON.stringify(validateAcquire.errors));
@@ -2546,6 +2559,7 @@ test("agent-computer-use-mcp freezes the local MCP tool contract", () => {
   });
 
   const observe = COMPUTER_USE_MCP_TOOLS.find((tool) => tool.name === "computer.observe");
+  assert.equal(observe.inputSchema.properties.titlePart, undefined);
   assert.equal(observe.annotations.readOnlyHint, true);
   assert.match(observe.description, /invalidates prior Scene element identities/u);
   assert.doesNotMatch(observe.description, /Start semantic, then screenshot/u);
@@ -2578,22 +2592,21 @@ test("agent-computer-use-mcp freezes the local MCP tool contract", () => {
     act.inputSchema.properties.action.properties.inputBehavior.enum,
     ["incremental", "commit"],
   );
-  assert.deepEqual(
-    act.inputSchema.properties.action.allOf[2].then.required,
-    ["textMode", "inputBehavior"],
-  );
-  assert.deepEqual(
-    act.inputSchema.properties.action.allOf[3].then.required,
-    ["observationId"],
-  );
-  assert.deepEqual(
-    act.inputSchema.properties.action.allOf[4].then.required,
-    ["targetBounds"],
-  );
-  assert.deepEqual(
-    act.inputSchema.properties.action.allOf[5].then.required,
-    ["targetBounds"],
-  );
+  const conditionalRequiredFields = act.inputSchema.properties.action.allOf
+    .map((condition) => condition.then?.required)
+    .filter(Array.isArray);
+  assert.ok(conditionalRequiredFields.some((fields) => (
+    fields.length === 1 && fields[0] === "value"
+  )));
+  assert.ok(conditionalRequiredFields.some((fields) => (
+    fields.length === 2 && fields[0] === "textMode" && fields[1] === "inputBehavior"
+  )));
+  assert.ok(conditionalRequiredFields.some((fields) => (
+    fields.length === 1 && fields[0] === "observationId"
+  )));
+  assert.equal(conditionalRequiredFields.filter((fields) => (
+    fields.length === 1 && fields[0] === "targetBounds"
+  )).length, 2);
   const validateAct = new Ajv({ strict: false }).compile(act.inputSchema);
   assert.equal(validateAct({ action: {
     kind: "type_text",
@@ -2611,14 +2624,16 @@ test("agent-computer-use-mcp freezes the local MCP tool contract", () => {
     targetBounds: { x: 10, y: 10, width: 100, height: 30 },
   } }), true);
   assert.equal(act.inputSchema.properties.action.properties.inputBehavior.default, undefined);
-  assert.deepEqual(
-    act.inputSchema.properties.action.allOf[0].then.required,
-    ["observationId", "x", "y", "coordinateSpace"],
-  );
-  assert.deepEqual(
-    act.inputSchema.properties.action.allOf[1].then.required,
-    ["interactionIntent", "targetRole"],
-  );
+  assert.ok(conditionalRequiredFields.some((fields) => (
+    fields.length === 4
+    && fields[0] === "observationId"
+    && fields[1] === "x"
+    && fields[2] === "y"
+    && fields[3] === "coordinateSpace"
+  )));
+  assert.ok(conditionalRequiredFields.some((fields) => (
+    fields.length === 2 && fields[0] === "interactionIntent" && fields[1] === "targetRole"
+  )));
   assert.deepEqual(
     act.inputSchema.properties.action.properties.interactionIntent.enum,
     ["focus-editable", "activate-control", "select-item"],

@@ -157,6 +157,33 @@ test("Host Scene is the single versioned ownership model for semantic and OCR ev
   assert.equal(ocr.actionable, false);
 });
 
+test("a structured document with a declared text action is an Editable", () => {
+  const scene = buildHostScene({
+    observationVersion: 16,
+    observation: {
+      observationId: "observation-16",
+      coordinateSpace: "window-local",
+      coordinateBounds: { x: 0, y: 0, width: 800, height: 600 },
+      surfaceReceipt: { generation: 16, screenshotId: "shot-16", windowId: "window-16" },
+      window: { id: "window-16", title: "Untitled - Notepad", bounds: { width: 800, height: 600 } },
+      elements: [{
+        elementToken: "document-editor",
+        role: "document",
+        name: "Text editor",
+        source: "uia-som",
+        bounds: { x: 8, y: 48, width: 784, height: 544 },
+        actions: ["type_text"],
+        value: "",
+      }],
+    },
+  });
+
+  const editor = resolveHostSceneElement(scene, { elementToken: "document-editor" });
+  assert.equal(editor.type, "Editable");
+  assert.deepEqual(editor.actions, ["type_text"]);
+  assert.equal(editor.actionable, true);
+});
+
 test("provider-declared evidence conflicts cannot produce a Host action", () => {
   const scene = buildHostScene({
     observationVersion: 12,

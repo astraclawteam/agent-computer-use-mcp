@@ -4690,11 +4690,11 @@ function describeDeliveredSemanticClick(result, verification) {
 
 function normalizePublicActionReceipt(result, outcome) {
   const {
-    effect: _legacyEffect,
-    replaySafe: _legacyReplaySafety,
-    completionEligible: _legacyCompletionEligibility,
-    delivered: _legacyDelivered,
-    escalation: _legacyEscalation,
+    effect: _providerEffect,
+    replaySafe: _providerReplaySafety,
+    completionEligible: _providerCompletionEligibility,
+    delivered: _providerDelivery,
+    escalation: _providerEscalation,
     status: providerStatus,
     ...detail
   } = result ?? {};

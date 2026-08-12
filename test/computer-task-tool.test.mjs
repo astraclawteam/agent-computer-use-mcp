@@ -4,6 +4,7 @@ import Ajv from "ajv";
 
 import { callTool, runGenericTaskTool } from "../src/computer-use-mcp-server.mjs";
 import { COMPUTER_USE_MCP_TOOLS } from "../src/computer-use-mcp-tools.mjs";
+import { buildHostScene } from "../src/scene-region-ownership.mjs";
 
 const APP = "Example Desktop";
 const GOAL = "Open settings and show usage";
@@ -220,8 +221,8 @@ test("computer.task continuation is owned by the opaque token and does not requi
 
   const usage = second.candidates.find((candidate) => candidate.label === "Usage" && candidate.action === "select");
   const third = await runGenericTaskTool(router, {
-    applicationName: `${APP} paraphrased by a legacy client`,
-    goal: `${GOAL} paraphrased by a legacy client`,
+    applicationName: `${APP} repeated but non-authoritative`,
+    goal: `${GOAL} repeated but non-authoritative`,
     taskToken: first.taskToken,
     candidateId: usage.candidateId,
   }, context);
@@ -291,6 +292,32 @@ test("computer.task can aim at a chat box that only exposes ValuePattern", async
   assert.equal(typed.action.receipt.postconditionVerified, true);
   assert.equal(typed.action.receipt.verificationMethod, "host-exact-edit-readback");
   assert.ok(typed.facts.some((fact) => fact.label === "hello" && fact.role === "edit"));
+});
+
+test("computer.task edits a Windows document control through the default Agent surface", async () => {
+  const router = notepadDocumentRouter();
+  const context = { agentId: "agent", sessionId: "session-notepad-document" };
+  const first = await runGenericTaskTool(router, {
+    applicationName: "Notepad",
+    goal: "Replace the document text with 测试 without saving or submitting",
+  }, context);
+
+  const editor = first.candidates.find((candidate) => candidate.action === "edit");
+  assert.ok(editor, "the UIA document must remain editable on the default Agent surface");
+  assert.equal(editor.inputRequired, true);
+  assert.equal("elementId" in editor, false);
+
+  const edited = await runGenericTaskTool(router, {
+    taskToken: first.taskToken,
+    candidateId: editor.candidateId,
+    text: "测试",
+  }, context);
+
+  assert.equal(edited.outcome, "committed");
+  assert.equal(edited.released, true);
+  assert.deepEqual(router.actions.map((action) => action.kind), ["type_text"]);
+  assert.equal(router.actions[0].value, "测试");
+  assert.ok(edited.facts.some((fact) => fact.label === "测试" && fact.role === "document"));
 });
 
 test("computer.task ranks a reversible return route above unrelated controls when an edit target is not visible", async () => {
@@ -943,7 +970,89 @@ test("computer.task is Agent-visible, keeps lifecycle tools Host-only, and valid
   const validate = new Ajv({ strict: false }).compile(task.outputSchema);
   assert.equal(validate(envelope.structuredContent), true, JSON.stringify(validate.errors));
   assert.equal(envelope.isError, false);
+
+  const act = COMPUTER_USE_MCP_TOOLS.find((tool) => tool.name === "computer.act");
+  const validateAct = new Ajv({ strict: false }).compile(act.inputSchema);
+  assert.equal(validateAct({
+    action: { kind: "type_text", textMode: "replace-all", inputBehavior: "commit" },
+  }), false);
+  assert.equal(validateAct({
+    action: { kind: "type_text", value: "测试", textMode: "replace-all", inputBehavior: "commit" },
+  }), true);
 });
+
+function notepadDocumentRouter() {
+  let version = 1;
+  let value = "";
+  let cancelCalls = 0;
+  const actions = [];
+
+  const capture = () => {
+    const observation = {
+      observationId: `notepad-observation:${version}`,
+      coordinateSpace: "window-local",
+      coordinateBounds: { x: 0, y: 0, width: 800, height: 600 },
+      surfaceReceipt: {
+        generation: version,
+        screenshotId: `notepad-screenshot:${version}`,
+        windowId: "notepad-window",
+      },
+      window: {
+        id: "notepad-window",
+        title: "Untitled - Notepad",
+        bounds: { x: 0, y: 0, width: 800, height: 600 },
+      },
+      elements: [{
+        elementToken: "notepad-document",
+        role: "document",
+        name: "Text editor",
+        source: "uia-som",
+        bounds: { x: 8, y: 48, width: 784, height: 544 },
+        actions: ["type_text"],
+        value,
+      }],
+    };
+    return {
+      observationId: observation.observationId,
+      scene: buildHostScene({ observation, observationVersion: version }),
+    };
+  };
+
+  return {
+    actions,
+    get cancelCalls() { return cancelCalls; },
+    async listState() {
+      return {
+        applications: [{ applicationToken: "application:notepad", name: "Notepad" }],
+        windows: [{ windowId: "notepad-window", title: "Untitled - Notepad" }],
+      };
+    },
+    async requestAccess() {
+      return { status: "granted", controller: { id: "controller:notepad" }, initialObservation: capture() };
+    },
+    async capture() {
+      return capture();
+    },
+    async act({ action }) {
+      actions.push(structuredClone(action));
+      value = action.value;
+      version += 1;
+      return {
+        status: "committed",
+        outcome: "committed",
+        result: {
+          verified: true,
+          verification: { method: "native-exact-value-read-back" },
+        },
+        capture: capture(),
+      };
+    },
+    async cancel() {
+      cancelCalls += 1;
+      return { status: "cancelled" };
+    },
+  };
+}
 
 function fixtureRouter({
   initialPage = "main",

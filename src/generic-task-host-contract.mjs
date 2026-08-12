@@ -1196,7 +1196,8 @@ function textHasAny(value, terms) {
 function isSemanticOwnerBoundary(element) {
   if (element?.type === "Window") return true;
   if (!semanticOwnerLabel(element)) return false;
-  return ["application", "document", "main-window", "window"].includes(element?.role);
+  if (element?.role === "document") return element?.type === "Container";
+  return ["application", "main-window", "window"].includes(element?.role);
 }
 
 function semanticOwnerLabel(element) {
