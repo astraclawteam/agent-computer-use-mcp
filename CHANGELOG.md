@@ -4,6 +4,8 @@ All notable changes to `agent-computer-use-mcp` are tracked here.
 
 ## Unreleased
 
+## 0.0.35
+
 - Classify structured Windows `Document` controls with declared text actions as
   editable on the default Agent surface, preserving opaque targeting and exact
   post-write read-back without requiring Host mode.
