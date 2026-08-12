@@ -10,6 +10,7 @@ import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js"
 import { createCanvas } from "ppu-ocv";
 import { COMPUTER_USE_MCP_TOOLS } from "../src/computer-use-mcp-tools.mjs";
 import { ComputerUseMcpError } from "../src/computer-use-errors.mjs";
+import { COMPUTER_USE_MCP_VERSION } from "../src/computer-use-version.mjs";
 import { buildHostScene } from "../src/scene-region-ownership.mjs";
 import {
   callTool,
@@ -2671,7 +2672,11 @@ test("agent-computer-use-mcp answers initialize, tools/list, and health over std
   const client = createSdkClient("computer-use-mcp-test", { toolSurface: "host" });
 
   try {
-    await client.connect();
+    const serverInfo = await client.connect();
+    assert.deepEqual(serverInfo, {
+      name: "agent-computer-use-mcp",
+      version: COMPUTER_USE_MCP_VERSION,
+    });
     const listed = await client.listTools();
     assert.deepEqual(listed.tools.map((tool) => tool.name), [
       "computer.task",
@@ -2698,6 +2703,7 @@ test("agent-computer-use-mcp answers initialize, tools/list, and health over std
       arguments: { fast: true },
     });
     assert.equal(health.structuredContent.module, "agent-computer-use-mcp");
+    assert.equal(health.structuredContent.version, COMPUTER_USE_MCP_VERSION);
     assert.equal(health.structuredContent.status, "ready");
     assert.equal(health.structuredContent.phases["0.9"], "contract-freeze");
     assert.equal(health.structuredContent.phases["1.0"], "stdio-mcp-server");
@@ -3609,7 +3615,10 @@ function createSdkClient(name, { toolSurface } = {}) {
     cwd: process.cwd(),
   });
   return {
-    connect: () => client.connect(transport),
+    connect: async () => {
+      await client.connect(transport);
+      return client.getServerVersion();
+    },
     listTools: () => client.listTools(),
     callTool: (request) => client.callTool(request),
     close: () => client.close(),

@@ -1,6 +1,6 @@
 {
   "name": "agent-computer-use-mcp",
-  "version": "0.0.33",
+  "version": "0.0.34",
   "description": "Evidence-driven Windows Computer Use for MCP Hosts: semantic observation, local OCR, secure screenshots, Unicode actions, and verified cleanup.",
   "private": true,
   "license": "MIT",

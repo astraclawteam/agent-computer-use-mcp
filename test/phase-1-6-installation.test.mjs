@@ -65,6 +65,40 @@ test("Phase 1.6 exposes a stable local module installation manifest", () => {
   assert.deepEqual(manifest.toolSurface.agentTools, ["computer.task", "computer.message"]);
   assert.deepEqual(manifest.toolSurface.host.args, ["--tool-surface=host"]);
   assert.deepEqual(manifest.toolSurface.host.env, { AGENT_COMPUTER_USE_TOOL_SURFACE: "host" });
+  assert.deepEqual(manifest.packaging, {
+    kind: "source-mcp-module",
+    ownership: "client-host",
+    hostIndependent: true,
+    splitRepoRequired: false,
+  });
+});
+
+test("Phase 1.6 exposes a Host-independent executable MCP configuration", () => {
+  const executablePath = "C:\\portable\\computer-use\\bin\\agent-computer-use-mcp.exe";
+  const manifest = getComputerUseInstallationManifest({
+    packageRoot: "C:\\portable\\computer-use",
+    executablePath,
+    env: { LOCALAPPDATA: "C:\\Users\\demo\\AppData\\Local" },
+  });
+
+  assert.deepEqual(manifest.entry, {
+    command: executablePath,
+    args: [],
+    cwd: "C:\\portable\\computer-use\\bin",
+  });
+  assert.deepEqual(manifest.packaging, {
+    kind: "executable-mcp",
+    ownership: "client-host",
+    hostIndependent: true,
+    splitRepoRequired: false,
+  });
+
+  const config = buildClientMcpConfig({ client: "codex", manifest });
+  assert.deepEqual(config.mcpServers["agent-computer-use"], {
+    command: executablePath,
+    args: [],
+    cwd: "C:\\portable\\computer-use\\bin",
+  });
 });
 
 test("Phase 1.6 builds Codex and Claude Desktop MCP client configs", () => {
@@ -79,7 +113,7 @@ test("Phase 1.6 builds Codex and Claude Desktop MCP client configs", () => {
   assert.deepEqual(codex.mcpServers["agent-computer-use"].args, ["src/computer-use-mcp-server.mjs"]);
   assert.equal(codex.mcpServers["agent-computer-use"].cwd, "F:\\agent-computer-use-mcp");
   assert.equal(codex.mcpServers["agent-computer-use"].env.AGENT_COMPUTER_USE_ARTIFACT_ROOT, manifest.paths.artifactRoot);
-  assert.equal(codex.mcpServers["agent-computer-use"].env.XIAOZHICLAW_COMPUTER_USE_ARTIFACT_ROOT, manifest.paths.artifactRoot);
+  assert.equal(Object.keys(codex.mcpServers["agent-computer-use"].env).some((key) => key.startsWith("XIAOZHICLAW_")), false);
   assert.equal(Object.keys(codex.mcpServers["agent-computer-use"].env).some((key) => /INSTALLER|ASSET_MANIFEST|KEYRING/u.test(key)), false);
 
   const claude = buildClientMcpConfig({ client: "claude-desktop", manifest });
