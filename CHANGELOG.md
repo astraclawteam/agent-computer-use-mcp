@@ -4,6 +4,12 @@ All notable changes to `agent-computer-use-mcp` are tracked here.
 
 ## Unreleased
 
+- Make Hub artifact registration and exact public-catalog verification part of
+  the tag release transaction. GitHub Latest is now created only after the
+  signed executable is visible publicly at the tagged version.
+- Update the Windows release smoke to acquire the exact freshly discovered
+  Native Lab window instead of using the retired partial-title selector.
+
 ## 0.0.35
 
 - Classify structured Windows `Document` controls with declared text actions as

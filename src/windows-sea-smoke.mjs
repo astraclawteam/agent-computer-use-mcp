@@ -77,8 +77,10 @@ export async function runWindowsSeaSmoke(options = {}) {
       }));
     }
 
+    const discovery = await connection.call("computer.acquire", { tier: "observe" });
+    const targetWindow = resolveSmokeTargetWindow(discovery, basename(outputFile));
     const access = await connection.call("computer.acquire", {
-      titlePart: basename(outputFile),
+      windowId: targetWindow.windowId,
       tier: "full",
       agentId: "windows-sea-layer-a",
       reason: "Windows SEA Layer A safe Native Lab verification",
@@ -180,6 +182,24 @@ export async function runWindowsSeaSmoke(options = {}) {
     if (lab && lab.exitCode === null) lab.kill();
     await rm(root, { recursive: true, force: true });
   }
+}
+
+export function resolveSmokeTargetWindow(discovery, outputFileName) {
+  const expectedSuffix = ` - ${required(outputFileName, "sea_smoke.output_name_missing")}`;
+  const matches = Array.isArray(discovery?.windows)
+    ? discovery.windows.filter((window) => (
+        (typeof window?.windowId === "string" || Number.isInteger(window?.windowId))
+        && typeof window?.title === "string"
+        && window.title.endsWith(expectedSuffix)
+      ))
+    : [];
+  if (matches.length !== 1) {
+    throw smokeError("sea_smoke.native_lab_window_ambiguous", JSON.stringify({
+      expectedSuffix,
+      matchCount: matches.length,
+    }));
+  }
+  return matches[0];
 }
 
 function createMcpConnection(executablePath, cwd, environment = {}, args = []) {

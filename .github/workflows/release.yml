@@ -10,12 +10,18 @@ concurrency:
   cancel-in-progress: false
 
 permissions:
-  contents: write
+  contents: read
+
+env:
+  HUB_PUBLISHER_REPOSITORY: https://gitee.com/huizhou-shunshi-intelligent/qlogicagent-hub.git
+  HUB_PUBLISHER_COMMIT: 192e86bc8d9c1b89f8db30afd5e152addc262c68
 
 jobs:
   windows-artifact:
-    name: verify and publish Windows artifact
+    name: verify and build Windows artifact
     runs-on: windows-latest
+    outputs:
+      version: ${{ steps.release.outputs.version }}
     steps:
       - name: Checkout tagged source
         uses: actions/checkout@v6
@@ -81,13 +87,116 @@ jobs:
           "$hash  agent-computer-use-mcp-$env:VERSION-win32-x64.tar.gz" |
             Set-Content -LiteralPath "$root/SHA256SUMS.txt" -Encoding utf8NoBOM
 
+      - name: Stage verified release payload
+        uses: actions/upload-artifact@v4
+        with:
+          name: computer-use-release-${{ github.sha }}
+          path: |
+            artifacts/mcp-executable/${{ steps.release.outputs.version }}/win32-x64/agent-computer-use-mcp-${{ steps.release.outputs.version }}-win32-x64.tar.gz
+            artifacts/mcp-executable/${{ steps.release.outputs.version }}/win32-x64/hub-publisher-input.json
+            artifacts/mcp-executable/${{ steps.release.outputs.version }}/win32-x64/SHA256SUMS.txt
+          compression-level: 0
+          if-no-files-found: error
+          retention-days: 3
+
+  hub-register:
+    name: register Hub artifact and verify public catalog
+    needs: windows-artifact
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout tagged verification source
+        uses: actions/checkout@v6
+
+      - name: Download verified release payload
+        uses: actions/download-artifact@v4
+        with:
+          name: computer-use-release-${{ github.sha }}
+          path: release-payload
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: "24.13.0"
+
+      - name: Checkout pinned Hub publisher
+        shell: bash
+        run: |
+          set -euo pipefail
+          git init _hub-release
+          git -C _hub-release remote add origin "$HUB_PUBLISHER_REPOSITORY"
+          git -C _hub-release fetch --depth=1 origin "$HUB_PUBLISHER_COMMIT"
+          git -C _hub-release checkout --detach FETCH_HEAD
+          test "$(git -C _hub-release rev-parse HEAD)" = "$HUB_PUBLISHER_COMMIT"
+
+      - name: Install pinned Hub publisher dependencies
+        working-directory: _hub-release
+        shell: bash
+        run: |
+          set -euo pipefail
+          corepack enable
+          corepack prepare pnpm@10.23.0 --activate
+          pnpm install --frozen-lockfile
+
+      - name: Configure Hub release transport
+        shell: bash
+        env:
+          HUB_RELEASE_SSH_PRIVATE_KEY: ${{ secrets.HUB_RELEASE_SSH_PRIVATE_KEY }}
+          HUB_RELEASE_KNOWN_HOSTS: ${{ secrets.HUB_RELEASE_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          test -n "$HUB_RELEASE_SSH_PRIVATE_KEY" || { echo "::error::HUB_RELEASE_SSH_PRIVATE_KEY is required"; exit 1; }
+          test -n "$HUB_RELEASE_KNOWN_HOSTS" || { echo "::error::HUB_RELEASE_KNOWN_HOSTS is required"; exit 1; }
+          install -d -m 700 "$HOME/.ssh"
+          printf '%s\n' "$HUB_RELEASE_SSH_PRIVATE_KEY" > "$HOME/.ssh/computer-use-hub-release"
+          printf '%s\n' "$HUB_RELEASE_KNOWN_HOSTS" > "$HOME/.ssh/known_hosts"
+          chmod 600 "$HOME/.ssh/computer-use-hub-release" "$HOME/.ssh/known_hosts"
+          echo "HUB_SSH_IDENTITY_FILE=$HOME/.ssh/computer-use-hub-release" >> "$GITHUB_ENV"
+
+      - name: Register signed artifact in Hub
+        working-directory: _hub-release
+        shell: bash
+        run: |
+          set -euo pipefail
+          node scripts/release-official-mcp-artifact-remote.mjs \
+            --input="$GITHUB_WORKSPACE/release-payload/hub-publisher-input.json"
+
+      - name: Verify exact version through public catalog
+        shell: bash
+        env:
+          VERSION: ${{ needs.windows-artifact.outputs.version }}
+        run: |
+          set -euo pipefail
+          node scripts/verify-hub-public-release.mjs \
+            --id=agent-computer-use-mcp \
+            --version="$VERSION"
+
+      - name: Remove Hub release credentials
+        if: always()
+        shell: bash
+        run: rm -f "$HOME/.ssh/computer-use-hub-release"
+
+  github-release:
+    name: publish immutable GitHub Release
+    needs:
+      - windows-artifact
+      - hub-register
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download Hub-verified release payload
+        uses: actions/download-artifact@v4
+        with:
+          name: computer-use-release-${{ github.sha }}
+          path: release-payload
+
       - name: Create immutable GitHub Release
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
-          VERSION: ${{ steps.release.outputs.version }}
+          VERSION: ${{ needs.windows-artifact.outputs.version }}
         run: |
-          $root = "artifacts/mcp-executable/$env:VERSION/win32-x64"
+          $root = "release-payload"
           gh release create $env:GITHUB_REF_NAME `
             "$root/agent-computer-use-mcp-$env:VERSION-win32-x64.tar.gz" `
             "$root/hub-publisher-input.json" `

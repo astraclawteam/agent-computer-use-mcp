@@ -249,10 +249,14 @@ A `vX.Y.Z` tag must match `package.json`, point to a commit reachable from
 1. runs the full test and official MCP SDK gates;
 2. assembles and verifies the Windows x64 SEA artifact;
 3. writes `SHA256SUMS.txt`;
-4. creates the GitHub Release and marks it Latest.
+4. registers and signs the artifact through the pinned Hub publisher;
+5. verifies the exact version repeatedly through the public Hub catalog;
+6. creates the GitHub Release and marks it Latest.
 
-The workflow has no npm or Gitee credentials and publishes only verified GitHub
-Release assets. See the
+The Hub registration job has only its dedicated release transport credentials;
+the final isolated GitHub job receives `contents: write` only after the public
+catalog gate passes. The workflow has no npm publishing credential and does not
+mutate Gitee source. See the
 [release pipeline specification](docs/productization/real-release-pipeline-spec.md)
 and [release gates](docs/productization/release-gates.md).
 

@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
+import { resolveSmokeTargetWindow } from "../src/windows-sea-smoke.mjs";
+
 test("Windows SEA smoke uses the released executable directly and fails closed on tampering", async () => {
   const source = await readFile(new URL("../src/windows-sea-smoke.mjs", import.meta.url), "utf8");
   assert.match(source, /new StdioClientTransport\(\{\s*command: executablePath/u);
@@ -9,6 +11,8 @@ test("Windows SEA smoke uses the released executable directly and fails closed o
   assert.match(source, /tamperRejected/u);
   assert.match(source, /sourceCwdRequired: false/u);
   assert.match(source, /connection\.call\("computer\.acquire"/u);
+  assert.match(source, /windowId: targetWindow\.windowId/u);
+  assert.doesNotMatch(source, /titlePart/u);
   assert.match(source, /connection\.call\("computer\.observe", \{ mode: "semantic" \}\)/u);
   assert.match(source, /connection\.call\("computer\.release"/u);
   assert.match(source, /connection\.call\("computer\.installation"/u);
@@ -26,6 +30,22 @@ test("Windows SEA smoke uses the released executable directly and fails closed o
   assert.doesNotMatch(source, /elementToken|elementIndex/u);
   assert.doesNotMatch(source, /connection\.call\("computer\.(?:request_access|capture|cancel|list_state)"/u);
   assert.doesNotMatch(source, /command:\s*process\.execPath/u);
+});
+
+test("Windows SEA smoke selects one exact freshly discovered Native Lab window", () => {
+  const selected = resolveSmokeTargetWindow({
+    windows: [
+      { windowId: 41, title: "Other Window" },
+      { windowId: 42, title: "Agent Computer Use Native Lab - native-lab-result.txt" },
+    ],
+  }, "native-lab-result.txt");
+  assert.equal(selected.windowId, 42);
+  assert.throws(() => resolveSmokeTargetWindow({
+    windows: [
+      { windowId: 42, title: "Agent Computer Use Native Lab - native-lab-result.txt" },
+      { windowId: 43, title: "Agent Computer Use Native Lab - native-lab-result.txt" },
+    ],
+  }, "native-lab-result.txt"), /sea_smoke\.native_lab_window_ambiguous/u);
 });
 
 test("Windows SEA smoke defaults to the current package version and releases control on close", async () => {

@@ -25,9 +25,14 @@
 ## Release Contract
 
 - Only a verified `v*` tag on main can produce release artifacts.
-- Tag CI has only GitHub contents permission and no npm or Gitee credentials.
-- CI publishes the verified SEA archive, Hub publisher input, and SHA-256 file
-  to one immutable GitHub Release and marks it Latest.
+- Tag CI defaults to GitHub contents read permission and has no npm publishing
+  or Gitee source credential.
+- The dedicated Hub job registers the signed executable through a pinned Hub
+  publisher and must repeatedly read the exact version and executable shape
+  from the public catalog.
+- Only the final isolated job receives GitHub contents write permission and
+  publishes the Hub-verified archive, publisher input, and SHA-256 file to one
+  immutable GitHub Release marked Latest.
 - The workflow never bumps, commits, moves tags, writes branches, publishes npm,
   or mutates Gitee.
 
