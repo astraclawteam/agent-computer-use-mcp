@@ -14,10 +14,10 @@ MCP gates, builds one immutable archive, writes SHA-256 checksums, and marks the
 release Latest. It has no npm or Gitee credential and never writes source
 branches.
 
-`app-smoke-matrix.md`, files named `windows-installer-*`,
-`asset-cache-materializer-*`, older release assembly plans, and the earlier
-automatic GitHub/Gitee publication designs are historical rebuild records.
-They are not current implementation guidance or release evidence.
+Superseded Windows installer, asset-cache, npm distribution, GitHub/Gitee
+publication, and real-application matrix plans were removed from this tree;
+Git history retains them for archaeology. They are not current implementation
+guidance or release evidence.
 
 AI workers must derive changes from the current normative files and preserve
 exact release versions, fail-closed platform verification, offline runtime
