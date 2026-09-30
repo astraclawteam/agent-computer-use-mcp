@@ -35,7 +35,7 @@ body:
       placeholder: |
         - npm test passes
         - phase script returns status=passed
-        - docs/productization/app-smoke-matrix.md updated
+        - docs/productization/roadmap.md updated if scope changes
     validations:
       required: true
   - type: textarea

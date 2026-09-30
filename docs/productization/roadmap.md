@@ -61,7 +61,7 @@ preview tag:
 | Gate | Removed runner | Doc still describing it |
 | --- | --- | --- |
 | PR / nightly / RC runtime soak | `src/phase-8-0-runtime-soak.mjs`, `src/runtime-soak-*.mjs`, `src/commercial-evidence*.mjs`, `.github/workflows/nightly-soak.yml` | `runtime-soak-operations.md` |
-| Real application smoke matrix | `src/phase-6-0/6-1/6-2-*.mjs`, `src/real-app-smoke-runner.mjs`, `src/real-app-catalog.mjs`, `src/app-fixture-pack.mjs`, `scripts/render-app-smoke-matrix.mjs`, `.github/workflows/real-app-smoke.yml` | `app-smoke-matrix.md` |
+| Real application smoke matrix | `src/phase-6-0/6-1/6-2-*.mjs`, `src/real-app-smoke-runner.mjs`, `src/real-app-catalog.mjs`, `src/app-fixture-pack.mjs`, `scripts/render-app-smoke-matrix.mjs`, `.github/workflows/real-app-smoke.yml` | this file |
 | Perception corpus generation | `scripts/generate-quick-perception-corpus.mjs`, `.github/workflows/nightly-perception.yml` | this file |
 | Agent E2E qualification campaign | `src/phase-10-2-host-discovery.mjs`, `src/phase-10-3-agent-e2e-campaign.mjs`, `src/phase-10-4-agent-e2e-evidence.mjs` | this file |
 | Commercial 1.0 promotion | `src/phase-9-0-commercial-promotion.mjs`, `src/commercial-promotion.mjs` | `release-gates.md` |
